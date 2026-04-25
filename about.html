@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн - О компании</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="about-page">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html" aria-label="ЭкваЛайн">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" />
+        </a>
+
+        <nav class="menu" aria-label="Главное меню">
+          <a href="index.html">Главная</a>
+          <a href="catalog.html">Каталог</a>
+          <a href="about.html" class="active">О компании</a>
+          <a href="delivery.html">Доставка</a>
+          <a href="contacts.html">Контакты</a>
+        </nav>
+
+        <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
+
+        <div class="contact-area">
+          <div class="hotline">
+            <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
+            <a href="tel:83532679909">8 (3532) 67-99-09</a>
+          </div>
+          <button class="ghost-btn" type="button" data-auth-login>Вход</button>
+          <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="about-hero">
+        <div class="container about-hero-inner">
+          <div class="about-hero-copy">
+            <p class="about-kicker">НАША ИСТОРИЯ И МИССИЯ</p>
+            <h1>
+              Чистота, которую мы создаем
+              <span class="text-blue">для вашего будущего</span>
+            </h1>
+            <p>
+              ЭкваЛайн - это быстрая доставка чистой воды по Оренбургу и одна из лучших
+              компаний региона по качеству сервиса, надежности и заботе о клиентах.
+            </p>
+          </div>
+          <div class="about-hero-glow" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <section class="about-pillars">
+        <div class="container about-steps" id="aboutSteps">
+          <h2>Этапы подготовки и доставки воды</h2>
+          <div class="about-steps-layout">
+            <div class="about-step-nav" role="tablist" aria-label="Этапы обработки воды">
+              <div class="about-step-progress" aria-hidden="true">
+                <span class="about-step-progress-fill" id="aboutStepProgressFill"></span>
+              </div>
+
+              <button type="button" class="about-step-btn is-active" data-step="wash" data-order="1">
+                <span class="about-step-btn-index">01</span>
+                <span class="about-step-btn-title">Обработка бутылки</span>
+                <span class="about-step-btn-arrow" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="about-step-btn" data-step="fill" data-order="2">
+                <span class="about-step-btn-index">02</span>
+                <span class="about-step-btn-title">Налив воды</span>
+                <span class="about-step-btn-arrow" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="about-step-btn" data-step="seal" data-order="3">
+                <span class="about-step-btn-index">03</span>
+                <span class="about-step-btn-title">Закрытие и контроль</span>
+                <span class="about-step-btn-arrow" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="about-step-btn" data-step="delivery" data-order="4">
+                <span class="about-step-btn-index">04</span>
+                <span class="about-step-btn-title">Доставка клиенту</span>
+                <span class="about-step-btn-arrow" aria-hidden="true">→</span>
+              </button>
+            </div>
+
+            <div class="about-step-panels">
+              <article class="about-step-panel is-active" data-step-panel="wash">
+                <p class="about-step-kicker">Этап 01</p>
+                <h3>Обработка бутылки</h3>
+                <p>Каждую бутыль принимаем, осматриваем и промываем на автоматической линии. Затем выполняем дезинфекцию и финальное ополаскивание, чтобы тара была полностью подготовлена к безопасному розливу.</p>
+              </article>
+
+              <article class="about-step-panel" data-step-panel="fill">
+                <p class="about-step-kicker">Этап 02</p>
+                <h3>Налив воды</h3>
+                <p>Подготовленные бутыли поступают на линию розлива, где вода наливается в герметичном контуре. Объем контролируется автоматически, что гарантирует стабильное качество каждой партии.</p>
+              </article>
+
+              <article class="about-step-panel" data-step-panel="seal">
+                <p class="about-step-kicker">Этап 03</p>
+                <h3>Закрытие и контроль</h3>
+                <p>После розлива бутыль закрывается новой крышкой с защитным кольцом. Далее партия проходит проверку на герметичность, маркировку и визуальный контроль перед отгрузкой.</p>
+              </article>
+
+              <article class="about-step-panel" data-step-panel="delivery">
+                <p class="about-step-kicker">Этап 04</p>
+                <h3>Доставка клиенту</h3>
+                <p>Готовые заказы передаются курьерам и доставляются в выбранный интервал. Мы соблюдаем сроки, аккуратно перевозим бутыли и уведомляем клиента о прибытии заранее.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="about-certs">
+        <div class="container">
+          <div class="about-certs-head">
+            <h2>Наши сертификаты</h2>
+            <p>Открыто подтверждаем стандарты качества и безопасности производства.</p>
+          </div>
+
+          <div class="about-certs-grid">
+            <article class="about-cert-card">
+              <img
+                src="assets/certificate-card.jpg"
+                alt="Карточка предприятия"
+              />
+              <div class="about-cert-overlay">
+                <span>Документ</span>
+                <h3>Карточка предприятия</h3>
+                <p>Реквизиты организации, контакты, банковские данные и юридическая информация.</p>
+              </div>
+            </article>
+
+            <article class="about-cert-card">
+              <img
+                src="assets/certificate-eac.jpg"
+                alt="Декларация о соответствии ЕАЭС"
+              />
+              <div class="about-cert-overlay">
+                <span>ЕАЭС</span>
+                <h3>Декларация о соответствии</h3>
+                <p>Подтверждение соответствия продукции требованиям технических регламентов.</p>
+              </div>
+            </article>
+
+            <article class="about-cert-card">
+              <img
+                src="assets/certificate-lab.jpg"
+                alt="Протокол лабораторных испытаний"
+              />
+              <div class="about-cert-overlay">
+                <span>Лаборатория</span>
+                <h3>Протокол испытаний</h3>
+                <p>Результаты лабораторных проверок качества и безопасности питьевой воды.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-top">
+        <div class="footer-brand">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="footer-logo" />
+          <p class="footer-brand-name">ЭкваЛайн</p>
+          <p class="footer-desc">Мы меняем представление о доставке воды в Оренбурге. Технологии чистоты и забота о каждом клиенте.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Компания</h4>
+          <ul class="footer-links">
+            <li><a href="about.html">О нас</a></li>
+            <li><a href="catalog.html">Каталог</a></li>
+            <li><a href="delivery.html">Доставка</a></li>
+            <li><a href="index.html">Главная</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Помощь</h4>
+          <ul class="footer-links">
+            <li><a href="delivery.html">Доставка и оплата</a></li>
+            <li><a href="delivery.html">Частые вопросы</a></li>
+            <li><a href="contacts.html">Контакты</a></li>
+            <li><a href="index.html">Личный кабинет</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="container footer-bottom-inner">
+          <span>© 2026 ЭкваЛайн. Все права защищены.</span>
+          <div class="footer-legal">
+            <a href="index.html">Политика конфиденциальности</a>
+            <a href="index.html">Публичная оферта</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

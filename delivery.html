@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн - Доставка воды</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="delivery-page">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html" aria-label="ЭкваЛайн">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" />
+        </a>
+
+        <nav class="menu" aria-label="Главное меню">
+          <a href="index.html">Главная</a>
+          <a href="catalog.html">Каталог</a>
+          <a href="about.html">О компании</a>
+          <a href="delivery.html" class="active">Доставка</a>
+          <a href="contacts.html">Контакты</a>
+        </nav>
+
+        <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
+
+        <div class="contact-area">
+          <div class="hotline">
+            <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
+            <a href="tel:83532679909">8 (3532) 67-99-09</a>
+          </div>
+          <button class="ghost-btn" type="button" data-auth-login>Вход</button>
+          <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="delivery-hero">
+        <div class="container delivery-hero-grid">
+          <div class="delivery-copy">
+            <p class="delivery-kicker">ДОСТАВКА В ОРЕНБУРГЕ</p>
+            <h1>
+              Свежая вода у вашего порога
+              <span class="text-blue">вовремя</span>
+            </h1>
+            <p class="delivery-note">
+              Мы выстроили быструю логистическую сеть в Оренбурге, чтобы вы не оставались
+              без чистой воды. Отслеживайте маршрут и получайте уведомления о прибытии.
+            </p>
+
+            <div class="delivery-stats">
+              <article class="delivery-stat-card">
+                <div class="delivery-stat-icon" aria-hidden="true">Д</div>
+                <div>
+                  <p class="delivery-stat-title">Бесплатная доставка</p>
+                  <p class="delivery-stat-text">для всех заказов</p>
+                </div>
+              </article>
+              <article class="delivery-stat-card">
+                <div class="delivery-stat-icon" aria-hidden="true">24/7</div>
+                <div>
+                  <p class="delivery-stat-title">9:00 - 21:00</p>
+                  <p class="delivery-stat-text">Без выходных</p>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="delivery-hero-visual" aria-hidden="true">
+            <img src="assets/bottles.png" alt="" class="delivery-hero-bottle" />
+            <div class="delivery-hero-ring ring-a"></div>
+            <div class="delivery-hero-ring ring-b"></div>
+            <div class="delivery-hero-ring ring-c"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="delivery-map-section">
+        <div class="container">
+          <div class="delivery-section-head">
+            <h2>Зоны покрытия Оренбурга</h2>
+            <p>Наведите на зону, чтобы увидеть доступный интервал доставки</p>
+          </div>
+
+          <div class="delivery-map-layout">
+            <div class="delivery-map-board" id="deliveryMapBoard">
+              <div class="delivery-leaflet-map" id="deliveryLeafletMap" aria-label="Карта зон доставки"></div>
+            </div>
+
+            <div class="delivery-zone-list" id="deliveryZoneList">
+              <article class="delivery-zone-item is-active">
+                <div class="zone-dot"></div>
+                <div>
+                  <h3>Интервалы доставки</h3>
+                  <p>Утро: <strong>9:00-14:00</strong>, День: <strong>14:00-17:00</strong>, Вечер: <strong>17:00-21:00</strong></p>
+                </div>
+              </article>
+
+              <article class="delivery-zone-item">
+                <div class="zone-dot"></div>
+                <div>
+                  <h3>Доставка для организаций</h3>
+                  <p>Отдельное окно: <strong>9:00-17:00</strong></p>
+                </div>
+              </article>
+
+              <article class="delivery-zone-item">
+                <div class="zone-dot"></div>
+                <div>
+                  <h3>Прием заказов</h3>
+                  <p>Оператор принимает заявки: <strong>8:00-19:00</strong></p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="delivery-features">
+        <div class="container delivery-feature-grid">
+          <article class="delivery-feature-card">
+            <span class="delivery-feature-icon">01</span>
+            <h3>Доставка по времени</h3>
+            <p>Выберите один из 3 интервалов доставки с 9:00 до 21:00.</p>
+          </article>
+
+          <article class="delivery-feature-card">
+            <span class="delivery-feature-icon">02</span>
+            <h3>Круговорот тары</h3>
+            <p>Заберем пустые бутыли и заменим на новые в один визит курьера.</p>
+          </article>
+
+          <article class="delivery-feature-card">
+            <span class="delivery-feature-icon">03</span>
+            <h3>Подъем до двери</h3>
+            <p>Курьер поднимет бутыли до квартиры или офиса и аккуратно установит в удобное место.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="delivery-planner-wrap">
+        <div class="container">
+          <div class="delivery-planner" id="deliveryPlanner">
+            <div class="delivery-planner-head">
+              <h2>Частые вопросы по доставке</h2>
+              <p>Нажмите на вопрос и сразу получите короткий ответ без звонка оператору.</p>
+            </div>
+
+            <div class="delivery-faq-layout" id="deliveryFaqList">
+              <div class="delivery-faq-nav" role="tablist" aria-label="Вопросы по доставке">
+                <button
+                  type="button"
+                  class="delivery-faq-nav-btn is-active"
+                  data-faq-code="Заявки"
+                  data-faq-tag="Оператор"
+                  data-faq-question="Во сколько можно принять заказ сегодня?"
+                  data-faq-answer="Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно."
+                >
+                  <span class="delivery-faq-nav-top">
+                    <span class="delivery-faq-nav-code">Заявки</span>
+                    <span class="delivery-faq-nav-tag">Оператор</span>
+                  </span>
+                  <span class="delivery-faq-nav-text">Во сколько можно принять заказ сегодня?</span>
+                </button>
+                <button
+                  type="button"
+                  class="delivery-faq-nav-btn"
+                  data-faq-code="Интервал"
+                  data-faq-tag="Квартира"
+                  data-faq-question="Какие интервалы доставки доступны для частных клиентов?"
+                  data-faq-answer="Для квартиры доступны окна 9:00-14:00, 14:00-17:00 и 17:00-21:00."
+                >
+                  <span class="delivery-faq-nav-top">
+                    <span class="delivery-faq-nav-code">Интервал</span>
+                    <span class="delivery-faq-nav-tag">Квартира</span>
+                  </span>
+                  <span class="delivery-faq-nav-text">Какие интервалы доставки доступны для частных клиентов?</span>
+                </button>
+                <button
+                  type="button"
+                  class="delivery-faq-nav-btn"
+                  data-faq-code="График"
+                  data-faq-tag="Офис"
+                  data-faq-question="Как оформить регулярную доставку воды для офиса?"
+                  data-faq-answer="Нужно связаться с оператором, выбрать удобные дни и интервал, после этого оператор сам проставит вам регулярные доставки."
+                >
+                  <span class="delivery-faq-nav-top">
+                    <span class="delivery-faq-nav-code">График</span>
+                    <span class="delivery-faq-nav-tag">Офис</span>
+                  </span>
+                  <span class="delivery-faq-nav-text">Как оформить регулярную доставку воды для офиса?</span>
+                </button>
+                <button
+                  type="button"
+                  class="delivery-faq-nav-btn"
+                  data-faq-code="Тара"
+                  data-faq-tag="Обмен"
+                  data-faq-question="Что делать с пустой тарой?"
+                  data-faq-answer="Курьер заберет пустые бутыли во время следующей доставки. Отдельно везти тару в офис не нужно."
+                >
+                  <span class="delivery-faq-nav-top">
+                    <span class="delivery-faq-nav-code">Тара</span>
+                    <span class="delivery-faq-nav-tag">Обмен</span>
+                  </span>
+                  <span class="delivery-faq-nav-text">Что делать с пустой тарой?</span>
+                </button>
+              </div>
+
+              <article class="delivery-faq-panel">
+                <div class="delivery-faq-panel-head">
+                  <p class="delivery-faq-panel-label">Карточка диспетчера</p>
+                  <span class="delivery-faq-panel-badge" id="deliveryFaqBadge">Оператор</span>
+                </div>
+                <p class="delivery-faq-panel-meta" id="deliveryFaqCode">Заявки</p>
+                <h3 class="delivery-faq-panel-title" id="deliveryFaqTitle">Во сколько можно принять заказ сегодня?</h3>
+                <p class="delivery-faq-panel-text" id="deliveryFaqText">
+                  Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно.
+                </p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-top">
+        <div class="footer-brand">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="footer-logo" />
+          <p class="footer-brand-name">ЭкваЛайн</p>
+          <p class="footer-desc">Мы меняем представление о доставке воды в Оренбурге. Технологии чистоты и забота о каждом клиенте.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Компания</h4>
+          <ul class="footer-links">
+            <li><a href="about.html">О нас</a></li>
+            <li><a href="catalog.html">Каталог</a></li>
+            <li><a href="delivery.html">Доставка</a></li>
+            <li><a href="community.html">Блог</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Помощь</h4>
+          <ul class="footer-links">
+            <li><a href="delivery.html">Доставка и оплата</a></li>
+            <li><a href="delivery.html">Частые вопросы</a></li>
+            <li><a href="contacts.html">Контакты</a></li>
+            <li><a href="index.html">Личный кабинет</a></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="footer-bottom">
+        <div class="container footer-bottom-inner">
+          <span>© 2026 ЭкваЛайн. Все права защищены.</span>
+          <div class="footer-legal">
+            <a href="index.html">Политика конфиденциальности</a>
+            <a href="index.html">Публичная оферта</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="script.js"></script>
+  </body>
+</html>

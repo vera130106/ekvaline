@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Оператор</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="staff-dashboard">
+    <aside class="staff-sidebar" aria-label="Навигация">
+      <a class="staff-brand" href="index.html">
+        <img src="assets/logo.png" alt="" width="36" height="36" />
+        <span>ЭкваЛайн</span>
+      </a>
+      <nav class="staff-nav">
+        <span class="staff-nav-label">Панели</span>
+        <a class="staff-nav-link" href="manager.html">Менеджер</a>
+        <a class="staff-nav-link is-active" href="operator.html" aria-current="page">Оператор</a>
+        <a class="staff-nav-link" href="admin.html">Администратор</a>
+      </nav>
+      <div class="staff-sidebar-foot">
+        <button type="button" class="ghost-btn staff-sidebar-btn" data-auth-login>Вход</button>
+        <button type="button" class="solid-btn staff-sidebar-btn" id="opLogoutBtn">Выйти</button>
+      </div>
+    </aside>
+
+    <div class="staff-main">
+      <div id="opGate" class="staff-gate">
+        <h1>Панель оператора</h1>
+        <p>Войдите под учётной записью оператора, менеджера или администратора.</p>
+        <button type="button" class="solid-btn" data-auth-login>Войти</button>
+      </div>
+
+      <div id="opApp" class="staff-app hidden">
+        <header class="staff-hero">
+          <div>
+            <p class="staff-kicker">Обработка заказов</p>
+            <h1 class="staff-title">Линия доставки</h1>
+            <p class="staff-sub" id="opWelcome"></p>
+          </div>
+          <div class="staff-hero-actions">
+            <button type="button" class="ghost-btn" id="opRefreshBtn">Обновить</button>
+            <a class="solid-btn" href="index.html">На сайт</a>
+          </div>
+        </header>
+
+        <div class="staff-stats" id="opStats" aria-live="polite"></div>
+
+        <div class="staff-toolbar">
+          <label class="staff-filter-label">
+            Статус
+            <select id="opFilterStatus" class="staff-select">
+              <option value="">Все</option>
+              <option value="processing">В обработке</option>
+              <option value="confirmed">Подтверждён</option>
+              <option value="courier">Передан курьеру</option>
+              <option value="on_way">В пути</option>
+              <option value="delivered">Доставлен</option>
+              <option value="cancelled">Отменён</option>
+            </select>
+          </label>
+          <label class="staff-filter-label staff-filter-grow">
+            Поиск (телефон / адрес / №)
+            <input type="search" id="opSearch" class="staff-search" placeholder="Например 7000 или Чкалова" />
+          </label>
+        </div>
+
+        <div class="staff-card staff-card--flush">
+          <div class="admin-table-wrap" id="opTableWrap">
+            <p class="cabinet-muted">Загрузка…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/umd/index.js" crossorigin="anonymous"></script>
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+    <script src="operator.js"></script>
+  </body>
+</html>

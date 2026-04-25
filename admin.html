@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Администрирование</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="staff-dashboard">
+    <aside class="staff-sidebar" aria-label="Разделы админки">
+      <a class="staff-brand" href="index.html">
+        <img src="assets/logo.png" alt="" width="36" height="36" />
+        <span>ЭкваЛайн</span>
+      </a>
+      <nav class="staff-nav">
+        <span class="staff-nav-label">Панели</span>
+        <a class="staff-nav-link" href="manager.html">Менеджер</a>
+        <a class="staff-nav-link" href="operator.html">Оператор</a>
+        <a class="staff-nav-link is-active" href="admin.html" aria-current="page">Администратор</a>
+      </nav>
+      <div class="staff-sidebar-foot">
+        <button type="button" class="ghost-btn staff-sidebar-btn" data-auth-login>Вход</button>
+        <button type="button" class="solid-btn staff-sidebar-btn" id="staffLogoutBtn">Выйти</button>
+      </div>
+    </aside>
+
+    <div class="staff-main">
+      <div id="adminGate" class="staff-gate">
+        <h1>Администрирование</h1>
+        <p>Войдите под учётной записью с ролью «администратор».</p>
+        <button type="button" class="solid-btn" data-auth-login>Войти</button>
+      </div>
+
+      <div id="adminApp" class="staff-app hidden">
+        <header class="staff-hero">
+          <div>
+            <p class="staff-kicker">Системное управление</p>
+            <h1 class="staff-title">Панель администратора</h1>
+            <p class="staff-sub" id="adminWelcome"></p>
+          </div>
+          <div class="staff-hero-actions">
+            <a class="ghost-btn" href="index.html">На главную</a>
+          </div>
+        </header>
+
+        <div class="staff-tabs" role="tablist">
+          <button type="button" class="staff-tab active" data-tab="users">Пользователи</button>
+          <button type="button" class="staff-tab" data-tab="addresses">Адреса доставки</button>
+          <button type="button" class="staff-tab" data-tab="zones">Зоны и тарифы</button>
+          <button type="button" class="staff-tab" data-tab="feedback">Обращения</button>
+        </div>
+
+        <section class="staff-panel" data-panel="users">
+          <div class="staff-card">
+            <h2 class="staff-card-title">Учётные записи</h2>
+            <p class="staff-card-desc">Роли, блокировка входа, баланс бонусов (только просмотр).</p>
+            <div class="admin-table-wrap" id="adminTableWrap">
+              <p class="cabinet-muted">Загрузка…</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="staff-panel hidden" data-panel="addresses">
+          <div class="staff-card">
+            <h2 class="staff-card-title">Справочник адресов</h2>
+            <p class="staff-card-desc">
+              Эти адреса попадают в выпадающий список при оформлении заказа на сайте (вместе с интервалами из панели
+              менеджера).
+            </p>
+            <form class="staff-inline-form" id="addrAddForm">
+              <label>Краткое название <input type="text" id="addrNewLabel" maxlength="120" placeholder="Напр. Центр — ул. Ленина" /></label>
+              <label>Полный адрес <input type="text" id="addrNewLine" maxlength="500" placeholder="Город, улица, дом" /></label>
+              <label>Порядок <input type="number" id="addrNewOrder" min="0" max="99999" placeholder="авто" /></label>
+              <button type="submit" class="solid-btn">Добавить</button>
+            </form>
+            <div class="admin-table-wrap" id="adminAddrWrap">
+              <p class="cabinet-muted">Загрузка…</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="staff-panel hidden" data-panel="zones">
+          <div class="staff-card">
+            <h2 class="staff-card-title">Зоны доставки</h2>
+            <p class="staff-card-desc">Название и надбавка к доставке (₽). Границы на карте — JSON для будущей интеграции.</p>
+            <div class="admin-table-wrap" id="adminZonesWrap">
+              <p class="cabinet-muted">Загрузка…</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="staff-panel hidden" data-panel="feedback">
+          <div class="staff-card">
+            <h2 class="staff-card-title">Обратная связь</h2>
+            <p class="staff-card-desc">Сообщения с формы на сайте.</p>
+            <div class="admin-table-wrap" id="adminFeedbackWrap">
+              <p class="cabinet-muted">Загрузка…</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/umd/index.js" crossorigin="anonymous"></script>
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>

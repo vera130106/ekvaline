@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн - Каталог продукции</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="catalog-page">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html" aria-label="ЭкваЛайн">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" />
+        </a>
+
+        <nav class="menu" aria-label="Главное меню">
+          <a href="index.html">Главная</a>
+          <a href="catalog.html" class="active">Каталог</a>
+          <a href="about.html">О компании</a>
+          <a href="delivery.html">Доставка</a>
+          <a href="contacts.html">Контакты</a>
+        </nav>
+
+        <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
+
+        <div class="contact-area">
+          <div class="hotline">
+            <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
+            <a href="tel:83532679909">8 (3532) 67-99-09</a>
+          </div>
+          <button class="ghost-btn" type="button" data-auth-login>Вход</button>
+          <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="catalog-hero">
+        <div class="container catalog-hero-inner">
+          <div class="catalog-hero-copy">
+            <p class="catalog-kicker">ОСВЕЖАЮЩИЙ ВЫБОР</p>
+            <h1>
+              <span>Полный</span>
+              <span class="text-blue">каталог</span>
+              <span class="text-green">ЭкваЛайн</span>
+            </h1>
+            <p>
+              Подберите воду и оборудование под ваш формат жизни: домой, в офис, для спорта
+              и ежедневного комфорта.
+            </p>
+            <a href="index.html" class="catalog-back-link">← Вернуться на главную</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="full-catalog-section" id="fullCatalog">
+        <div class="container">
+          <div class="full-catalog-controls">
+            <div class="filter-group" id="catalogFilters">
+              <button class="catalog-filter-btn active" type="button" data-category="all">Все</button>
+              <button class="catalog-filter-btn" type="button" data-category="water">Вода в бутылях</button>
+              <button class="catalog-filter-btn" type="button" data-category="accessories">Аксессуары</button>
+              <button class="catalog-filter-btn" type="button" data-category="equipment">Оборудование</button>
+            </div>
+          </div>
+
+          <div class="full-catalog-grid" id="catalogGrid">
+            <article class="full-catalog-card" data-category="water">
+              <div class="full-card-image-wrap image-bg-a">
+                <img src="assets/product-18-9-white.png" alt="Природная вода 18.9л" class="full-card-image size-md" />
+                <span class="full-card-tag tag-hot">ХИТ</span>
+              </div>
+              <p class="full-card-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">1 бутыль — 220 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="water">
+              <div class="full-card-image-wrap image-bg-b">
+                <img src="assets/product-2-4.png" alt="Вода 18.9л (2-4 бутылки)" class="full-card-image size-lg" />
+                <span class="full-card-tag tag-hot">ХИТ</span>
+              </div>
+              <p class="full-card-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">от 2-4 бутылок по 190 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="water">
+              <div class="full-card-image-wrap image-bg-c">
+                <img src="assets/product-5.png" alt="Вода 18.9л (от 5 бутылей)" class="full-card-image size-sm" />
+                <span class="full-card-tag tag-hot">ХИТ</span>
+              </div>
+              <p class="full-card-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">от 5 бутылей по 175 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="equipment">
+              <div class="full-card-image-wrap image-bg-d">
+                <img src="assets/vatten-l45-ne.png" alt="Кулер для воды Vatten L 45 NE" class="full-card-image size-sm" />
+              </div>
+              <p class="full-card-type">ОБОРУДОВАНИЕ · <span class="preorder-mark">ПОД ЗАКАЗ</span></p>
+              <h3>Кулер для воды Vatten L 45 NE</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">29 900 ₽</p>
+                <div class="full-card-actions">
+                  <button type="button" class="catalog-more-btn" data-cooler-open>Подробнее</button>
+                  <button type="button" class="catalog-add-btn">В корзину</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="equipment">
+              <div class="full-card-image-wrap image-bg-a">
+                <img src="assets/ael-lk-ael-47c.png" alt="Кулер для воды AEL LK-AEL-47c black/silver" class="full-card-image size-md" />
+              </div>
+              <p class="full-card-type">ОБОРУДОВАНИЕ · <span class="preorder-mark">ПОД ЗАКАЗ</span></p>
+              <h3>Кулер для воды AEL LK-AEL-47c black/silver</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">7 450 ₽</p>
+                <div class="full-card-actions">
+                  <button type="button" class="catalog-more-btn" data-ael-open>Подробнее</button>
+                  <button type="button" class="catalog-add-btn">В корзину</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="equipment">
+              <div class="full-card-image-wrap image-bg-b">
+                <img src="assets/electric-pump.png" alt="Электрическая помпа" class="full-card-image size-md" />
+              </div>
+              <p class="full-card-type">ОБОРУДОВАНИЕ</p>
+              <h3>Электрическая помпа</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">2 100 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="accessories">
+              <div class="full-card-image-wrap image-bg-c">
+                <img src="assets/mechanical-pump.png" alt="Помпа механическая" class="full-card-image size-sm" />
+              </div>
+              <p class="full-card-type">АКСЕССУАРЫ</p>
+              <h3>Помпа механическая</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">600 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="accessories">
+              <div class="full-card-image-wrap image-bg-d">
+                <img src="assets/empty-bottle.png" alt="Пустая тара" class="full-card-image size-md" />
+              </div>
+              <p class="full-card-type">АКСЕССУАРЫ</p>
+              <h3>Пустая тара</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">400 ₽</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+
+            <article class="full-catalog-card" data-category="accessories">
+              <div class="full-card-image-wrap image-bg-b">
+                <img src="assets/preorder-cups.png" alt="Одноразовые стаканы" class="full-card-image size-md" />
+              </div>
+              <p class="full-card-type"><span class="preorder-mark">ПОД ЗАКАЗ</span></p>
+              <h3>Одноразовые стаканы</h3>
+              <div class="full-card-bottom">
+                <p class="full-card-price">Уточнять у оператора</p>
+                <button type="button" class="catalog-add-btn">В корзину</button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="catalog-modal" id="coolerDetailsModal" aria-hidden="true">
+      <button type="button" class="catalog-modal-overlay" data-cooler-close aria-label="Закрыть карточку товара"></button>
+      <div class="catalog-modal-card catalog-modal-card-split" role="dialog" aria-modal="true" aria-labelledby="coolerDetailsTitle">
+        <button type="button" class="catalog-modal-close" data-cooler-close aria-label="Закрыть">
+          ×
+        </button>
+        <div class="catalog-modal-content">
+          <h3 id="coolerDetailsTitle">Кулер для воды Vatten L 45 NE</h3>
+          <p>
+            Напольный кулер с нижней загрузкой бутыли и электронным охлаждением. Удобен для дома и офиса:
+            три режима воды (горячая, холодная, комнатная), защита от детей и стабильная работа даже при высокой температуре.
+          </p>
+          <ul class="catalog-modal-features">
+            <li><strong>Тип:</strong> напольный, с нижней загрузкой</li>
+            <li><strong>Габариты:</strong> 104 x 31 x 34 см</li>
+            <li><strong>Нагрев:</strong> до 6 л/ч, 650 Вт</li>
+            <li><strong>Охлаждение:</strong> до 0.6 л/ч, 70 Вт</li>
+            <li><strong>Цвет:</strong> черный, гарантия 2 года</li>
+          </ul>
+        </div>
+        <div class="catalog-modal-image-wrap catalog-modal-image-wrap-clean">
+          <img src="assets/vatten-l45-ne.png" alt="Кулер для воды Vatten L 45 NE" class="catalog-modal-image catalog-modal-image-vatten" />
+        </div>
+      </div>
+    </div>
+
+    <div class="catalog-modal" id="aelDetailsModal" aria-hidden="true">
+      <button type="button" class="catalog-modal-overlay" data-ael-close aria-label="Закрыть карточку товара"></button>
+      <div class="catalog-modal-card catalog-modal-card-split" role="dialog" aria-modal="true" aria-labelledby="aelDetailsTitle">
+        <button type="button" class="catalog-modal-close" data-ael-close aria-label="Закрыть">
+          ×
+        </button>
+        <div class="catalog-modal-content">
+          <h3 id="aelDetailsTitle">Кулер для воды AEL LK-AEL-47c black/silver</h3>
+          <p>
+            Напольный кулер в черно-серебристом корпусе с верхней загрузкой бутыли и шкафчиком для хранения.
+            Подает горячую и комнатную воду, надежен для дома и офиса.
+          </p>
+          <ul class="catalog-modal-features">
+            <li><strong>Тип:</strong> напольный, верхняя загрузка</li>
+            <li><strong>Подача воды:</strong> горячая / комнатная</li>
+            <li><strong>Нагрев:</strong> 5 л/ч, 550 Вт, до 90 °C</li>
+            <li><strong>Охлаждение:</strong> без охлаждения</li>
+            <li><strong>Габариты:</strong> 31 x 31 x 95 см, вес 7.25 кг</li>
+            <li><strong>Цвет:</strong> black/silver, гарантия 1 год</li>
+          </ul>
+        </div>
+        <div class="catalog-modal-image-wrap catalog-modal-image-wrap-clean">
+          <img src="assets/ael-lk-ael-47c.png" alt="Кулер для воды AEL LK-AEL-47c black/silver" class="catalog-modal-image catalog-modal-image-ael" />
+        </div>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      <div class="container footer-top">
+        <div class="footer-brand">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="footer-logo" />
+          <p class="footer-brand-name">ЭкваЛайн</p>
+          <p class="footer-desc">Мы меняем представление о доставке воды в Оренбурге. Технологии чистоты и забота о каждом клиенте.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Компания</h4>
+          <ul class="footer-links">
+            <li><a href="about.html">О нас</a></li>
+            <li><a href="about.html">Производство</a></li>
+            <li><a href="about.html">Сертификаты</a></li>
+            <li><a href="community.html">Блог</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Помощь</h4>
+          <ul class="footer-links">
+            <li><a href="delivery.html">Доставка и оплата</a></li>
+            <li><a href="delivery.html">Частые вопросы</a></li>
+            <li><a href="contacts.html">Контакты</a></li>
+            <li><a href="index.html">Личный кабинет</a></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="footer-bottom">
+        <div class="container footer-bottom-inner">
+          <span>© 2026 ЭкваЛайн. Все права защищены.</span>
+          <div class="footer-legal">
+            <a href="index.html">Политика конфиденциальности</a>
+            <a href="index.html">Публичная оферта</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

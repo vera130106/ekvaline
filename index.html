@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн - Чистая и полезная питьевая вода</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html" aria-label="ЭкваЛайн">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" />
+        </a>
+
+        <nav class="menu" aria-label="Главное меню">
+          <a href="index.html" class="active">Главная</a>
+          <a href="catalog.html">Каталог</a>
+          <a href="about.html">О компании</a>
+          <a href="delivery.html">Доставка</a>
+          <a href="contacts.html">Контакты</a>
+        </nav>
+
+        <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
+
+        <div class="contact-area">
+          <div class="hotline">
+            <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
+            <a href="tel:83532679909">8 (3532) 67-99-09</a>
+          </div>
+          <button class="ghost-btn" type="button" data-auth-login>Вход</button>
+          <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">ЧИСТОТА В КАЖДОЙ КАПЛЕ</p>
+            <h1>
+              Чистая и полезная
+              <span class="text-blue">питьевая</span>
+              <span class="text-green">вода</span>
+            </h1>
+            <p class="hero-note">
+              Мы доставляем идеально сбалансированную воду прямо к вашему порогу.
+              Почувствуйте свежесть и энергию каждый день.
+            </p>
+          </div>
+
+          <div class="hero-media" aria-hidden="true">
+            <img src="assets/bottles.png" alt="" class="bottles" />
+          </div>
+        </div>
+
+        <div class="wave-layer"></div>
+      </section>
+
+      <section class="catalog">
+        <div class="container">
+          <div class="catalog-head">
+            <div>
+              <p class="catalog-kicker">НАШ АССОРТИМЕНТ</p>
+              <h2>Каталог</h2>
+            </div>
+            <a href="catalog.html" class="catalog-link">Весь каталог →</a>
+          </div>
+
+          <div class="catalog-grid">
+            <article class="catalog-card">
+              <div class="catalog-image-wrap">
+                <img src="assets/product-18-9.png" alt="Вода 18.9л" class="catalog-bottle one single" />
+              </div>
+              <p class="catalog-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="catalog-bottom">
+                <p class="catalog-price">1 бутыль — 220 ₽</p>
+                <div class="catalog-actions">
+                  <button type="button" class="cart-btn">В корзину</button>
+                  <a href="catalog.html" class="details-link">Подробнее</a>
+                </div>
+              </div>
+            </article>
+
+            <article class="catalog-card">
+              <div class="catalog-image-wrap">
+                <img src="assets/product-2-4.png" alt="Вода 18.9л (2 бутылки)" class="catalog-bottle two" />
+              </div>
+              <p class="catalog-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="catalog-bottom">
+                <p class="catalog-price">от 2-4 бутылок по 190 ₽</p>
+                <div class="catalog-actions">
+                  <button type="button" class="cart-btn">В корзину</button>
+                  <a href="catalog.html" class="details-link">Подробнее</a>
+                </div>
+              </div>
+            </article>
+
+            <article class="catalog-card">
+              <div class="catalog-image-wrap">
+                <img src="assets/product-5.png" alt="Вода 18.9л (от 5 бутылей)" class="catalog-bottle five" />
+              </div>
+              <p class="catalog-type">ВОДА В БУТЫЛЯХ</p>
+              <h3>Вода 18.9л</h3>
+              <div class="catalog-bottom">
+                <p class="catalog-price">от 5 бутылей по 175 ₽</p>
+                <div class="catalog-actions">
+                  <button type="button" class="cart-btn">В корзину</button>
+                  <a href="catalog.html" class="details-link">Подробнее</a>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="calc-section" id="water-calc">
+        <div class="container">
+          <div class="calc-head">
+            <h2>Калькулятор потребления</h2>
+            <p>Рассчитайте идеальный объем воды для вашего здоровья и активности</p>
+          </div>
+
+          <div class="calc-layout">
+            <div class="calc-controls">
+              <div class="calc-group">
+                <div class="calc-label-row">
+                  <label for="peopleRange">Количество человек</label>
+                  <strong id="peopleValue">2</strong>
+                </div>
+                <input id="peopleRange" type="range" min="1" max="15" value="2" />
+              </div>
+
+              <div class="calc-group">
+                <div class="calc-label-row">
+                  <label>Сценарий использования</label>
+                  <strong id="usageText">Питье и готовка</strong>
+                </div>
+                <div class="option-grid" id="usageOptions">
+                  <button type="button" class="option-btn" data-group="usage" data-value="drink">Только питье</button>
+                  <button type="button" class="option-btn" data-group="usage" data-value="cook">Только готовка</button>
+                  <button type="button" class="option-btn active" data-group="usage" data-value="both">Питье и готовка</button>
+                </div>
+              </div>
+
+              <div class="calc-group">
+                <div class="calc-label-row">
+                  <label>Уровень активности</label>
+                  <strong id="activityText">Средний</strong>
+                </div>
+                <div class="option-grid" id="activityOptions">
+                  <button type="button" class="option-btn" data-group="activity" data-value="low">Низкий</button>
+                  <button type="button" class="option-btn active" data-group="activity" data-value="medium">Средний</button>
+                  <button type="button" class="option-btn" data-group="activity" data-value="high">Высокий</button>
+                </div>
+              </div>
+
+              <div class="calc-group">
+                <div class="calc-label-row">
+                  <label>Время года</label>
+                  <strong id="seasonText">Весна/Осень</strong>
+                </div>
+                <div class="option-grid" id="seasonOptions">
+                  <button type="button" class="option-btn" data-group="season" data-value="winter">Зима</button>
+                  <button type="button" class="option-btn active" data-group="season" data-value="spring-autumn">Весна/Осень</button>
+                  <button type="button" class="option-btn" data-group="season" data-value="summer">Лето</button>
+                </div>
+              </div>
+
+              <div class="calc-plan" id="calcPlan">
+                <p class="calc-plan-title">Рекомендация по тарифу</p>
+                <p>Тариф 220 ₽/бутыль: <strong id="planLineOne">1 бут./заказ • 10 заказов/мес • 2 200 ₽/мес</strong></p>
+                <p>Тариф 190 ₽/бутыль (2-4 шт): <strong id="planLineTwo">4 бут./заказ • 3 заказа/мес • 1 900 ₽/мес</strong></p>
+                <p>Тариф 175 ₽/бутыль (от 5 шт): <strong id="planLineFive">5 бут./заказ • 2 заказа/мес • 1 750 ₽/мес</strong></p>
+                <p class="calc-plan-best">Самый выгодный тариф: <strong id="planTierValue">от 5 бутылей по 175 ₽</strong></p>
+              </div>
+
+            </div>
+
+            <aside class="calc-result-card" aria-live="polite">
+              <div class="bottle-meter" id="bottleMeter">
+                <div class="bottle-water" id="bottleWater"></div>
+                <p class="meter-title">ВАША НОРМА</p>
+                <p class="meter-value"><span id="litersValue">5</span> л/день</p>
+              </div>
+              <p class="calc-footnote">* Рекомендуемое количество 19л бутылей в месяц: <strong id="bottlesValue">8 шт</strong></p>
+              <div class="calc-breakdown" id="calcBreakdown">
+                <p>Питьевая норма: <strong id="drinkNormValue">4.2 л/день</strong></p>
+                <p>Расход на готовку: <strong id="householdReserveValue">0.8 л/день</strong></p>
+                <p>Объем в месяц: <strong id="monthlyLitersValue">150 л</strong></p>
+                <p>Частота заказа: <strong id="orderIntervalValue">каждые 4 дня</strong></p>
+              </div>
+              <p class="calc-note" id="calcNote">
+                Расчет учитывает питьевую норму, сезон, активность и дополнительный бытовой запас.
+              </p>
+            </aside>
+          </div>
+        </div>
+      </section>
+      <section class="callback-section" id="callback">
+        <div class="container">
+          <div class="callback-inner">
+
+            <div class="cb-left">
+              <h2 class="cb-title">
+                Остались вопросы?<br/>
+                <span>Мы всегда на связи</span>
+              </h2>
+              <p class="callback-note">Заполните форму, и наш менеджер свяжется с вами в течение 15 минут для консультации.</p>
+
+              <div class="cb-contacts">
+                <div class="cb-contact-item">
+                  <div class="cb-icon-wrap">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#141b2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  </div>
+                  <div>
+                    <strong>Наш офис</strong>
+                    <span>Оренбург, ул. Ветеранов труда, 15а</span>
+                  </div>
+                </div>
+                <div class="cb-contact-item">
+                  <div class="cb-icon-wrap">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#141b2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.59 3.47 2 2 0 0 1 3.56 1.29h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.83a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16z"/></svg>
+                  </div>
+                  <div>
+                    <strong>Телефон</strong>
+                    <span>8 (3532) 67-99-09</span>
+                  </div>
+                </div>
+                <div class="cb-contact-item">
+                  <div class="cb-icon-wrap">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#141b2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  </div>
+                  <div>
+                    <strong>Email</strong>
+                    <span>ekvalyn@mail.ru</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="cb-right">
+              <form class="callback-form" id="callbackForm" novalidate>
+                <div class="cb-row">
+                  <div class="field-wrap">
+                    <label for="cbName">ИМЯ</label>
+                    <input type="text" id="cbName" name="name" placeholder="Иван" autocomplete="name" maxlength="40" />
+                    <span class="field-hint">2-40 символов: буквы, пробел, дефис, апостроф.</span>
+                    <span class="field-error" id="cbNameError"></span>
+                  </div>
+                  <div class="field-wrap">
+                    <label for="cbPhone">ТЕЛЕФОН</label>
+                    <input type="tel" id="cbPhone" name="phone" placeholder="+7 (___) ___-__-__" autocomplete="tel" maxlength="18" />
+                    <span class="field-hint">Формат: +7 (999) 123-45-67.</span>
+                    <span class="field-error" id="cbPhoneError"></span>
+                  </div>
+                </div>
+                <div class="field-wrap">
+                  <label for="cbMessage">СООБЩЕНИЕ</label>
+                  <textarea id="cbMessage" name="message" placeholder="Ваш вопрос..." rows="4" maxlength="400"></textarea>
+                  <span class="field-hint" id="cbMessageCount">0/400</span>
+                  <span class="field-error" id="cbMessageError"></span>
+                </div>
+                <button type="submit" class="cb-submit-btn">
+                  Отправить
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+                <p class="cb-success" id="cbSuccess" aria-live="polite"></p>
+              </form>
+            </div>
+
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="cb-modal" id="callbackModal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="callbackModalTitle">
+      <div class="cb-modal-overlay" data-close-modal="true"></div>
+      <div class="cb-modal-card" role="document">
+        <button type="button" class="cb-modal-close" id="callbackModalClose" aria-label="Закрыть окно">×</button>
+        <h3 id="callbackModalTitle">Заявка отправлена</h3>
+        <p>Спасибо! Мы получили ваши данные и свяжемся с вами в течение 15 минут.</p>
+        <button type="button" class="cb-modal-btn" id="callbackModalOk">Понятно</button>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      <div class="container footer-top">
+
+        <div class="footer-brand">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="footer-logo" />
+          <p class="footer-brand-name">ЭкваЛайн</p>
+          <p class="footer-desc">Мы меняем представление о доставке воды в Оренбурге. Технологии чистоты и забота о каждом клиенте.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Компания</h4>
+          <ul class="footer-links">
+            <li><a href="about.html">О нас</a></li>
+            <li><a href="about.html">Производство</a></li>
+            <li><a href="about.html">Сертификаты</a></li>
+            <li><a href="community.html">Блог</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Помощь</h4>
+          <ul class="footer-links">
+            <li><a href="delivery.html">Доставка и оплата</a></li>
+            <li><a href="delivery.html">Частые вопросы</a></li>
+            <li><a href="contacts.html">Контакты</a></li>
+            <li><a href="index.html">Личный кабинет</a></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="footer-bottom">
+        <div class="container footer-bottom-inner">
+          <span>© 2026 ЭкваЛайн. Все права защищены.</span>
+          <div class="footer-legal">
+            <a href="index.html">Политика конфиденциальности</a>
+            <a href="index.html">Публичная оферта</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

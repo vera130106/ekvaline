@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Сообщество</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="community-page">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html" aria-label="ЭкваЛайн">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" />
+        </a>
+
+        <nav class="menu" aria-label="Главное меню">
+          <a href="index.html">Главная</a>
+          <a href="catalog.html">Каталог</a>
+          <a href="about.html">О компании</a>
+          <a href="delivery.html">Доставка</a>
+          <a href="contacts.html">Контакты</a>
+          <a href="community.html" class="active">Сообщество</a>
+        </nav>
+
+        <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
+
+        <div class="contact-area">
+          <div class="hotline">
+            <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
+            <a href="tel:83532679909">8 (3532) 67-99-09</a>
+          </div>
+          <a href="operator.html" class="ghost-btn manager-link hidden" id="operatorNavLink">Оператор</a>
+          <a href="manager.html" class="ghost-btn manager-link hidden" id="managerNavLink">Менеджер</a>
+          <a href="admin.html" class="ghost-btn manager-link hidden" id="adminNavLink">Админ</a>
+          <button class="ghost-btn" type="button" data-auth-login>Вход</button>
+          <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="community-main">
+      <section class="community-hero">
+        <div class="container community-hero-inner">
+          <div class="community-hero-copy">
+            <p class="community-kicker">СООБЩЕСТВО</p>
+            <h1>ЭкваЛайн — полезное рядом</h1>
+            <p class="community-lead" id="communityIntro">Загрузка…</p>
+          </div>
+          <div class="community-hero-visual" aria-hidden="true">
+            <div class="community-hero-bubble"></div>
+            <div class="community-hero-bubble community-hero-bubble--2"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="container community-shell">
+        <aside class="community-sidebar" aria-label="Информация о доставке">
+          <div class="sidebar-card sidebar-card--hours">
+            <div class="sidebar-card-head">
+              <span class="sidebar-card-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" />
+                  <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                </svg>
+              </span>
+              <h2>Режим работы</h2>
+            </div>
+            <p class="sidebar-card-text" id="workLine">—</p>
+            <h3 class="sidebar-subtitle">Окна доставки</h3>
+            <ul id="deliverySlots" class="hours-slots hours-slots--pills"></ul>
+          </div>
+          <div class="sidebar-card sidebar-card--hint">
+            <p class="sidebar-hint-text">Лайкайте публикации и обсуждайте статьи — мы читаем комментарии и берём идеи в работу.</p>
+          </div>
+        </aside>
+
+        <div class="community-stream">
+          <section class="community-feed-section" aria-labelledby="feed-heading">
+            <div class="section-heading">
+              <h2 id="feed-heading" class="community-feed-title">Лента</h2>
+              <span class="section-heading-line" aria-hidden="true"></span>
+            </div>
+            <div id="communityFeed" class="community-feed"></div>
+          </section>
+
+          <section class="community-polls-section" aria-labelledby="polls-heading">
+            <div class="section-heading">
+              <h2 id="polls-heading" class="community-feed-title">Опросы</h2>
+              <span class="section-heading-line" aria-hidden="true"></span>
+            </div>
+            <div id="communityPolls" class="community-polls"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-bottom-inner" style="padding: 1.5rem 0">
+        <span>© 2026 ЭкваЛайн</span>
+        <a href="index.html">На главную</a>
+      </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/umd/index.js" crossorigin="anonymous"></script>
+    <script src="app-core.js"></script>
+    <script src="api-client.js"></script>
+    <script src="script.js"></script>
+    <script src="community.js"></script>
+  </body>
+</html>
