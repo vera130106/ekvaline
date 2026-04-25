@@ -37,9 +37,6 @@ const ROOT_JS = [
   'api-client.js',
   'script.js',
   'community.js',
-  'manager.js',
-  'operator.js',
-  'admin.js',
 ];
 
 function read(rel) {

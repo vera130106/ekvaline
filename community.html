@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ЭкваЛайн — Сообщество</title>
+    <title>ЭкваЛайн — Блог</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -25,7 +25,7 @@
           <a href="about.html">О компании</a>
           <a href="delivery.html">Доставка</a>
           <a href="contacts.html">Контакты</a>
-          <a href="community.html" class="active">Сообщество</a>
+          <a href="community.html" class="active">Блог</a>
         </nav>
 
         <div class="topbar-mid" id="topbarNotifications" aria-label="Уведомления"></div>
@@ -35,9 +35,6 @@
             <span>БЕСПЛАТНАЯ ДОСТАВКА</span>
             <a href="tel:83532679909">8 (3532) 67-99-09</a>
           </div>
-          <a href="operator.html" class="ghost-btn manager-link hidden" id="operatorNavLink">Оператор</a>
-          <a href="manager.html" class="ghost-btn manager-link hidden" id="managerNavLink">Менеджер</a>
-          <a href="admin.html" class="ghost-btn manager-link hidden" id="adminNavLink">Админ</a>
           <button class="ghost-btn" type="button" data-auth-login>Вход</button>
           <button class="solid-btn" type="button" data-auth-register>Регистрация</button>
         </div>
@@ -48,8 +45,8 @@
       <section class="community-hero">
         <div class="container community-hero-inner">
           <div class="community-hero-copy">
-            <p class="community-kicker">СООБЩЕСТВО</p>
-            <h1>ЭкваЛайн — полезное рядом</h1>
+            <p class="community-kicker">БЛОГ ЭКВАЛАЙН</p>
+            <h1>Полезные посты о воде, здоровье и сервисе</h1>
             <p class="community-lead" id="communityIntro">Загрузка…</p>
           </div>
           <div class="community-hero-visual" aria-hidden="true">
@@ -60,7 +57,42 @@
       </section>
 
       <div class="container community-shell">
-        <aside class="community-sidebar" aria-label="Информация о доставке">
+        <div class="community-stream">
+          <section class="community-toolbar-card" aria-label="Поиск и темы блога">
+            <div class="community-search">
+              <input id="feedSearchInput" type="search" placeholder="Поиск по постам и темам..." />
+            </div>
+            <div class="community-topics" id="communityTopics">
+              <button class="community-topic is-active" type="button" data-topic="all">Все</button>
+              <button class="community-topic" type="button" data-topic="zog">ЗОЖ</button>
+              <button class="community-topic" type="button" data-topic="news">Новости</button>
+              <button class="community-topic" type="button" data-topic="service">Сервис</button>
+              <button class="community-topic" type="button" data-topic="analysis">Разборы</button>
+            </div>
+          </section>
+
+          <section class="community-pinned-section" aria-labelledby="pinned-heading">
+            <div class="section-heading">
+              <h2 id="pinned-heading" class="community-feed-title">Закреплённые посты</h2>
+              <span class="section-heading-line" aria-hidden="true"></span>
+            </div>
+            <div id="communityPinnedFeed" class="community-pinned-feed"></div>
+          </section>
+
+          <section class="community-feed-section" aria-labelledby="feed-heading">
+            <div class="section-heading">
+              <h2 id="feed-heading" class="community-feed-title">Лента блога</h2>
+              <div class="feed-tabs" id="feedTabs">
+                <button type="button" class="feed-tab is-active" data-tab="all">Все посты</button>
+                <button type="button" class="feed-tab" data-tab="saved">Избранное</button>
+              </div>
+              <span class="section-heading-line" aria-hidden="true"></span>
+            </div>
+            <div id="communityFeed" class="community-feed"></div>
+          </section>
+        </div>
+
+        <aside class="community-sidebar" aria-label="Опросы и полезная информация">
           <div class="sidebar-card sidebar-card--hours">
             <div class="sidebar-card-head">
               <span class="sidebar-card-icon" aria-hidden="true">
@@ -75,27 +107,28 @@
             <h3 class="sidebar-subtitle">Окна доставки</h3>
             <ul id="deliverySlots" class="hours-slots hours-slots--pills"></ul>
           </div>
-          <div class="sidebar-card sidebar-card--hint">
-            <p class="sidebar-hint-text">Лайкайте публикации и обсуждайте статьи — мы читаем комментарии и берём идеи в работу.</p>
-          </div>
-        </aside>
-
-        <div class="community-stream">
-          <section class="community-feed-section" aria-labelledby="feed-heading">
-            <div class="section-heading">
-              <h2 id="feed-heading" class="community-feed-title">Лента</h2>
-              <span class="section-heading-line" aria-hidden="true"></span>
-            </div>
-            <div id="communityFeed" class="community-feed"></div>
-          </section>
 
           <section class="community-polls-section" aria-labelledby="polls-heading">
-            <div class="section-heading">
+            <div class="section-heading section-heading--sidebar">
               <h2 id="polls-heading" class="community-feed-title">Опросы</h2>
-              <span class="section-heading-line" aria-hidden="true"></span>
             </div>
             <div id="communityPolls" class="community-polls"></div>
           </section>
+
+          <div class="sidebar-card sidebar-card--popular">
+            <h3 class="sidebar-subtitle">Популярное за неделю</h3>
+            <div id="weeklyPopularList" class="weekly-popular-list"></div>
+          </div>
+
+          <div class="sidebar-card sidebar-card--hint">
+            <h3 class="sidebar-subtitle">Полезно знать</h3>
+            <ul class="community-hints-list">
+              <li>Норма воды в день в среднем 30 мл на 1 кг веса.</li>
+              <li>Для офиса удобнее ставить автозаказ на 2-4 бутыли.</li>
+              <li>Идеи для новых постов можно оставлять в комментариях.</li>
+            </ul>
+          </div>
+        </aside>
         </div>
       </div>
     </main>
@@ -108,9 +141,9 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/umd/index.js" crossorigin="anonymous"></script>
-    <script src="app-core.js"></script>
-    <script src="api-client.js"></script>
-    <script src="script.js"></script>
-    <script src="community.js"></script>
+    <script src="app-core.js?v=20260425-2"></script>
+    <script src="api-client.js?v=20260425-2"></script>
+    <script src="script.js?v=20260425-2"></script>
+    <script src="community.js?v=20260425-2"></script>
   </body>
 </html>
