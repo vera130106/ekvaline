@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Менеджер блога</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="manager-page">
+    <main class="manager-shell">
+      <header class="manager-head">
+        <div>
+          <p class="manager-kicker">ПАНЕЛЬ МЕНЕДЖЕРА</p>
+          <h1>Управление блогом</h1>
+          <p>Посты, истории, факт дня, комментарии и ответы в одном месте.</p>
+        </div>
+        <div class="manager-head-actions">
+          <a href="community.html" target="_blank" rel="noopener" class="manager-btn is-green">Просмотреть на сайте</a>
+          <button type="button" class="manager-btn is-secondary" id="managerLogoutBtn">Выйти</button>
+        </div>
+      </header>
+
+      <section class="manager-grid">
+        <article class="manager-card manager-launch-card">
+          <h2>Новый пост</h2>
+          <p>Создать и опубликовать пост с фото.</p>
+          <button type="button" class="manager-btn is-green" data-open-form-modal="managerPostFormModal">Открыть</button>
+        </article>
+
+        <article class="manager-card manager-launch-card">
+          <h2>Факт дня</h2>
+          <p>Изменить текущий факт для правого блока.</p>
+          <button type="button" class="manager-btn is-green" data-open-form-modal="managerFactFormModal">Открыть</button>
+        </article>
+
+        <article class="manager-card manager-launch-card">
+          <h2>Боковые блоки блога</h2>
+          <p>Редактировать заголовки и списки в правой колонке.</p>
+          <button type="button" class="manager-btn is-green" data-open-form-modal="managerBlocksFormModal">Открыть</button>
+        </article>
+
+        <article class="manager-card manager-launch-card">
+          <h2>Истории</h2>
+          <p>Добавить ручные и редактировать авто-истории.</p>
+          <button type="button" class="manager-btn is-green" data-open-form-modal="managerStoryFormModal">Открыть</button>
+        </article>
+
+        <article class="manager-card manager-launch-card">
+          <h2>Опрос</h2>
+          <p>Создать и настроить опрос в блоге.</p>
+          <button type="button" class="manager-btn is-green" data-open-form-modal="managerPollFormModal">Открыть</button>
+        </article>
+      </section>
+
+      <section class="manager-card manager-wide">
+        <h2>Все посты (архив)</h2>
+        <p class="manager-note">В ленте клиента видно максимум 5 последних видимых постов. Остальные остаются здесь и уходят вниз. Скрытые посты затемнены.</p>
+        <div class="manager-posts-carousel">
+          <button type="button" class="manager-carousel-arrow" id="managerPostsPrevBtn" aria-label="Прокрутить влево">‹</button>
+          <div class="manager-posts-viewport" id="managerPostsViewport">
+            <div id="managerPostsList" class="manager-posts-list"></div>
+          </div>
+          <button type="button" class="manager-carousel-arrow" id="managerPostsNextBtn" aria-label="Прокрутить вправо">›</button>
+        </div>
+      </section>
+
+      <section class="manager-card manager-wide">
+        <h2>Комментарии и ответы</h2>
+        <div id="managerCommentsList" class="manager-comments-list"></div>
+      </section>
+    </main>
+
+    <div class="manager-modal" id="managerPostFormModal">
+      <div class="manager-modal-backdrop" data-close-form-modal="managerPostFormModal"></div>
+      <div class="manager-modal-card">
+        <button type="button" class="manager-modal-close" data-close-form-modal="managerPostFormModal">×</button>
+        <h3 class="manager-modal-title">Новый пост</h3>
+        <form id="managerPostForm" class="manager-form manager-modal-body" novalidate>
+          <label>Заголовок (до 80)
+            <input type="text" name="title" maxlength="80" required />
+            <span class="manager-limit" data-limit-for="title">0/80</span>
+          </label>
+          <label>Краткий текст (до 180)
+            <textarea name="excerpt" maxlength="180" required></textarea>
+            <span class="manager-limit" data-limit-for="excerpt">0/180</span>
+          </label>
+          <label>Полный текст (до 1200)
+            <textarea name="details" maxlength="1200" required></textarea>
+            <span class="manager-limit" data-limit-for="details">0/1200</span>
+          </label>
+          <label>Фото поста
+            <input type="file" name="image" accept="image/*" required />
+          </label>
+          <button type="submit" class="manager-btn is-green">Опубликовать пост</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="manager-modal" id="managerFactFormModal">
+      <div class="manager-modal-backdrop" data-close-form-modal="managerFactFormModal"></div>
+      <div class="manager-modal-card">
+        <button type="button" class="manager-modal-close" data-close-form-modal="managerFactFormModal">×</button>
+        <h3 class="manager-modal-title">Факт дня</h3>
+        <form id="managerFactForm" class="manager-form manager-modal-body" novalidate>
+          <label>Текст факта (до 160)
+            <textarea name="fact" maxlength="160" required></textarea>
+            <span class="manager-limit" data-limit-for="fact">0/160</span>
+          </label>
+          <button type="submit" class="manager-btn is-green">Сохранить факт</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="manager-modal" id="managerBlocksFormModal">
+      <div class="manager-modal-backdrop" data-close-form-modal="managerBlocksFormModal"></div>
+      <div class="manager-modal-card">
+        <button type="button" class="manager-modal-close" data-close-form-modal="managerBlocksFormModal">×</button>
+        <h3 class="manager-modal-title">Боковые блоки блога</h3>
+        <form id="managerBlocksForm" class="manager-form manager-modal-body" novalidate>
+          <label>Заголовок блока "Факт дня" (до 40)
+            <input type="text" name="factTitle" maxlength="40" placeholder="Факт дня" />
+            <span class="manager-limit" data-limit-for="fact-title">0/40</span>
+          </label>
+          <label>Заголовок блока "Популярное" (до 40)
+            <input type="text" name="popularTitle" maxlength="40" placeholder="Популярное" />
+            <span class="manager-limit" data-limit-for="popular-title">0/40</span>
+          </label>
+          <label>Заголовок блока "Советы дня" (до 40)
+            <input type="text" name="tipsTitle" maxlength="40" placeholder="Советы дня" />
+            <span class="manager-limit" data-limit-for="tips-title">0/40</span>
+          </label>
+          <label>Заголовок блока "Рецепты с водой" (до 40)
+            <input type="text" name="recipesTitle" maxlength="40" placeholder="Рецепты с водой" />
+            <span class="manager-limit" data-limit-for="recipes-title">0/40</span>
+          </label>
+          <label>Популярное (каждая строка = один пункт; максимум 10, без нумерации)
+            <textarea name="popular" maxlength="700" placeholder="Пункт 1&#10;Пункт 2"></textarea>
+            <span class="manager-limit" data-limit-for="popular">0/700</span>
+          </label>
+          <label>Советы дня (каждая строка = один совет; максимум 12)
+            <textarea name="tips" maxlength="900" placeholder="Совет 1&#10;Совет 2"></textarea>
+            <span class="manager-limit" data-limit-for="tips">0/900</span>
+          </label>
+          <label>Рецепты с водой (каждая строка = один рецепт; максимум 12, формат: Вода + лимон + мята)
+            <textarea name="recipes" maxlength="900" placeholder="Рецепт 1&#10;Рецепт 2"></textarea>
+            <span class="manager-limit" data-limit-for="recipes">0/900</span>
+          </label>
+          <button type="submit" class="manager-btn is-green">Сохранить блоки</button>
+        </form>
+        <div class="manager-blocks-preview" id="managerBlocksPreview"></div>
+      </div>
+    </div>
+
+    <div class="manager-modal" id="managerStoryFormModal">
+      <div class="manager-modal-backdrop" data-close-form-modal="managerStoryFormModal"></div>
+      <div class="manager-modal-card">
+        <button type="button" class="manager-modal-close" data-close-form-modal="managerStoryFormModal">×</button>
+        <h3 class="manager-modal-title">Добавить и управлять историями</h3>
+        <form id="managerStoryForm" class="manager-form manager-modal-body" novalidate>
+          <label>Заголовок (до 40)
+            <input type="text" name="title" maxlength="40" required />
+            <span class="manager-limit" data-limit-for="story-title">0/40</span>
+          </label>
+          <label>Текст (до 180)
+            <textarea name="text" maxlength="180" required></textarea>
+            <span class="manager-limit" data-limit-for="story-text">0/180</span>
+          </label>
+          <label>К какому посту привязать (необязательно)
+            <select name="postId" id="storyPostSelect">
+              <option value="">Без привязки</option>
+            </select>
+          </label>
+          <label>Фото истории
+            <input type="file" name="image" accept="image/*" required />
+          </label>
+          <button type="submit" class="manager-btn is-green">Добавить историю</button>
+        </form>
+        <div id="managerStoriesList" class="manager-mini-list"></div>
+      </div>
+    </div>
+
+    <div class="manager-modal" id="managerPollFormModal">
+      <div class="manager-modal-backdrop" data-close-form-modal="managerPollFormModal"></div>
+      <div class="manager-modal-card">
+        <button type="button" class="manager-modal-close" data-close-form-modal="managerPollFormModal">×</button>
+        <h3 class="manager-modal-title">Опрос</h3>
+        <form id="managerPollForm" class="manager-form manager-modal-body" novalidate>
+          <label>Заголовок (до 40)
+            <input type="text" name="title" maxlength="40" placeholder="Опрос дня" />
+            <span class="manager-limit" data-limit-for="poll-title">0/40</span>
+          </label>
+          <label>Вопрос (до 120)
+            <textarea name="question" maxlength="120" required></textarea>
+            <span class="manager-limit" data-limit-for="poll-question">0/120</span>
+          </label>
+          <div id="pollOptionsContainer" class="manager-poll-options"></div>
+          <button type="button" class="manager-btn is-secondary" id="addPollOptionBtn">Добавить вариант</button>
+          <div class="manager-post-edit-actions">
+            <button type="button" class="manager-btn is-secondary" id="deactivatePollBtn">Скрыть опрос</button>
+            <button type="submit" class="manager-btn is-green">Сохранить опрос</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="manager.js?v=20260427-6"></script>
+  </body>
+</html>

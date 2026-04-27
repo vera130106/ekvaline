@@ -2,6 +2,8 @@
 (function initAuthAndCabinet() {
   const USERS_KEY = 'ekvaline_users';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
+  const MANAGER_LOGIN = 'manager@ekvaline.local';
+  const MANAGER_PASSWORD = 'AquaManager2026';
 
   const loginTrigger = document.querySelector('[data-auth-login]');
   const registerTrigger = document.querySelector('[data-auth-register]');
@@ -11,7 +13,7 @@
   const cabinetTrigger = document.createElement('button');
   cabinetTrigger.type = 'button';
   cabinetTrigger.className = 'solid-btn cabinet-trigger';
-  cabinetTrigger.textContent = 'Кабинет';
+  cabinetTrigger.textContent = 'Личный кабинет';
   contactArea.appendChild(cabinetTrigger);
 
   document.body.insertAdjacentHTML(
@@ -367,6 +369,12 @@
       openAuthModal('login');
       return;
     }
+    if (user.role === 'manager') {
+      window.location.href = 'manager.html';
+      return;
+    }
+    window.location.href = 'cabinet.html';
+    return;
 
     cabinetUserName.textContent = user.name;
     cabinetUserMeta.textContent = `${user.email} · ${formatPhoneMask(user.phone)}`;
@@ -398,7 +406,7 @@
 
   function updateHeaderAuth() {
     const user = readCurrentUser();
-    const isLoggedIn = Boolean(user);
+    const isLoggedIn = Boolean(user) && user.role !== 'manager';
     loginTrigger.style.display = isLoggedIn ? 'none' : 'inline-flex';
     registerTrigger.style.display = isLoggedIn ? 'none' : 'inline-flex';
     cabinetTrigger.style.display = isLoggedIn ? 'inline-flex' : 'none';
@@ -438,6 +446,23 @@
       return;
     }
 
+    if (byEmail === MANAGER_LOGIN) {
+      if (password !== MANAGER_PASSWORD) {
+        authLoginError.textContent = 'Неверный пароль менеджера.';
+        return;
+      }
+      saveCurrentUser({
+        id: 'manager',
+        name: 'Менеджер блога',
+        email: MANAGER_LOGIN,
+        phone: '',
+        role: 'manager',
+      });
+      closeAuthModal();
+      window.location.href = 'manager.html';
+      return;
+    }
+
     const user = readUsers().find((item) => item.email === byEmail || item.phone === byPhone);
     if (!user || user.password !== password) {
       authLoginError.textContent = 'Неверные данные для входа.';
@@ -466,6 +491,10 @@
     }
     if (!isValidEmail(email)) {
       authRegisterError.textContent = 'Введите корректный email.';
+      return;
+    }
+    if (email === MANAGER_LOGIN) {
+      authRegisterError.textContent = 'Этот логин зарезервирован для менеджера блога.';
       return;
     }
     if (phone.length !== 11 || phone[0] !== '7') {
@@ -536,6 +565,309 @@
   });
 
   updateHeaderAuth();
+})();
+
+/* ── Cart + checkout (frontend only, no DB) ── */
+(function initCartAndCheckout() {
+  const CART_KEY = 'ekvaline_cart_items';
+  const CURRENT_USER_KEY = 'ekvaline_current_user';
+  const ORDERS_KEY = 'ekvaline_orders_by_user';
+  const ADDRESSES_KEY = 'ekvaline_addresses_by_user';
+  const BONUSES_KEY = 'ekvaline_bonuses_by_user';
+
+  function safeParse(raw, fallback) {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed == null ? fallback : parsed;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function readCurrentUser() {
+    return safeParse(localStorage.getItem(CURRENT_USER_KEY), null);
+  }
+
+  function readCart() {
+    return safeParse(localStorage.getItem(CART_KEY), []);
+  }
+
+  function saveCart(items) {
+    localStorage.setItem(CART_KEY, JSON.stringify(items));
+  }
+
+  function readByUser(key, userId, fallback) {
+    const all = safeParse(localStorage.getItem(key), {});
+    return all[userId] ?? fallback;
+  }
+
+  function writeByUser(key, userId, value) {
+    const all = safeParse(localStorage.getItem(key), {});
+    all[userId] = value;
+    localStorage.setItem(key, JSON.stringify(all));
+  }
+
+  function parsePrice(value) {
+    const m = String(value || '').replace(/\s/g, '').match(/(\d+)/);
+    return m ? Number(m[1]) : 0;
+  }
+
+  const contactArea = document.querySelector('.contact-area');
+  if (!contactArea) return;
+  const cartBtn = document.createElement('button');
+  cartBtn.type = 'button';
+  cartBtn.className = 'cart-floating-btn cart-trigger-btn';
+  cartBtn.textContent = 'Корзина (0)';
+  document.body.classList.add('has-floating-cart');
+  document.body.appendChild(cartBtn);
+
+  document.body.insertAdjacentHTML(
+    'beforeend',
+    `
+    <div class="cart-modal" id="cartModal" aria-hidden="true">
+      <div class="cart-modal-overlay" data-cart-close="true"></div>
+      <div class="cart-modal-card" role="dialog" aria-modal="true" aria-labelledby="cartModalTitle">
+        <button type="button" class="cart-modal-close" data-cart-close="true">×</button>
+        <h3 id="cartModalTitle">Корзина</h3>
+        <div id="cartItemsList" class="cart-items-list"></div>
+        <div class="cart-total-row"><span>Итого:</span><strong id="cartTotalPrice">0 ₽</strong></div>
+        <button type="button" class="auth-submit" id="openCheckoutBtn">Оформить заказ</button>
+      </div>
+    </div>
+
+    <div class="cart-modal" id="checkoutModal" aria-hidden="true">
+      <div class="cart-modal-overlay" data-checkout-close="true"></div>
+      <div class="cart-modal-card" role="dialog" aria-modal="true" aria-labelledby="checkoutModalTitle">
+        <button type="button" class="cart-modal-close" data-checkout-close="true">×</button>
+        <h3 id="checkoutModalTitle">Оформление заказа</h3>
+        <form id="checkoutForm" class="checkout-form" novalidate>
+          <label>Адрес доставки
+            <input type="text" name="address" maxlength="180" required placeholder="Город, улица, дом, квартира" />
+          </label>
+          <label>Комментарий к заказу
+            <textarea name="comment" maxlength="240" placeholder="Например: позвонить за 30 минут"></textarea>
+          </label>
+          <label>Списать бонусы
+            <input type="number" name="bonusSpend" min="0" step="1" value="0" />
+          </label>
+          <p class="checkout-meta" id="checkoutMetaText"></p>
+          <button type="submit" class="auth-submit">Подтвердить заказ</button>
+        </form>
+      </div>
+    </div>
+  `
+  );
+
+  const cartModal = document.getElementById('cartModal');
+  const checkoutModal = document.getElementById('checkoutModal');
+  const cartItemsList = document.getElementById('cartItemsList');
+  const cartTotalPrice = document.getElementById('cartTotalPrice');
+  const openCheckoutBtn = document.getElementById('openCheckoutBtn');
+  const checkoutForm = document.getElementById('checkoutForm');
+  const checkoutMetaText = document.getElementById('checkoutMetaText');
+
+  function updateCartBadge() {
+    const count = readCart().reduce((sum, item) => sum + (item.qty || 0), 0);
+    cartBtn.textContent = `Корзина (${count})`;
+  }
+
+  function renderCart() {
+    const items = readCart();
+    if (!cartItemsList || !cartTotalPrice) return 0;
+    if (!items.length) {
+      cartItemsList.innerHTML = '<p class="cart-empty">Корзина пока пуста.</p>';
+      cartTotalPrice.textContent = '0 ₽';
+      return 0;
+    }
+    let total = 0;
+    cartItemsList.innerHTML = items
+      .map((item) => {
+        const line = (item.price || 0) * (item.qty || 0);
+        total += line;
+        return `
+          <article class="cart-item">
+            <div>
+              <strong>${item.title}</strong>
+              <p>${item.qty} × ${item.price} ₽</p>
+            </div>
+            <div class="cart-item-actions">
+              <button type="button" data-cart-minus="${item.id}">−</button>
+              <button type="button" data-cart-plus="${item.id}">+</button>
+              <button type="button" data-cart-remove="${item.id}">Удалить</button>
+            </div>
+          </article>
+        `;
+      })
+      .join('');
+    cartTotalPrice.textContent = `${total} ₽`;
+    return total;
+  }
+
+  function openCartModal() {
+    const user = readCurrentUser();
+    if (!user || user.role === 'manager') {
+      const loginBtn = document.querySelector('[data-auth-login]');
+      if (loginBtn instanceof HTMLElement) loginBtn.click();
+      return;
+    }
+    renderCart();
+    cartModal?.classList.add('open');
+    cartModal?.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeCartModal() {
+    cartModal?.classList.remove('open');
+    cartModal?.setAttribute('aria-hidden', 'true');
+    if (!checkoutModal?.classList.contains('open')) document.body.style.overflow = '';
+  }
+
+  function openCheckout() {
+    const user = readCurrentUser();
+    if (!user || user.role === 'manager') return;
+    const items = readCart();
+    if (!items.length) return;
+    const subtotal = items.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0);
+    const bonuses = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
+    if (checkoutMetaText) checkoutMetaText.textContent = `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
+    checkoutModal?.classList.add('open');
+    checkoutModal?.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeCheckout() {
+    checkoutModal?.classList.remove('open');
+    checkoutModal?.setAttribute('aria-hidden', 'true');
+    if (!cartModal?.classList.contains('open')) document.body.style.overflow = '';
+  }
+
+  cartBtn.addEventListener('click', openCartModal);
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    if (target.closest('[data-cart-close="true"]')) {
+      closeCartModal();
+      return;
+    }
+    if (target.closest('[data-checkout-close="true"]')) {
+      closeCheckout();
+      return;
+    }
+    if (target.closest('#openCheckoutBtn')) {
+      openCheckout();
+      return;
+    }
+
+    const addBtn = target.closest('.catalog-add-btn, .cart-btn');
+    if (addBtn) {
+      const user = readCurrentUser();
+      if (!user || user.role === 'manager') {
+        const loginBtn = document.querySelector('[data-auth-login]');
+        if (loginBtn instanceof HTMLElement) loginBtn.click();
+        return;
+      }
+      const card = addBtn.closest('.full-catalog-card, .catalog-card');
+      if (!card) return;
+      const title = card.querySelector('h3')?.textContent?.trim() || 'Товар';
+      const priceText = card.querySelector('.full-card-price, .catalog-price')?.textContent || '';
+      const price = parsePrice(priceText);
+      const id = `${title}_${price}`.toLowerCase().replace(/\s+/g, '_');
+      const items = readCart();
+      const idx = items.findIndex((item) => item.id === id);
+      if (idx >= 0) items[idx].qty += 1;
+      else items.push({ id, title, price, qty: 1 });
+      saveCart(items);
+      updateCartBadge();
+      return;
+    }
+
+    const minus = target.closest('[data-cart-minus]');
+    if (minus) {
+      const id = minus.getAttribute('data-cart-minus');
+      if (!id) return;
+      const items = readCart()
+        .map((item) => (item.id === id ? { ...item, qty: Math.max(0, item.qty - 1) } : item))
+        .filter((item) => item.qty > 0);
+      saveCart(items);
+      renderCart();
+      updateCartBadge();
+      return;
+    }
+
+    const plus = target.closest('[data-cart-plus]');
+    if (plus) {
+      const id = plus.getAttribute('data-cart-plus');
+      if (!id) return;
+      const items = readCart().map((item) => (item.id === id ? { ...item, qty: item.qty + 1 } : item));
+      saveCart(items);
+      renderCart();
+      updateCartBadge();
+      return;
+    }
+
+    const remove = target.closest('[data-cart-remove]');
+    if (remove) {
+      const id = remove.getAttribute('data-cart-remove');
+      if (!id) return;
+      const items = readCart().filter((item) => item.id !== id);
+      saveCart(items);
+      renderCart();
+      updateCartBadge();
+    }
+  });
+
+  if (checkoutForm instanceof HTMLFormElement) {
+    checkoutForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const user = readCurrentUser();
+      if (!user || user.role === 'manager') return;
+      const items = readCart();
+      if (!items.length) return;
+
+      const address = String(checkoutForm.elements.namedItem('address')?.value || '').trim();
+      const comment = String(checkoutForm.elements.namedItem('comment')?.value || '').trim();
+      const bonusSpendRaw = Number(checkoutForm.elements.namedItem('bonusSpend')?.value || 0);
+      if (!address) return;
+
+      const subtotal = items.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0);
+      const currentBonus = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
+      const bonusSpend = Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
+      const total = Math.max(0, subtotal - bonusSpend);
+      const bonusEarned = Math.floor(total * 0.05);
+
+      const orders = readByUser(ORDERS_KEY, String(user.id), []);
+      orders.unshift({
+        id: `ORD-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        status: 'new',
+        items,
+        subtotal,
+        bonusSpend,
+        bonusEarned,
+        total,
+        address,
+        comment,
+      });
+      writeByUser(ORDERS_KEY, String(user.id), orders);
+
+      const addresses = readByUser(ADDRESSES_KEY, String(user.id), []);
+      if (!addresses.includes(address)) {
+        addresses.unshift(address);
+        writeByUser(ADDRESSES_KEY, String(user.id), addresses.slice(0, 10));
+      }
+
+      writeByUser(BONUSES_KEY, String(user.id), currentBonus - bonusSpend + bonusEarned);
+      saveCart([]);
+      updateCartBadge();
+      renderCart();
+      closeCheckout();
+      closeCartModal();
+      checkoutForm.reset();
+      alert(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
+    });
+  }
+
+  updateCartBadge();
 })();
 
 const peopleRange = document.getElementById('peopleRange');
@@ -1145,3 +1477,29 @@ if (aboutSteps) {
   const initial = stepButtons.find((button) => button.classList.contains('is-active')) || stepButtons[0];
   if (initial) setActiveAboutStep(initial.dataset.step);
 }
+
+/* ── Back to top button (all pages) ── */
+(function initBackToTopButton() {
+  if (!document.body) return;
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'back-to-top-btn';
+  button.setAttribute('aria-label', 'Наверх');
+  button.textContent = '↑';
+  document.body.appendChild(button);
+
+  const SHOW_OFFSET = 320;
+
+  function updateVisibility() {
+    const y = window.scrollY || window.pageYOffset || 0;
+    button.classList.toggle('is-visible', y > SHOW_OFFSET);
+  }
+
+  button.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  window.addEventListener('scroll', updateVisibility, { passive: true });
+  updateVisibility();
+})();

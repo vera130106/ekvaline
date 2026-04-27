@@ -41,102 +41,136 @@
       </div>
     </header>
 
-    <main class="community-main">
-      <section class="community-hero">
-        <div class="container community-hero-inner">
-          <div class="community-hero-copy">
-            <p class="community-kicker">БЛОГ ЭКВАЛАЙН</p>
-            <h1>Полезные посты о воде, здоровье и сервисе</h1>
-            <p class="community-lead" id="communityIntro">Загрузка…</p>
-          </div>
-          <div class="community-hero-visual" aria-hidden="true">
-            <div class="community-hero-bubble"></div>
-            <div class="community-hero-bubble community-hero-bubble--2"></div>
-          </div>
+    <main class="community-main blogv2">
+      <section class="container blogv2-stories-wrap" aria-labelledby="stories-title">
+        <div class="blogv2-section-head">
+          <h2 id="stories-title">Истории</h2>
         </div>
+        <div class="blogv2-stories" id="blogStories"></div>
       </section>
 
-      <div class="container community-shell">
-        <div class="community-stream">
-          <section class="community-toolbar-card" aria-label="Поиск и темы блога">
-            <div class="community-search">
-              <input id="feedSearchInput" type="search" placeholder="Поиск по постам и темам..." />
-            </div>
-            <div class="community-topics" id="communityTopics">
-              <button class="community-topic is-active" type="button" data-topic="all">Все</button>
-              <button class="community-topic" type="button" data-topic="zog">ЗОЖ</button>
-              <button class="community-topic" type="button" data-topic="news">Новости</button>
-              <button class="community-topic" type="button" data-topic="service">Сервис</button>
-              <button class="community-topic" type="button" data-topic="analysis">Разборы</button>
-            </div>
+      <section class="container blogv2-layout">
+        <aside class="blogv2-sidebar blogv2-sidebar-left" aria-label="Факты и полезные материалы">
+          <section class="blogv2-card">
+            <h3 id="factBlockTitle">Факт дня</h3>
+            <p id="factOfDayText">Даже легкое обезвоживание снижает концентрацию на 20%.</p>
           </section>
 
-          <section class="community-pinned-section" aria-labelledby="pinned-heading">
-            <div class="section-heading">
-              <h2 id="pinned-heading" class="community-feed-title">Закреплённые посты</h2>
-              <span class="section-heading-line" aria-hidden="true"></span>
-            </div>
-            <div id="communityPinnedFeed" class="community-pinned-feed"></div>
+          <section class="blogv2-card">
+            <h3 id="popularBlockTitle">Популярное</h3>
+            <ul class="blogv2-list" id="popularList"></ul>
           </section>
 
-          <section class="community-feed-section" aria-labelledby="feed-heading">
-            <div class="section-heading">
-              <h2 id="feed-heading" class="community-feed-title">Лента блога</h2>
-              <div class="feed-tabs" id="feedTabs">
-                <button type="button" class="feed-tab is-active" data-tab="all">Все посты</button>
-                <button type="button" class="feed-tab" data-tab="saved">Избранное</button>
-              </div>
-              <span class="section-heading-line" aria-hidden="true"></span>
-            </div>
-            <div id="communityFeed" class="community-feed"></div>
+          <section class="blogv2-card">
+            <h3 id="tipsBlockTitle">Советы дня</h3>
+            <ul class="blogv2-list" id="tipsList">
+              <li>Начинайте утро со стакана воды.</li>
+              <li>Пейте небольшими порциями каждые 1-2 часа.</li>
+              <li>Держите бутылку воды всегда под рукой.</li>
+            </ul>
           </section>
+
+          <section class="blogv2-card">
+            <h3 id="recipesBlockTitle">Рецепты с водой</h3>
+            <ul class="blogv2-list" id="recipesList">
+              <li>Вода + лимон + мята.</li>
+              <li>Вода + огурец + лайм.</li>
+              <li>Вода + ягоды + базилик.</li>
+            </ul>
+          </section>
+        </aside>
+
+        <div class="blogv2-feed-col">
+          <div id="blogFeed" class="blogv2-feed"></div>
         </div>
 
-        <aside class="community-sidebar" aria-label="Опросы и полезная информация">
-          <div class="sidebar-card sidebar-card--hours">
-            <div class="sidebar-card-head">
-              <span class="sidebar-card-icon" aria-hidden="true">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" />
-                  <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-                </svg>
-              </span>
-              <h2>Режим работы</h2>
-            </div>
-            <p class="sidebar-card-text" id="workLine">—</p>
-            <h3 class="sidebar-subtitle">Окна доставки</h3>
-            <ul id="deliverySlots" class="hours-slots hours-slots--pills"></ul>
-          </div>
-
-          <section class="community-polls-section" aria-labelledby="polls-heading">
-            <div class="section-heading section-heading--sidebar">
-              <h2 id="polls-heading" class="community-feed-title">Опросы</h2>
-            </div>
-            <div id="communityPolls" class="community-polls"></div>
+        <aside class="blogv2-sidebar blogv2-sidebar-right" aria-label="Связь и трекер воды">
+          <section class="blogv2-card blogv2-brand-card">
+            <img src="assets/logo.png" alt="ЭкваЛайн" class="blogv2-brand-logo" />
+            <h3>Связаться с ЭкваЛайн</h3>
+            <p>Быстрая связь с менеджером и оформление заказа воды.</p>
+            <a class="blogv2-btn" href="catalog.html">Заказать воду</a>
+            <a class="blogv2-btn is-secondary" href="contacts.html">Связаться</a>
           </section>
 
-          <div class="sidebar-card sidebar-card--popular">
-            <h3 class="sidebar-subtitle">Популярное за неделю</h3>
-            <div id="weeklyPopularList" class="weekly-popular-list"></div>
-          </div>
+          <section class="blogv2-card blogv2-hydration-card">
+            <h3>Трекер воды за день</h3>
+            <p>Вы сегодня выпили: <strong><span id="hydrationValueText">1.2</span> л</strong></p>
+            <p class="blogv2-hydration-limit" id="hydrationLimitText">Норма: до 2.0 л/день. Лимит индикатора: 5.0 л.</p>
+            <div class="blogv2-water-track" aria-hidden="true">
+              <div class="blogv2-water-fill" id="hydrationFill"></div>
+            </div>
+            <label class="blogv2-input-label" for="hydrationInput">Добавить выпитую воду (л)</label>
+            <div class="blogv2-water-controls">
+              <input id="hydrationInput" type="number" min="0.1" step="0.1" placeholder="0.3" />
+              <button type="button" class="blogv2-btn small" id="hydrationAddBtn">Добавить</button>
+            </div>
+          </section>
 
-          <div class="sidebar-card sidebar-card--hint">
-            <h3 class="sidebar-subtitle">Полезно знать</h3>
-            <ul class="community-hints-list">
-              <li>Норма воды в день в среднем 30 мл на 1 кг веса.</li>
-              <li>Для офиса удобнее ставить автозаказ на 2-4 бутыли.</li>
-              <li>Идеи для новых постов можно оставлять в комментариях.</li>
-            </ul>
-          </div>
+          <section class="blogv2-card" id="hydrationPollCard" hidden>
+            <h3 id="hydrationPollTitle">Опрос дня</h3>
+            <p id="hydrationPollQuestion"></p>
+            <div class="blogv2-poll-options" id="hydrationPollOptions"></div>
+          </section>
         </aside>
+      </section>
+
+      <div class="blogv2-story-modal" id="storyModal" aria-hidden="true">
+        <div class="blogv2-story-backdrop" data-story-close="true"></div>
+        <div class="blogv2-story-shell" role="dialog" aria-modal="true" aria-labelledby="storyTitle">
+          <div class="blogv2-story-progress" id="storyProgress"></div>
+          <button type="button" class="blogv2-story-tap-zone blogv2-story-tap-zone-prev" id="storyPrevZone" aria-label="Предыдущая история"></button>
+          <button type="button" class="blogv2-story-tap-zone blogv2-story-tap-zone-next" id="storyNextZone" aria-label="Следующая история"></button>
+          <button type="button" class="blogv2-story-close" data-story-close="true" aria-label="Закрыть">×</button>
+          <div class="blogv2-story-content">
+            <p class="blogv2-story-kicker" id="storyKicker">История</p>
+            <h3 id="storyTitle"></h3>
+            <p id="storyBody"></p>
+            <button type="button" class="blogv2-story-cta" id="storyCtaBtn">К посту</button>
+          </div>
         </div>
       </div>
     </main>
 
     <footer class="site-footer">
-      <div class="container footer-bottom-inner" style="padding: 1.5rem 0">
-        <span>© 2026 ЭкваЛайн</span>
-        <a href="index.html">На главную</a>
+      <div class="container footer-top">
+
+        <div class="footer-brand">
+          <img src="assets/logo.png" alt="ЭкваЛайн" class="footer-logo" />
+          <p class="footer-brand-name">ЭкваЛайн</p>
+          <p class="footer-desc">Мы меняем представление о доставке воды в Оренбурге. Технологии чистоты и забота о каждом клиенте.</p>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Компания</h4>
+          <ul class="footer-links">
+            <li><a href="about.html">О нас</a></li>
+            <li><a href="about.html">Производство</a></li>
+            <li><a href="about.html">Сертификаты</a></li>
+            <li><a href="community.html">Блог</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 class="footer-heading">Помощь</h4>
+          <ul class="footer-links">
+            <li><a href="delivery.html">Доставка и оплата</a></li>
+            <li><a href="delivery.html">Частые вопросы</a></li>
+            <li><a href="contacts.html">Контакты</a></li>
+            <li><a href="index.html">Личный кабинет</a></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="footer-bottom">
+        <div class="container footer-bottom-inner">
+          <span>© 2026 ЭкваЛайн. Все права защищены.</span>
+          <div class="footer-legal">
+            <a href="index.html">Политика конфиденциальности</a>
+            <a href="index.html">Публичная оферта</a>
+          </div>
+        </div>
       </div>
     </footer>
 
@@ -144,6 +178,6 @@
     <script src="app-core.js?v=20260425-2"></script>
     <script src="api-client.js?v=20260425-2"></script>
     <script src="script.js?v=20260425-2"></script>
-    <script src="community.js?v=20260425-2"></script>
+    <script src="community.js?v=20260427-5"></script>
   </body>
 </html>
