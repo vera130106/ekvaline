@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Панель оператора</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="operator-page">
+    <main class="operator-shell">
+      <header class="operator-head">
+        <div>
+          <p class="operator-kicker">РАБОЧЕЕ МЕСТО ОПЕРАТОРА</p>
+          <h1>Заказы и карточка клиента</h1>
+        </div>
+        <div class="operator-head-actions">
+          <button type="button" class="operator-btn is-ghost" id="operatorRefreshBtn">Обновить</button>
+          <button type="button" class="operator-btn is-danger" id="operatorLogoutBtn">Выйти</button>
+        </div>
+      </header>
+
+      <section class="operator-toolbar">
+        <input type="search" id="operatorSearchInput" class="operator-input" placeholder="Поиск: клиент, телефон, адрес, № заказа" />
+        <select id="operatorStatusFilter" class="operator-select">
+          <option value="all">Все статусы</option>
+          <option value="new">Новый</option>
+          <option value="pending_operator">Требует оператора</option>
+          <option value="processing">В обработке</option>
+          <option value="confirmed">Подтвержден</option>
+          <option value="courier">Передан курьеру</option>
+          <option value="on_way">В пути</option>
+          <option value="delivered">Доставлен</option>
+          <option value="cancelled">Отменен</option>
+        </select>
+      </section>
+
+      <section class="operator-layout">
+        <article class="operator-card operator-orders">
+          <div class="operator-table-head">
+            <span>Заказы</span>
+            <strong id="operatorOrdersCount">0</strong>
+          </div>
+          <div class="operator-table-wrap">
+            <table class="operator-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Клиент</th>
+                  <th>Адрес</th>
+                  <th>Дата</th>
+                  <th>Слот</th>
+                  <th>Статус</th>
+                  <th>Сумма</th>
+                </tr>
+              </thead>
+              <tbody id="operatorOrdersBody"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <aside class="operator-card operator-details" id="operatorDetailsRoot">
+          <p class="operator-empty">Выберите заказ в списке.</p>
+        </aside>
+      </section>
+    </main>
+
+    <div id="operatorToast" class="operator-toast" hidden>
+      <div class="operator-toast-card">
+        <p id="operatorToastText"></p>
+      </div>
+    </div>
+
+    <script src="api-client.js"></script>
+    <script src="operator.js"></script>
+  </body>
+</html>

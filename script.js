@@ -2,8 +2,12 @@
 (function initAuthAndCabinet() {
   const USERS_KEY = 'ekvaline_users';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
-  const MANAGER_LOGIN = 'manager@ekvaline.local';
-  const MANAGER_PASSWORD = 'AquaManager2026';
+  const STAFF_DEMO_ACCOUNTS = {
+    'manager@ekvaline.local': { password: 'AquaManager2026', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
+    'manager@ekvaline.demo': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
+    'operator@ekvaline.demo': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
+    'admin@ekvaline.demo': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'operator.html' },
+  };
 
   const loginTrigger = document.querySelector('[data-auth-login]');
   const registerTrigger = document.querySelector('[data-auth-register]');
@@ -373,6 +377,10 @@
       window.location.href = 'manager.html';
       return;
     }
+    if (user.role === 'operator' || user.role === 'admin') {
+      window.location.href = 'operator.html';
+      return;
+    }
     window.location.href = 'cabinet.html';
     return;
 
@@ -446,20 +454,21 @@
       return;
     }
 
-    if (byEmail === MANAGER_LOGIN) {
-      if (password !== MANAGER_PASSWORD) {
-        authLoginError.textContent = 'Неверный пароль менеджера.';
+    const staff = STAFF_DEMO_ACCOUNTS[byEmail];
+    if (staff) {
+      if (password !== staff.password) {
+        authLoginError.textContent = 'Неверный пароль сотрудника.';
         return;
       }
       saveCurrentUser({
-        id: 'manager',
-        name: 'Менеджер блога',
-        email: MANAGER_LOGIN,
+        id: staff.role,
+        name: staff.name,
+        email: byEmail,
         phone: '',
-        role: 'manager',
+        role: staff.role,
       });
       closeAuthModal();
-      window.location.href = 'manager.html';
+      window.location.href = staff.redirect;
       return;
     }
 
@@ -493,8 +502,8 @@
       authRegisterError.textContent = 'Введите корректный email.';
       return;
     }
-    if (email === MANAGER_LOGIN) {
-      authRegisterError.textContent = 'Этот логин зарезервирован для менеджера блога.';
+    if (STAFF_DEMO_ACCOUNTS[email]) {
+      authRegisterError.textContent = 'Этот логин зарезервирован для служебного аккаунта.';
       return;
     }
     if (phone.length !== 11 || phone[0] !== '7') {
@@ -738,6 +747,9 @@
             <input type="text" id="checkoutAddressInput" name="address" maxlength="${CHECKOUT_ADDRESS_MAX}" required placeholder="Сначала выберите адрес на карте" readonly />
             <button type="button" class="checkout-map-btn" id="openMapPickerBtn">Выбрать на карте</button>
           </label>
+          <label class="checkout-field">Дата доставки
+            <input type="date" id="checkoutDeliveryDate" name="deliveryDate" required />
+          </label>
           <label class="checkout-field">Интервал доставки
             <select id="checkoutDeliverySlot" name="deliverySlot" required>
               <option value="09:00-14:00">09:00–14:00</option>
@@ -772,6 +784,7 @@
           <label class="checkout-field">Улица
             <div class="address-suggest-wrap">
               <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Тверская" autocomplete="off" />
+              <button type="button" id="clearMapStreetBtn" class="address-input-clear" aria-label="Очистить улицу" title="Очистить">×</button>
               <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
             </div>
           </label>
@@ -788,6 +801,9 @@
             <input type="text" id="mapEntranceInput" maxlength="10" placeholder="Например: 2" />
           </label>
         </div>
+        <p id="mapApartmentRequirementsHint" class="checkout-map-validation-hint" hidden>
+          Если указана квартира, обязательно заполните этаж и подъезд.
+        </p>
         <datalist id="mapCitySuggestions"></datalist>
         <div id="checkoutMapRoot" class="checkout-map-root"></div>
         <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
@@ -795,6 +811,12 @@
           <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
           <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
         </div>
+      </div>
+    </div>
+    <div id="appToast" class="app-toast" hidden>
+      <div class="app-toast-card" role="status" aria-live="polite">
+        <p id="appToastText" class="app-toast-text"></p>
+        <button type="button" id="appToastClose" class="app-toast-close" aria-label="Закрыть уведомление">×</button>
       </div>
     </div>
   `
@@ -809,6 +831,7 @@
   const checkoutForm = document.getElementById('checkoutForm');
   const checkoutAddressInput = document.getElementById('checkoutAddressInput');
   const openMapPickerBtn = document.getElementById('openMapPickerBtn');
+  const checkoutDeliveryDate = document.getElementById('checkoutDeliveryDate');
   const checkoutDeliverySlot = document.getElementById('checkoutDeliverySlot');
   const checkoutMetaText = document.getElementById('checkoutMetaText');
   const checkoutCommentField = document.getElementById('checkoutCommentField');
@@ -823,8 +846,13 @@
   const mapApartmentInput = document.getElementById('mapApartmentInput');
   const mapFloorInput = document.getElementById('mapFloorInput');
   const mapEntranceInput = document.getElementById('mapEntranceInput');
+  const mapApartmentRequirementsHint = document.getElementById('mapApartmentRequirementsHint');
   const mapCitySuggestions = document.getElementById('mapCitySuggestions');
   const mapStreetDropdown = document.getElementById('mapStreetDropdown');
+  const clearMapStreetBtn = document.getElementById('clearMapStreetBtn');
+  const appToast = document.getElementById('appToast');
+  const appToastText = document.getElementById('appToastText');
+  const appToastClose = document.getElementById('appToastClose');
 
   let leafletReadyPromise = null;
   let mapInstance = null;
@@ -834,12 +862,36 @@
   let citySuggestTimer = null;
   let streetSuggestTimer = null;
   let latestGeocodeRequestId = 0;
+  let remoteOrenburgStreetsCache = null;
+  let remoteOrenburgStreetsPromise = null;
+  let appToastTimer = null;
+
+  function showAppToast(message, variant = 'success') {
+    if (!(appToast instanceof HTMLElement) || !(appToastText instanceof HTMLElement)) return;
+    appToastText.textContent = String(message || '').trim();
+    appToast.dataset.variant = variant === 'error' ? 'error' : 'success';
+    appToast.hidden = false;
+    appToast.classList.add('is-visible');
+    if (appToastTimer) window.clearTimeout(appToastTimer);
+    appToastTimer = window.setTimeout(() => {
+      appToast.classList.remove('is-visible');
+      appToast.hidden = true;
+    }, 4200);
+  }
 
   function updateCheckoutCommentCounter() {
     if (!(checkoutCommentField instanceof HTMLTextAreaElement) || !(checkoutCommentCounter instanceof HTMLElement)) {
       return;
     }
     checkoutCommentCounter.textContent = `${checkoutCommentField.value.length}/${CHECKOUT_COMMENT_MAX}`;
+  }
+
+  function currentIsoDate() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   function setCartError(message) {
@@ -983,6 +1035,81 @@
     return `${type} ${title}`;
   }
 
+  function extractStreetFromRow(row) {
+    const address = row?.address || {};
+    const direct = address.road || address.pedestrian || address.footway || '';
+    if (!direct) return '';
+    return toTitleCase(direct);
+  }
+
+  function isOrenburgCityAddress(row) {
+    const address = row?.address || {};
+    const city = normalizeAddressToken(address.city || address.town || address.village || '');
+    const stateDistrict = normalizeAddressToken(address.state_district || '');
+    const state = normalizeAddressToken(address.state || '');
+    if (city === normalizeAddressToken(DEFAULT_CITY)) return true;
+    return stateDistrict.includes('оренбург') || state.includes('оренбург');
+  }
+
+  function isValidStreetName(name) {
+    const value = String(name || '').trim();
+    if (!value) return false;
+    // Отсекаем названия маршрутов/магазинов и прочий не-уличный шум.
+    if (/[«»"']/u.test(value)) return false;
+    if (/\d+\s*км/i.test(value)) return false;
+    if (/[—-]/.test(value) && !/\b(пер|проезд|проспект|бульвар|улица|ул)\b/i.test(value)) return false;
+    return true;
+  }
+
+  async function fetchRemoteOrenburgStreets(force = false) {
+    if (!force && Array.isArray(remoteOrenburgStreetsCache)) return remoteOrenburgStreetsCache;
+    if (!force && remoteOrenburgStreetsPromise) return remoteOrenburgStreetsPromise;
+    remoteOrenburgStreetsPromise = (async () => {
+      try {
+        const query = [
+          '[out:json][timeout:30];',
+          'area["name"="Оренбург"]["boundary"="administrative"]->.searchArea;',
+          '(',
+          '  way["highway"]["name"](area.searchArea);',
+          ');',
+          'out tags;',
+        ].join('\n');
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: query,
+        });
+        if (!response.ok) throw new Error('overpass_failed');
+        const data = await response.json();
+        const rows = Array.isArray(data?.elements) ? data.elements : [];
+        const values = rows
+          .map((row) => String(row?.tags?.name || '').trim())
+          .filter((name) => isValidStreetName(name))
+          .map((name) => toTitleCase(name));
+        const unique = [...new Set(values)];
+        if (unique.length) {
+          remoteOrenburgStreetsCache = unique;
+          return remoteOrenburgStreetsCache;
+        }
+        throw new Error('overpass_empty');
+      } catch {
+        try {
+          const rows = await searchSuggestions(`${DEFAULT_CITY}, улица`, 300);
+          const values = rows
+            .filter((row) => isOrenburgCityAddress(row))
+            .map((row) => extractStreetFromRow(row))
+            .filter((name) => isValidStreetName(name));
+          remoteOrenburgStreetsCache = [...new Set(values)];
+          return remoteOrenburgStreetsCache;
+        } catch {
+          remoteOrenburgStreetsCache = [];
+          return remoteOrenburgStreetsCache;
+        }
+      }
+    })();
+    return remoteOrenburgStreetsPromise;
+  }
+
   function showStreetDropdown(values) {
     if (!(mapStreetDropdown instanceof HTMLElement)) return;
     if (!values.length) {
@@ -991,13 +1118,29 @@
       return;
     }
     mapStreetDropdown.innerHTML = values
-      .slice(0, 8)
+      .slice(0, 120)
       .map(
         (value) =>
           `<button type="button" class="address-suggest-item" data-street-suggest="${escapeHtmlLocal(value)}">${escapeHtmlLocal(value)}</button>`
       )
       .join('');
     mapStreetDropdown.hidden = false;
+  }
+
+  function updateStreetClearButton() {
+    if (!(clearMapStreetBtn instanceof HTMLButtonElement)) return;
+    const hasValue = Boolean(String(mapStreetInput instanceof HTMLInputElement ? mapStreetInput.value : '').trim());
+    clearMapStreetBtn.hidden = !hasValue;
+  }
+
+  function applyStreetSuggestion(value) {
+    if (!(mapStreetInput instanceof HTMLInputElement)) return;
+    mapStreetInput.value = String(value || '');
+    applyTitleCaseInput(mapStreetInput);
+    updateStreetClearButton();
+    showStreetDropdown([]);
+    updatePickedAddressLabel();
+    void syncMapByInputs();
   }
 
   async function updateCitySuggestions() {
@@ -1019,27 +1162,31 @@
     const streetQ = String(mapStreetInput instanceof HTMLInputElement ? mapStreetInput.value : '').trim();
     const cityQRaw = String(mapCityInput instanceof HTMLInputElement ? mapCityInput.value : '').trim();
     const cityQ = cityQRaw || DEFAULT_CITY;
-    if (streetQ.length < 1) {
-      showStreetDropdown([]);
-      return;
-    }
     const normalizedNeedle = normalizeAddressToken(streetQ);
     const localMatches = ORENBURG_STREETS.filter((item) => {
       const nName = normalizeAddressToken(item.name);
       const nType = normalizeAddressToken(item.type);
+      if (!normalizedNeedle) return true;
       return nName.startsWith(normalizedNeedle) || nName.includes(normalizedNeedle) || nType.startsWith(normalizedNeedle);
     })
       .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
       .map((item) => formatStreetLabel(item));
-    if (localMatches.length) {
-      const uniqLocal = [...new Set(localMatches)].slice(0, 10);
-      showStreetDropdown(uniqLocal);
-    }
+    const remoteBase = await fetchRemoteOrenburgStreets();
+    const remoteFiltered = normalizedNeedle
+      ? remoteBase.filter((name) => {
+          const n = normalizeAddressToken(name);
+          return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+        })
+      : remoteBase;
+    const initialCombined = [...new Set([...localMatches, ...remoteFiltered])];
+    if (initialCombined.length) showStreetDropdown(initialCombined);
+    if (!normalizedNeedle) return;
     try {
       const rows = await searchSuggestions(`${cityQ}, ${streetQ}`.trim(), 20);
       const values = rows
-        .map((row) => row.address?.road || row.address?.pedestrian || row.address?.footway || '')
-        .filter(Boolean)
+        .filter((row) => isOrenburgCityAddress(row))
+        .map((row) => extractStreetFromRow(row))
+        .filter((name) => isValidStreetName(name))
         .map((name) => {
           const prepared = toTitleCase(name);
           if (/переулок|пер\.?/i.test(prepared)) return prepared;
@@ -1052,10 +1199,10 @@
           const n = normalizeAddressToken(name);
           return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
         });
-      const unique = [...new Set([...localMatches, ...values])].slice(0, 10);
+      const unique = [...new Set([...localMatches, ...remoteFiltered, ...values])];
       showStreetDropdown(unique);
     } catch {
-      if (!localMatches.length) {
+      if (!initialCombined.length) {
         showStreetDropdown([]);
       }
     }
@@ -1147,12 +1294,16 @@
   function updatePickedAddressLabel() {
     const parts = readAddressParts();
     pickedAddress = formatAddressByTemplate(parts);
+    const apartmentFilled = Boolean(parts.apartment);
+    const apartmentExtrasOk = apartmentFilled ? Boolean(parts.floor && parts.entrance) : true;
     if (checkoutMapAddress instanceof HTMLElement) {
       checkoutMapAddress.textContent = pickedAddress || 'Заполните: город, улица, дом.';
     }
+    if (mapApartmentRequirementsHint instanceof HTMLElement) {
+      const needShowWarning = apartmentFilled && !apartmentExtrasOk;
+      mapApartmentRequirementsHint.hidden = !needShowWarning;
+    }
     if (applyMapAddressBtn instanceof HTMLButtonElement) {
-      const apartmentFilled = Boolean(parts.apartment);
-      const apartmentExtrasOk = apartmentFilled ? Boolean(parts.floor && parts.entrance) : true;
       applyMapAddressBtn.disabled = !parts.city || !parts.street || !parts.house || !apartmentExtrasOk;
     }
   }
@@ -1237,7 +1388,7 @@
       void syncMapByInputs();
     } catch {
       closeMapPicker();
-      alert('Не удалось загрузить карту. Проверьте подключение к интернету.');
+      showAppToast('Не удалось загрузить карту. Проверьте подключение к интернету.', 'error');
     }
   }
 
@@ -1354,6 +1505,11 @@
           ? `В корзине есть товары "под заказ". Укажите свою почту в примечании к заказу: компания пришлет всю необходимую информацию и дату доставки. Текущая сумма оплачиваемых позиций: ${subtotal} ₽.`
           : `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
     }
+    if (checkoutDeliveryDate instanceof HTMLInputElement) {
+      const minDate = currentIsoDate();
+      checkoutDeliveryDate.min = minDate;
+      if (!checkoutDeliveryDate.value) checkoutDeliveryDate.value = minDate;
+    }
     checkoutModal?.classList.add('open');
     checkoutModal?.setAttribute('aria-hidden', 'false');
     updateCheckoutCommentCounter();
@@ -1394,13 +1550,7 @@
     const streetSuggestBtn = target.closest('[data-street-suggest]');
     if (streetSuggestBtn) {
       const value = streetSuggestBtn.getAttribute('data-street-suggest') || '';
-      if (mapStreetInput instanceof HTMLInputElement) {
-        mapStreetInput.value = value;
-        applyTitleCaseInput(mapStreetInput);
-        showStreetDropdown([]);
-        updatePickedAddressLabel();
-        void syncMapByInputs();
-      }
+      applyStreetSuggestion(value);
       return;
     }
 
@@ -1490,6 +1640,7 @@
 
       const address = String(checkoutForm.elements.namedItem('address')?.value || '').trim();
       const comment = String(checkoutForm.elements.namedItem('comment')?.value || '').trim();
+      const deliveryDate = String(checkoutForm.elements.namedItem('deliveryDate')?.value || '').trim();
       const deliverySlot = String(checkoutDeliverySlot instanceof HTMLSelectElement ? checkoutDeliverySlot.value : '').trim();
       const bonusSpendRaw = Number(checkoutForm.elements.namedItem('bonusSpend')?.value || 0);
       const hasFloor = /этаж\s+\S+/i.test(address);
@@ -1500,11 +1651,14 @@
         !address ||
         address.length > CHECKOUT_ADDRESS_MAX ||
         comment.length > CHECKOUT_COMMENT_MAX ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate) ||
         !deliverySlot ||
         !apartmentAddressValid
       ) {
-        alert(
-          `Проверьте поля: выберите адрес на карте, интервал доставки, адрес до ${CHECKOUT_ADDRESS_MAX} символов, комментарий до ${CHECKOUT_COMMENT_MAX} символов. Если указана квартира — обязательно заполните этаж и подъезд.`
+        showAppToast(
+          `Проверьте поля: выберите адрес на карте, дату и интервал доставки, адрес до ${CHECKOUT_ADDRESS_MAX} символов, комментарий до ${CHECKOUT_COMMENT_MAX} символов. Если указана квартира — обязательно заполните этаж и подъезд.`
+          ,
+          'error'
         );
         return;
       }
@@ -1533,6 +1687,7 @@
         bonusEarned,
         total,
         address,
+        deliveryDate,
         deliverySlot,
         comment,
         paymentDeferred: hasPreorderItems,
@@ -1552,11 +1707,16 @@
       closeCheckout();
       closeCartModal();
       checkoutForm.reset();
+      if (checkoutDeliveryDate instanceof HTMLInputElement) {
+        checkoutDeliveryDate.value = currentIsoDate();
+      }
       updateCheckoutCommentCounter();
       if (hasPreorderItems) {
-        alert('Заказ с товарами "под заказ" принят. Укажите свою почту в примечании: компания пришлет всю необходимую информацию и дату доставки.');
+        showAppToast(
+          'Заказ с товарами "под заказ" принят. Укажите свою почту в примечании: компания пришлет всю необходимую информацию и дату доставки.'
+        );
       } else {
-        alert(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
+        showAppToast(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
       }
     });
   }
@@ -1586,6 +1746,7 @@
   });
 
   mapStreetInput?.addEventListener('input', () => {
+    updateStreetClearButton();
     if (streetSuggestTimer) window.clearTimeout(streetSuggestTimer);
     streetSuggestTimer = window.setTimeout(() => {
       void updateStreetSuggestions();
@@ -1593,12 +1754,41 @@
   });
 
   mapStreetInput?.addEventListener('focus', () => {
+    updateStreetClearButton();
     void updateStreetSuggestions();
   });
 
   mapStreetInput?.addEventListener('blur', () => {
     setTimeout(() => showStreetDropdown([]), 120);
   });
+
+  mapStreetDropdown?.addEventListener('mousedown', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const streetSuggestBtn = target.closest('[data-street-suggest]');
+    if (!(streetSuggestBtn instanceof HTMLElement)) return;
+    event.preventDefault();
+    const value = streetSuggestBtn.getAttribute('data-street-suggest') || '';
+    applyStreetSuggestion(value);
+  });
+
+  clearMapStreetBtn?.addEventListener('click', () => {
+    if (!(mapStreetInput instanceof HTMLInputElement)) return;
+    mapStreetInput.value = '';
+    updateStreetClearButton();
+    updatePickedAddressLabel();
+    void updateStreetSuggestions();
+    mapStreetInput.focus();
+  });
+
+  appToastClose?.addEventListener('click', () => {
+    if (!(appToast instanceof HTMLElement)) return;
+    if (appToastTimer) window.clearTimeout(appToastTimer);
+    appToast.classList.remove('is-visible');
+    appToast.hidden = true;
+  });
+
+  updateStreetClearButton();
 
   updateCartBadge();
   saveCart(readCart());

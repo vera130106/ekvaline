@@ -12,6 +12,7 @@
   const addressesList = document.getElementById('cabinetAddressesList');
   const ordersList = document.getElementById('cabinetOrdersList');
   const bonusValue = document.getElementById('cabinetBonusValue');
+  const logoutBtn = document.getElementById('cabinetFullLogoutBtn');
 
   function safeParse(raw, fallback) {
     try {
@@ -28,6 +29,10 @@
 
   function writeCurrentUser(user) {
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  }
+
+  function clearCurrentUser() {
+    localStorage.removeItem(CURRENT_USER_KEY);
   }
 
   function readUsers() {
@@ -85,6 +90,20 @@
     });
   }
 
+  function orderStatusLabel(status) {
+    const map = {
+      new: 'Новый',
+      pending_operator: 'Требует оператора',
+      processing: 'В обработке',
+      confirmed: 'Подтвержден',
+      courier: 'Передан курьеру',
+      on_way: 'В пути',
+      delivered: 'Доставлен',
+      cancelled: 'Отменен',
+    };
+    return map[String(status || '')] || String(status || '—');
+  }
+
   function render(user) {
     if (!user || user.role === 'manager') {
       window.location.href = 'index.html';
@@ -124,7 +143,7 @@
                     <strong>${order.id}</strong>
                     <span>${formatDate(order.createdAt)}</span>
                   </div>
-                  <p>Статус: <strong>${order.status}</strong></p>
+                  <p>Статус: <span class="cabinet-status-badge is-${String(order.status || '').toLowerCase()}">${orderStatusLabel(order.status)}</span></p>
                   <p>Состав: ${items}</p>
                   <p>Адрес: ${order.address}</p>
                   <p>Итого: <strong>${order.total} ₽</strong> · Списано бонусов: ${order.bonusSpend || 0} · Начислено: ${
@@ -153,6 +172,13 @@
 
   const current = readCurrentUser();
   render(current);
+
+  if (logoutBtn instanceof HTMLButtonElement) {
+    logoutBtn.addEventListener('click', () => {
+      clearCurrentUser();
+      window.location.href = 'index.html';
+    });
+  }
 
   if (profileForm instanceof HTMLFormElement) {
     const phone = profileForm.elements.namedItem('phone');
