@@ -574,6 +574,36 @@
   const ORDERS_KEY = 'ekvaline_orders_by_user';
   const ADDRESSES_KEY = 'ekvaline_addresses_by_user';
   const BONUSES_KEY = 'ekvaline_bonuses_by_user';
+  const WATER_MAX_QTY = 50;
+  const CHECKOUT_ADDRESS_MAX = 220;
+  const CHECKOUT_COMMENT_MAX = 500;
+  const MAP_DEFAULT_CENTER = [51.768199, 55.096955];
+  const MAP_DEFAULT_ZOOM = 12;
+  const DEFAULT_CITY = 'Оренбург';
+  const ORENBURG_VIEWBOX = '54.95,51.95,55.55,51.55';
+  const ORENBURG_STREETS = [
+    { name: 'Салмышская', type: 'улица', popularity: 10 },
+    { name: 'Родимцева', type: 'улица', popularity: 9 },
+    { name: 'Пролетарская', type: 'улица', popularity: 9 },
+    { name: 'Просторная', type: 'улица', popularity: 8 },
+    { name: 'Терешковой', type: 'улица', popularity: 8 },
+    { name: 'Чкалова', type: 'улица', popularity: 8 },
+    { name: 'Советская', type: 'улица', popularity: 8 },
+    { name: 'Туркестанская', type: 'улица', popularity: 7 },
+    { name: 'Брестская', type: 'улица', popularity: 7 },
+    { name: 'Комсомольская', type: 'улица', popularity: 7 },
+    { name: 'Победы', type: 'проспект', popularity: 7 },
+    { name: 'Донгузская', type: 'улица', popularity: 6 },
+    { name: 'Монтажников', type: 'улица', popularity: 6 },
+    { name: 'Новая', type: 'улица', popularity: 6 },
+    { name: 'Гаранькина', type: 'улица', popularity: 6 },
+    { name: 'Ткачева', type: 'улица', popularity: 6 },
+    { name: 'Автомобилистов', type: 'улица', popularity: 6 },
+    { name: 'Поляничко', type: 'улица', popularity: 6 },
+    { name: 'Дзержинского', type: 'проспект', popularity: 6 },
+    { name: 'Больничный', type: 'переулок', popularity: 6 },
+    { name: 'Почтовый', type: 'переулок', popularity: 5 },
+  ];
 
   function safeParse(raw, fallback) {
     try {
@@ -589,7 +619,10 @@
   }
 
   function readCart() {
-    return safeParse(localStorage.getItem(CART_KEY), []);
+    const raw = safeParse(localStorage.getItem(CART_KEY), []);
+    if (!Array.isArray(raw)) return [];
+    const normalized = normalizeCartItems(raw);
+    return normalized;
   }
 
   function saveCart(items) {
@@ -608,12 +641,70 @@
   }
 
   function parsePrice(value) {
-    const m = String(value || '').replace(/\s/g, '').match(/(\d+)/);
-    return m ? Number(m[1]) : 0;
+    const matches = String(value || '')
+      .replace(/\s/g, '')
+      .match(/(\d+)/g);
+    if (!matches || !matches.length) return 0;
+    return Number(matches[matches.length - 1]) || 0;
   }
 
+  function isWaterProduct(title) {
+    return /вода\s*18\.?9л/i.test(String(title || ''));
+  }
+
+  function getWaterUnitPrice(qty) {
+    if (qty >= 5) return 175;
+    if (qty >= 2) return 190;
+    return 220;
+  }
+
+  function hasPreorderMark(card) {
+    if (!(card instanceof HTMLElement)) return false;
+    return Boolean(card.querySelector('.preorder-mark'));
+  }
+
+  function buildCartItemFromCard(card) {
+    if (!(card instanceof HTMLElement)) return null;
+    const title = card.querySelector('h3')?.textContent?.trim() || 'Товар';
+    const priceText = card.querySelector('.full-card-price, .catalog-price')?.textContent || '';
+    const preorder = hasPreorderMark(card) || /уточнять/i.test(priceText);
+    const water = isWaterProduct(title);
+    const id = water ? 'water_18_9' : title.toLowerCase().replace(/\s+/g, '_');
+    const price = preorder ? 0 : parsePrice(priceText);
+    return { id, title, price, qty: 1, water, preorder };
+  }
+
+  function normalizeCartItems(items) {
+    const merged = new Map();
+    items.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const title = String(item.title || 'Товар').trim();
+      const qty = Math.max(0, Number(item.qty) || 0);
+      if (!qty) return;
+      const legacyWater =
+        item.water === true || isWaterProduct(title) || String(item.id || '').toLowerCase().includes('water');
+      const preorder = item.preorder === true;
+      const id = legacyWater
+        ? 'water_18_9'
+        : String(item.id || title.toLowerCase().replace(/\s+/g, '_'));
+      const price = preorder ? 0 : Math.max(0, Number(item.price) || 0);
+      const key = preorder ? `${id}__preorder` : id;
+      const prev = merged.get(key);
+      if (prev) {
+        prev.qty += qty;
+        if (!prev.price && price) prev.price = price;
+      } else {
+        merged.set(key, { id, title, price, qty, water: legacyWater, preorder });
+      }
+    });
+    return Array.from(merged.values()).map((item) =>
+      item.water ? { ...item, qty: Math.min(item.qty, WATER_MAX_QTY) } : item
+    );
+  }
+
+  const isCatalogPage = document.body.classList.contains('catalog-page');
   const contactArea = document.querySelector('.contact-area');
-  if (!contactArea) return;
+  if (!isCatalogPage || !contactArea) return;
   const cartBtn = document.createElement('button');
   cartBtn.type = 'button';
   cartBtn.className = 'cart-floating-btn cart-trigger-btn';
@@ -630,6 +721,7 @@
         <button type="button" class="cart-modal-close" data-cart-close="true">×</button>
         <h3 id="cartModalTitle">Корзина</h3>
         <div id="cartItemsList" class="cart-items-list"></div>
+        <p id="cartErrorText" class="cart-error-text" aria-live="polite"></p>
         <div class="cart-total-row"><span>Итого:</span><strong id="cartTotalPrice">0 ₽</strong></div>
         <button type="button" class="auth-submit" id="openCheckoutBtn">Оформить заказ</button>
       </div>
@@ -637,22 +729,72 @@
 
     <div class="cart-modal" id="checkoutModal" aria-hidden="true">
       <div class="cart-modal-overlay" data-checkout-close="true"></div>
-      <div class="cart-modal-card" role="dialog" aria-modal="true" aria-labelledby="checkoutModalTitle">
+      <div class="cart-modal-card checkout-modal-card" role="dialog" aria-modal="true" aria-labelledby="checkoutModalTitle">
         <button type="button" class="cart-modal-close" data-checkout-close="true">×</button>
         <h3 id="checkoutModalTitle">Оформление заказа</h3>
+        <p class="checkout-subtitle">Проверьте данные перед подтверждением заказа.</p>
         <form id="checkoutForm" class="checkout-form" novalidate>
-          <label>Адрес доставки
-            <input type="text" name="address" maxlength="180" required placeholder="Город, улица, дом, квартира" />
+          <label class="checkout-field">Адрес доставки
+            <input type="text" id="checkoutAddressInput" name="address" maxlength="${CHECKOUT_ADDRESS_MAX}" required placeholder="Сначала выберите адрес на карте" readonly />
+            <button type="button" class="checkout-map-btn" id="openMapPickerBtn">Выбрать на карте</button>
           </label>
-          <label>Комментарий к заказу
-            <textarea name="comment" maxlength="240" placeholder="Например: позвонить за 30 минут"></textarea>
+          <label class="checkout-field">Интервал доставки
+            <select id="checkoutDeliverySlot" name="deliverySlot" required>
+              <option value="09:00-14:00">09:00–14:00</option>
+              <option value="14:00-17:00">14:00–17:00</option>
+              <option value="17:00-21:00">17:00–21:00</option>
+              <option value="09:00-17:00">Для организации: 09:00–17:00</option>
+            </select>
           </label>
-          <label>Списать бонусы
+          <label class="checkout-field">Комментарий к заказу
+            <textarea id="checkoutCommentField" name="comment" maxlength="${CHECKOUT_COMMENT_MAX}" placeholder="Например: позвонить за 30 минут"></textarea>
+            <span class="checkout-field-hint" id="checkoutCommentCounter">0/${CHECKOUT_COMMENT_MAX}</span>
+          </label>
+          <label class="checkout-field">Списать бонусы
             <input type="number" name="bonusSpend" min="0" step="1" value="0" />
           </label>
           <p class="checkout-meta" id="checkoutMetaText"></p>
           <button type="submit" class="auth-submit">Подтвердить заказ</button>
         </form>
+      </div>
+    </div>
+
+    <div class="cart-modal" id="mapPickerModal" aria-hidden="true">
+      <div class="cart-modal-overlay" data-map-close="true"></div>
+      <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
+        <button type="button" class="cart-modal-close" data-map-close="true">×</button>
+        <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
+        <p class="checkout-subtitle">Заполните поля адреса, карта автоматически покажет точку.</p>
+        <div class="checkout-map-form">
+          <label class="checkout-field">Город
+            <input type="text" id="mapCityInput" maxlength="60" placeholder="Например: Москва" list="mapCitySuggestions" autocomplete="off" />
+          </label>
+          <label class="checkout-field">Улица
+            <div class="address-suggest-wrap">
+              <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Тверская" autocomplete="off" />
+              <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
+            </div>
+          </label>
+          <label class="checkout-field">Дом
+            <input type="text" id="mapHouseInput" maxlength="20" placeholder="Например: 12" />
+          </label>
+          <label class="checkout-field">Квартира
+            <input type="text" id="mapApartmentInput" maxlength="10" placeholder="Например: 45" />
+          </label>
+          <label class="checkout-field">Этаж
+            <input type="text" id="mapFloorInput" maxlength="10" placeholder="Например: 6" />
+          </label>
+          <label class="checkout-field">Подъезд
+            <input type="text" id="mapEntranceInput" maxlength="10" placeholder="Например: 2" />
+          </label>
+        </div>
+        <datalist id="mapCitySuggestions"></datalist>
+        <div id="checkoutMapRoot" class="checkout-map-root"></div>
+        <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
+        <div class="checkout-map-actions">
+          <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
+          <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
+        </div>
       </div>
     </div>
   `
@@ -662,9 +804,477 @@
   const checkoutModal = document.getElementById('checkoutModal');
   const cartItemsList = document.getElementById('cartItemsList');
   const cartTotalPrice = document.getElementById('cartTotalPrice');
+  const cartErrorText = document.getElementById('cartErrorText');
   const openCheckoutBtn = document.getElementById('openCheckoutBtn');
   const checkoutForm = document.getElementById('checkoutForm');
+  const checkoutAddressInput = document.getElementById('checkoutAddressInput');
+  const openMapPickerBtn = document.getElementById('openMapPickerBtn');
+  const checkoutDeliverySlot = document.getElementById('checkoutDeliverySlot');
   const checkoutMetaText = document.getElementById('checkoutMetaText');
+  const checkoutCommentField = document.getElementById('checkoutCommentField');
+  const checkoutCommentCounter = document.getElementById('checkoutCommentCounter');
+  const mapPickerModal = document.getElementById('mapPickerModal');
+  const checkoutMapRoot = document.getElementById('checkoutMapRoot');
+  const checkoutMapAddress = document.getElementById('checkoutMapAddress');
+  const applyMapAddressBtn = document.getElementById('applyMapAddressBtn');
+  const mapCityInput = document.getElementById('mapCityInput');
+  const mapStreetInput = document.getElementById('mapStreetInput');
+  const mapHouseInput = document.getElementById('mapHouseInput');
+  const mapApartmentInput = document.getElementById('mapApartmentInput');
+  const mapFloorInput = document.getElementById('mapFloorInput');
+  const mapEntranceInput = document.getElementById('mapEntranceInput');
+  const mapCitySuggestions = document.getElementById('mapCitySuggestions');
+  const mapStreetDropdown = document.getElementById('mapStreetDropdown');
+
+  let leafletReadyPromise = null;
+  let mapInstance = null;
+  let mapMarker = null;
+  let pickedAddress = '';
+  let mapSearchTimer = null;
+  let citySuggestTimer = null;
+  let streetSuggestTimer = null;
+  let latestGeocodeRequestId = 0;
+
+  function updateCheckoutCommentCounter() {
+    if (!(checkoutCommentField instanceof HTMLTextAreaElement) || !(checkoutCommentCounter instanceof HTMLElement)) {
+      return;
+    }
+    checkoutCommentCounter.textContent = `${checkoutCommentField.value.length}/${CHECKOUT_COMMENT_MAX}`;
+  }
+
+  function setCartError(message) {
+    if (!(cartErrorText instanceof HTMLElement)) return;
+    cartErrorText.textContent = message || '';
+    cartErrorText.style.display = message ? 'block' : 'none';
+  }
+
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    if (leafletReadyPromise) return leafletReadyPromise;
+    leafletReadyPromise = new Promise((resolve, reject) => {
+      const cssExists = document.querySelector('link[data-leaflet-css="true"]');
+      if (!cssExists) {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        css.setAttribute('data-leaflet-css', 'true');
+        document.head.appendChild(css);
+      }
+
+      const existingScript = document.querySelector('script[data-leaflet-js="true"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve(window.L));
+        existingScript.addEventListener('error', () => reject(new Error('leaflet_load_error')));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.async = true;
+      script.setAttribute('data-leaflet-js', 'true');
+      script.onload = () => resolve(window.L);
+      script.onerror = () => reject(new Error('leaflet_load_error'));
+      document.head.appendChild(script);
+    });
+    return leafletReadyPromise;
+  }
+
+  function readAddressParts() {
+    return {
+      city: String(mapCityInput instanceof HTMLInputElement ? mapCityInput.value : '').trim(),
+      street: String(mapStreetInput instanceof HTMLInputElement ? mapStreetInput.value : '').trim(),
+      house: String(mapHouseInput instanceof HTMLInputElement ? mapHouseInput.value : '').trim(),
+      apartment: String(mapApartmentInput instanceof HTMLInputElement ? mapApartmentInput.value : '').trim(),
+      floor: String(mapFloorInput instanceof HTMLInputElement ? mapFloorInput.value : '').trim(),
+      entrance: String(mapEntranceInput instanceof HTMLInputElement ? mapEntranceInput.value : '').trim(),
+    };
+  }
+
+  function toTitleCase(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/(^|[\s-])([a-zа-яё])/gi, (m, sep, letter) => `${sep}${letter.toUpperCase()}`);
+  }
+
+  function applyTitleCaseInput(input) {
+    if (!(input instanceof HTMLInputElement)) return;
+    const prev = input.value;
+    const next = toTitleCase(prev);
+    if (prev === next) return;
+    const pos = input.selectionStart ?? next.length;
+    input.value = next;
+    input.setSelectionRange(pos, pos);
+  }
+
+  function formatAddressByTemplate(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const chunks = [];
+    if (parts.city) chunks.push(`г. ${parts.city}`);
+    if (normalizedStreet) chunks.push(`ул. ${normalizedStreet}`);
+    if (parts.house) chunks.push(`д. ${parts.house}`);
+    if (parts.entrance) chunks.push(`подъезд ${parts.entrance}`);
+    if (parts.floor) chunks.push(`этаж ${parts.floor}`);
+    if (parts.apartment) chunks.push(`кв. ${parts.apartment}`);
+    return chunks.join(', ');
+  }
+
+  function geocodeAddress(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      limit: '6',
+      'accept-language': 'ru',
+      addressdetails: '1',
+      countrycodes: 'ru',
+      city: parts.city,
+      street: `${parts.house} ${normalizedStreet}`.trim(),
+    });
+    if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
+      params.set('bounded', '1');
+      params.set('viewbox', ORENBURG_VIEWBOX);
+    }
+    const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
+    return fetch(url, { headers: { Accept: 'application/json' } })
+      .then((response) => {
+        if (!response.ok) throw new Error('geocode_failed');
+        return response.json();
+      })
+      .then((rows) => (Array.isArray(rows) ? rows : []));
+  }
+
+  function searchSuggestions(query, limit = 5) {
+    const q = encodeURIComponent(query);
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&accept-language=ru&q=${q}`;
+    return fetch(url, { headers: { Accept: 'application/json' } })
+      .then((response) => {
+        if (!response.ok) throw new Error('suggest_failed');
+        return response.json();
+      })
+      .then((rows) => (Array.isArray(rows) ? rows : []));
+  }
+
+  function fillDatalist(root, values) {
+    if (!(root instanceof HTMLDataListElement)) return;
+    root.innerHTML = values
+      .filter(Boolean)
+      .slice(0, 6)
+      .map((v) => `<option value="${String(v).replace(/"/g, '&quot;')}"></option>`)
+      .join('');
+  }
+
+  function escapeHtmlLocal(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatStreetLabel(item) {
+    const title = toTitleCase(item.name || '');
+    const type = String(item.type || '').trim().toLowerCase();
+    if (!title) return '';
+    if (!type) return title;
+    return `${type} ${title}`;
+  }
+
+  function showStreetDropdown(values) {
+    if (!(mapStreetDropdown instanceof HTMLElement)) return;
+    if (!values.length) {
+      mapStreetDropdown.hidden = true;
+      mapStreetDropdown.innerHTML = '';
+      return;
+    }
+    mapStreetDropdown.innerHTML = values
+      .slice(0, 8)
+      .map(
+        (value) =>
+          `<button type="button" class="address-suggest-item" data-street-suggest="${escapeHtmlLocal(value)}">${escapeHtmlLocal(value)}</button>`
+      )
+      .join('');
+    mapStreetDropdown.hidden = false;
+  }
+
+  async function updateCitySuggestions() {
+    const q = String(mapCityInput instanceof HTMLInputElement ? mapCityInput.value : '').trim();
+    if (q.length < 2) {
+      fillDatalist(mapCitySuggestions, []);
+      return;
+    }
+    try {
+      const rows = await searchSuggestions(q, 6);
+      const values = rows.map((row) => row.address?.city || row.address?.town || row.address?.village || '').filter(Boolean);
+      fillDatalist(mapCitySuggestions, [...new Set(values)]);
+    } catch {
+      fillDatalist(mapCitySuggestions, []);
+    }
+  }
+
+  async function updateStreetSuggestions() {
+    const streetQ = String(mapStreetInput instanceof HTMLInputElement ? mapStreetInput.value : '').trim();
+    const cityQRaw = String(mapCityInput instanceof HTMLInputElement ? mapCityInput.value : '').trim();
+    const cityQ = cityQRaw || DEFAULT_CITY;
+    if (streetQ.length < 1) {
+      showStreetDropdown([]);
+      return;
+    }
+    const normalizedNeedle = normalizeAddressToken(streetQ);
+    const localMatches = ORENBURG_STREETS.filter((item) => {
+      const nName = normalizeAddressToken(item.name);
+      const nType = normalizeAddressToken(item.type);
+      return nName.startsWith(normalizedNeedle) || nName.includes(normalizedNeedle) || nType.startsWith(normalizedNeedle);
+    })
+      .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+      .map((item) => formatStreetLabel(item));
+    if (localMatches.length) {
+      const uniqLocal = [...new Set(localMatches)].slice(0, 10);
+      showStreetDropdown(uniqLocal);
+    }
+    try {
+      const rows = await searchSuggestions(`${cityQ}, ${streetQ}`.trim(), 20);
+      const values = rows
+        .map((row) => row.address?.road || row.address?.pedestrian || row.address?.footway || '')
+        .filter(Boolean)
+        .map((name) => {
+          const prepared = toTitleCase(name);
+          if (/переулок|пер\.?/i.test(prepared)) return prepared;
+          const matchedLane = ORENBURG_STREETS.find(
+            (item) => item.type === 'переулок' && normalizeAddressToken(item.name) === normalizeAddressToken(prepared)
+          );
+          return matchedLane ? formatStreetLabel(matchedLane) : prepared;
+        })
+        .filter((name) => {
+          const n = normalizeAddressToken(name);
+          return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+        });
+      const unique = [...new Set([...localMatches, ...values])].slice(0, 10);
+      showStreetDropdown(unique);
+    } catch {
+      if (!localMatches.length) {
+        showStreetDropdown([]);
+      }
+    }
+  }
+
+  async function fallbackGeocode(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const q = encodeURIComponent(`${parts.city}, ${normalizedStreet}, ${parts.house}, Россия`);
+    let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&accept-language=ru&addressdetails=1&countrycodes=ru&q=${q}`;
+    if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
+      url += `&bounded=1&viewbox=${encodeURIComponent(ORENBURG_VIEWBOX)}`;
+    }
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  function pickBestGeocodeMatch(parts, rows) {
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const srcCity = normalizeAddressToken(parts.city);
+    const srcStreet = normalizeAddressToken(parts.street);
+    const srcHouse = normalizeAddressToken(parts.house);
+    let best = null;
+    let bestScore = -1;
+    rows.forEach((row) => {
+      const addr = row.address || {};
+      const city = normalizeAddressToken(addr.city || addr.town || addr.village || addr.state || '');
+      const street = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
+      const house = normalizeAddressToken(addr.house_number || '');
+      const display = normalizeAddressToken(row.display_name || '');
+      let score = 0;
+      if (city && city === srcCity) score += 5;
+      if (street && (street === srcStreet || street.includes(srcStreet) || srcStreet.includes(street))) score += 6;
+      if (house && house === srcHouse) score += 10;
+      else if (srcHouse && display.includes(srcHouse)) score += 4;
+      if (display.includes(srcStreet)) score += 2;
+      if (['building', 'house', 'residential'].includes(String(row.type || '').toLowerCase())) score += 2;
+      if (score > bestScore) {
+        best = row;
+        bestScore = score;
+      }
+    });
+    return best;
+  }
+
+  function reverseGeocode(lat, lon) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ru&addressdetails=1`;
+    return fetch(url, { headers: { Accept: 'application/json' } })
+      .then((response) => {
+        if (!response.ok) throw new Error('geocode_failed');
+        return response.json();
+      })
+      .then((data) => data || null);
+  }
+
+  function applyReverseAddress(data) {
+    const addr = (data && data.address) || {};
+    const city = addr.city || addr.town || addr.village || addr.state || '';
+    const street = addr.road || addr.pedestrian || addr.footway || '';
+    const house = addr.house_number || '';
+    if (mapCityInput instanceof HTMLInputElement && city) mapCityInput.value = city;
+    if (mapStreetInput instanceof HTMLInputElement && street) mapStreetInput.value = street;
+    if (mapHouseInput instanceof HTMLInputElement && house) mapHouseInput.value = house;
+  }
+
+  function normalizeAddressToken(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[^a-zа-я0-9]/gi, '');
+  }
+
+  function isGeocodeMatchAccurate(parts, match) {
+    if (!match) return false;
+    const addr = match.address || {};
+    const matchStreet = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
+    const matchHouse = normalizeAddressToken(addr.house_number || '');
+    const srcStreet = normalizeAddressToken(parts.street);
+    const srcHouse = normalizeAddressToken(parts.house);
+    const display = normalizeAddressToken(match.display_name || '');
+    const streetOk = srcStreet && (matchStreet.includes(srcStreet) || srcStreet.includes(matchStreet) || display.includes(srcStreet));
+    const houseOk = srcHouse && (matchHouse === srcHouse || display.includes(srcHouse));
+    return Boolean(streetOk && houseOk);
+  }
+
+  function updatePickedAddressLabel() {
+    const parts = readAddressParts();
+    pickedAddress = formatAddressByTemplate(parts);
+    if (checkoutMapAddress instanceof HTMLElement) {
+      checkoutMapAddress.textContent = pickedAddress || 'Заполните: город, улица, дом.';
+    }
+    if (applyMapAddressBtn instanceof HTMLButtonElement) {
+      const apartmentFilled = Boolean(parts.apartment);
+      const apartmentExtrasOk = apartmentFilled ? Boolean(parts.floor && parts.entrance) : true;
+      applyMapAddressBtn.disabled = !parts.city || !parts.street || !parts.house || !apartmentExtrasOk;
+    }
+  }
+
+  async function syncMapByInputs() {
+    const parts = readAddressParts();
+    updatePickedAddressLabel();
+    if (!parts.city || !parts.street || !parts.house || !mapInstance) return;
+    const requestId = ++latestGeocodeRequestId;
+    try {
+      let candidates = await geocodeAddress(parts);
+      if (!candidates.length) {
+        candidates = await fallbackGeocode(parts);
+      }
+      const match = pickBestGeocodeMatch(parts, candidates);
+      if (!match) return;
+      if (requestId !== latestGeocodeRequestId) return;
+      const lat = Number(match.lat);
+      const lon = Number(match.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if (!window.L) return;
+      if (!mapMarker) mapMarker = window.L.marker([lat, lon]).addTo(mapInstance);
+      else mapMarker.setLatLng([lat, lon]);
+      mapInstance.setView([lat, lon], 16);
+      const accurate = isGeocodeMatchAccurate(parts, match);
+      if (!accurate && checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent =
+          `Внимание: карта нашла похожий адрес. Проверьте улицу и дом. Сейчас: ${pickedAddress || 'адрес не собран'}`;
+      }
+    } catch {
+      /* silent */
+    }
+  }
+
+  async function initMapPicker() {
+    if (!(checkoutMapRoot instanceof HTMLElement)) return;
+    const L = await loadLeaflet();
+    if (!mapInstance) {
+      mapInstance = L.map(checkoutMapRoot).setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap',
+      }).addTo(mapInstance);
+
+      mapInstance.on('click', async (e) => {
+        const { lat, lng } = e.latlng;
+        if (!mapMarker) mapMarker = L.marker([lat, lng]).addTo(mapInstance);
+        else mapMarker.setLatLng([lat, lng]);
+        if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Определяем адрес...';
+
+        try {
+          const data = await reverseGeocode(lat, lng);
+          applyReverseAddress(data);
+          updatePickedAddressLabel();
+        } catch {
+          updatePickedAddressLabel();
+          if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Не удалось определить адрес. Уточните поля вручную.';
+        }
+      });
+    }
+    setTimeout(() => mapInstance?.invalidateSize(), 30);
+  }
+
+  async function openMapPicker() {
+    const currentAddress = String(checkoutAddressInput instanceof HTMLInputElement ? checkoutAddressInput.value : '').trim();
+    if (!currentAddress) {
+      if (mapCityInput instanceof HTMLInputElement) mapCityInput.value = DEFAULT_CITY;
+      if (mapStreetInput instanceof HTMLInputElement) mapStreetInput.value = '';
+      if (mapHouseInput instanceof HTMLInputElement) mapHouseInput.value = '';
+      if (mapApartmentInput instanceof HTMLInputElement) mapApartmentInput.value = '';
+      if (mapFloorInput instanceof HTMLInputElement) mapFloorInput.value = '';
+      if (mapEntranceInput instanceof HTMLInputElement) mapEntranceInput.value = '';
+    } else if (mapCityInput instanceof HTMLInputElement && !mapCityInput.value.trim()) {
+      mapCityInput.value = DEFAULT_CITY;
+    }
+    updatePickedAddressLabel();
+    mapPickerModal?.classList.add('open');
+    mapPickerModal?.setAttribute('aria-hidden', 'false');
+    try {
+      await initMapPicker();
+      mapInstance?.setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
+      void syncMapByInputs();
+    } catch {
+      closeMapPicker();
+      alert('Не удалось загрузить карту. Проверьте подключение к интернету.');
+    }
+  }
+
+  function closeMapPicker() {
+    mapPickerModal?.classList.remove('open');
+    mapPickerModal?.setAttribute('aria-hidden', 'true');
+  }
+
+  function animateAddToCart(card) {
+    if (!(card instanceof HTMLElement) || !(cartBtn instanceof HTMLElement)) return;
+    const source = card.querySelector('.full-card-image, .catalog-card-image') || card;
+    if (!(source instanceof HTMLElement)) return;
+    const from = source.getBoundingClientRect();
+    const to = cartBtn.getBoundingClientRect();
+    const ghost = source.cloneNode(true);
+    if (!(ghost instanceof HTMLElement)) return;
+
+    ghost.classList.add('cart-fly-ghost');
+    ghost.style.left = `${from.left + from.width / 2}px`;
+    ghost.style.top = `${from.top + from.height / 2}px`;
+    ghost.style.width = `${Math.max(36, Math.min(130, from.width * 0.42))}px`;
+    ghost.style.height = 'auto';
+    ghost.style.transform = 'translate(-50%, -50%) scale(1)';
+    document.body.appendChild(ghost);
+
+    const deltaX = to.left + to.width / 2 - (from.left + from.width / 2);
+    const deltaY = to.top + to.height / 2 - (from.top + from.height / 2);
+    requestAnimationFrame(() => {
+      ghost.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px)) scale(0.2)`;
+      ghost.style.opacity = '0';
+    });
+    setTimeout(() => ghost.remove(), 540);
+
+    cartBtn.classList.remove('cart-bump');
+    void cartBtn.offsetWidth;
+    cartBtn.classList.add('cart-bump');
+  }
 
   function updateCartBadge() {
     const count = readCart().reduce((sum, item) => sum + (item.qty || 0), 0);
@@ -677,18 +1287,21 @@
     if (!items.length) {
       cartItemsList.innerHTML = '<p class="cart-empty">Корзина пока пуста.</p>';
       cartTotalPrice.textContent = '0 ₽';
+      setCartError('');
       return 0;
     }
     let total = 0;
     cartItemsList.innerHTML = items
       .map((item) => {
-        const line = (item.price || 0) * (item.qty || 0);
+        const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
+        const line = item.preorder ? 0 : unitPrice * (item.qty || 0);
         total += line;
+        const priceLabel = item.preorder ? 'Под заказ' : `${item.qty} × ${unitPrice} ₽`;
         return `
           <article class="cart-item">
             <div>
               <strong>${item.title}</strong>
-              <p>${item.qty} × ${item.price} ₽</p>
+              <p>${priceLabel}</p>
             </div>
             <div class="cart-item-actions">
               <button type="button" data-cart-minus="${item.id}">−</button>
@@ -711,6 +1324,7 @@
       return;
     }
     renderCart();
+    setCartError('');
     cartModal?.classList.add('open');
     cartModal?.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -727,11 +1341,22 @@
     if (!user || user.role === 'manager') return;
     const items = readCart();
     if (!items.length) return;
-    const subtotal = items.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0);
+    const preorderCount = items.filter((item) => item.preorder).length;
+    const subtotal = items.reduce((sum, item) => {
+      if (item.preorder) return sum;
+      const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
+      return sum + unitPrice * (item.qty || 0);
+    }, 0);
     const bonuses = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
-    if (checkoutMetaText) checkoutMetaText.textContent = `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
+    if (checkoutMetaText) {
+      checkoutMetaText.textContent =
+        preorderCount > 0
+          ? `В корзине есть товары "под заказ". Укажите свою почту в примечании к заказу: компания пришлет всю необходимую информацию и дату доставки. Текущая сумма оплачиваемых позиций: ${subtotal} ₽.`
+          : `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
+    }
     checkoutModal?.classList.add('open');
     checkoutModal?.setAttribute('aria-hidden', 'false');
+    updateCheckoutCommentCounter();
   }
 
   function closeCheckout() {
@@ -747,14 +1372,35 @@
 
     if (target.closest('[data-cart-close="true"]')) {
       closeCartModal();
+      setCartError('');
       return;
     }
     if (target.closest('[data-checkout-close="true"]')) {
       closeCheckout();
       return;
     }
+    if (target.closest('[data-map-close="true"]')) {
+      closeMapPicker();
+      return;
+    }
     if (target.closest('#openCheckoutBtn')) {
       openCheckout();
+      return;
+    }
+    if (target.closest('#openMapPickerBtn')) {
+      openMapPicker();
+      return;
+    }
+    const streetSuggestBtn = target.closest('[data-street-suggest]');
+    if (streetSuggestBtn) {
+      const value = streetSuggestBtn.getAttribute('data-street-suggest') || '';
+      if (mapStreetInput instanceof HTMLInputElement) {
+        mapStreetInput.value = value;
+        applyTitleCaseInput(mapStreetInput);
+        showStreetDropdown([]);
+        updatePickedAddressLabel();
+        void syncMapByInputs();
+      }
       return;
     }
 
@@ -768,16 +1414,23 @@
       }
       const card = addBtn.closest('.full-catalog-card, .catalog-card');
       if (!card) return;
-      const title = card.querySelector('h3')?.textContent?.trim() || 'Товар';
-      const priceText = card.querySelector('.full-card-price, .catalog-price')?.textContent || '';
-      const price = parsePrice(priceText);
-      const id = `${title}_${price}`.toLowerCase().replace(/\s+/g, '_');
+      const nextItem = buildCartItemFromCard(card);
+      if (!nextItem) return;
       const items = readCart();
-      const idx = items.findIndex((item) => item.id === id);
-      if (idx >= 0) items[idx].qty += 1;
-      else items.push({ id, title, price, qty: 1 });
+      const idx = items.findIndex((item) => item.id === nextItem.id);
+      if (idx >= 0) {
+        if (items[idx].water && items[idx].qty >= WATER_MAX_QTY) {
+          setCartError('Больше 50 бутылей, договорная цена.');
+          return;
+        }
+        items[idx].qty += 1;
+      } else {
+        items.push(nextItem);
+      }
+      setCartError('');
       saveCart(items);
       updateCartBadge();
+      animateAddToCart(card);
       return;
     }
 
@@ -788,6 +1441,7 @@
       const items = readCart()
         .map((item) => (item.id === id ? { ...item, qty: Math.max(0, item.qty - 1) } : item))
         .filter((item) => item.qty > 0);
+      setCartError('');
       saveCart(items);
       renderCart();
       updateCartBadge();
@@ -799,6 +1453,13 @@
       const id = plus.getAttribute('data-cart-plus');
       if (!id) return;
       const items = readCart().map((item) => (item.id === id ? { ...item, qty: item.qty + 1 } : item));
+      const current = items.find((item) => item.id === id);
+      if (current?.water && current.qty > WATER_MAX_QTY) {
+        current.qty = WATER_MAX_QTY;
+        setCartError('Больше 50 бутылей, договорная цена.');
+      } else {
+        setCartError('');
+      }
       saveCart(items);
       renderCart();
       updateCartBadge();
@@ -810,6 +1471,7 @@
       const id = remove.getAttribute('data-cart-remove');
       if (!id) return;
       const items = readCart().filter((item) => item.id !== id);
+      setCartError('');
       saveCart(items);
       renderCart();
       updateCartBadge();
@@ -817,6 +1479,8 @@
   });
 
   if (checkoutForm instanceof HTMLFormElement) {
+    updateCheckoutCommentCounter();
+    checkoutCommentField?.addEventListener('input', updateCheckoutCommentCounter);
     checkoutForm.addEventListener('submit', (event) => {
       event.preventDefault();
       const user = readCurrentUser();
@@ -826,12 +1490,35 @@
 
       const address = String(checkoutForm.elements.namedItem('address')?.value || '').trim();
       const comment = String(checkoutForm.elements.namedItem('comment')?.value || '').trim();
+      const deliverySlot = String(checkoutDeliverySlot instanceof HTMLSelectElement ? checkoutDeliverySlot.value : '').trim();
       const bonusSpendRaw = Number(checkoutForm.elements.namedItem('bonusSpend')?.value || 0);
-      if (!address) return;
+      const hasFloor = /этаж\s+\S+/i.test(address);
+      const hasEntrance = /подъезд\s+\S+/i.test(address);
+      const hasApartment = /кв\.\s*\S+/i.test(address);
+      const apartmentAddressValid = hasApartment ? hasFloor && hasEntrance : true;
+      if (
+        !address ||
+        address.length > CHECKOUT_ADDRESS_MAX ||
+        comment.length > CHECKOUT_COMMENT_MAX ||
+        !deliverySlot ||
+        !apartmentAddressValid
+      ) {
+        alert(
+          `Проверьте поля: выберите адрес на карте, интервал доставки, адрес до ${CHECKOUT_ADDRESS_MAX} символов, комментарий до ${CHECKOUT_COMMENT_MAX} символов. Если указана квартира — обязательно заполните этаж и подъезд.`
+        );
+        return;
+      }
 
-      const subtotal = items.reduce((sum, item) => sum + (item.price || 0) * (item.qty || 0), 0);
+      const hasPreorderItems = items.some((item) => item.preorder);
+      const subtotal = items.reduce((sum, item) => {
+        if (item.preorder) return sum;
+        const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
+        return sum + unitPrice * (item.qty || 0);
+      }, 0);
       const currentBonus = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
-      const bonusSpend = Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
+      const bonusSpend = hasPreorderItems
+        ? 0
+        : Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
       const total = Math.max(0, subtotal - bonusSpend);
       const bonusEarned = Math.floor(total * 0.05);
 
@@ -839,14 +1526,16 @@
       orders.unshift({
         id: `ORD-${Date.now()}`,
         createdAt: new Date().toISOString(),
-        status: 'new',
+        status: hasPreorderItems ? 'pending_operator' : 'new',
         items,
         subtotal,
         bonusSpend,
         bonusEarned,
         total,
         address,
+        deliverySlot,
         comment,
+        paymentDeferred: hasPreorderItems,
       });
       writeByUser(ORDERS_KEY, String(user.id), orders);
 
@@ -863,11 +1552,56 @@
       closeCheckout();
       closeCartModal();
       checkoutForm.reset();
-      alert(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
+      updateCheckoutCommentCounter();
+      if (hasPreorderItems) {
+        alert('Заказ с товарами "под заказ" принят. Укажите свою почту в примечании: компания пришлет всю необходимую информацию и дату доставки.');
+      } else {
+        alert(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
+      }
     });
   }
 
+  applyMapAddressBtn?.addEventListener('click', () => {
+    if (!pickedAddress || !(checkoutAddressInput instanceof HTMLInputElement)) return;
+    checkoutAddressInput.value = pickedAddress.slice(0, CHECKOUT_ADDRESS_MAX);
+    closeMapPicker();
+  });
+
+  [mapCityInput, mapStreetInput, mapHouseInput, mapApartmentInput, mapFloorInput, mapEntranceInput].forEach((input) => {
+    input?.addEventListener('input', () => {
+      applyTitleCaseInput(input);
+      updatePickedAddressLabel();
+      if (mapSearchTimer) window.clearTimeout(mapSearchTimer);
+      mapSearchTimer = window.setTimeout(() => {
+        void syncMapByInputs();
+      }, 450);
+    });
+  });
+
+  mapCityInput?.addEventListener('input', () => {
+    if (citySuggestTimer) window.clearTimeout(citySuggestTimer);
+    citySuggestTimer = window.setTimeout(() => {
+      void updateCitySuggestions();
+    }, 220);
+  });
+
+  mapStreetInput?.addEventListener('input', () => {
+    if (streetSuggestTimer) window.clearTimeout(streetSuggestTimer);
+    streetSuggestTimer = window.setTimeout(() => {
+      void updateStreetSuggestions();
+    }, 220);
+  });
+
+  mapStreetInput?.addEventListener('focus', () => {
+    void updateStreetSuggestions();
+  });
+
+  mapStreetInput?.addEventListener('blur', () => {
+    setTimeout(() => showStreetDropdown([]), 120);
+  });
+
   updateCartBadge();
+  saveCart(readCart());
 })();
 
 const peopleRange = document.getElementById('peopleRange');

@@ -1,6 +1,7 @@
 (function () {
   const FEED_KEY = 'ekvaline_blog_v2_posts';
   const WATER_KEY = 'ekvaline_blog_v2_water_liters';
+  const WATER_DATE_KEY = 'ekvaline_blog_v2_water_date';
   const SORT_KEY = 'ekvaline_blog_v2_sort';
   const BLOG_ADMIN_KEY = 'ekvaline_blog_manager_data';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
@@ -188,6 +189,15 @@
 
   function saveWater() {
     localStorage.setItem(WATER_KEY, String(state.water));
+    localStorage.setItem(WATER_DATE_KEY, currentDateKey());
+  }
+
+  function currentDateKey() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   function readAdminData() {
@@ -249,6 +259,14 @@
   function userName() {
     const user = safeJsonParse(localStorage.getItem('ekvaline_current_user'), null);
     return user && user.name ? user.name : 'Гость';
+  }
+
+  function requireAuthorizedAction() {
+    const user = readCurrentUser();
+    if (user && user.id) return true;
+    const loginBtn = document.querySelector('[data-auth-login]');
+    if (loginBtn instanceof HTMLElement) loginBtn.click();
+    return false;
   }
 
   function initials(name) {
@@ -470,6 +488,7 @@
   function renderFeed() {
     const root = document.getElementById('blogFeed');
     if (!root) return;
+    const isAuthorized = Boolean(readCurrentUser()?.id);
     const posts = sortedPosts();
     if (!posts.length) {
       root.innerHTML = '<p class="blogv2-empty">Постов пока нет.</p>';
@@ -538,10 +557,10 @@
                   )
                   .join('')}
                 <form class="blogv2-comment-form" data-comment-form="${post.id}">
-                  <textarea name="text" maxlength="500" placeholder="Написать комментарий..." required></textarea>
+                  <textarea name="text" maxlength="500" placeholder="${isAuthorized ? 'Написать комментарий...' : 'Только для зарегистрированных пользователей'}" ${isAuthorized ? '' : 'disabled'} required></textarea>
                   <div class="blogv2-comment-form-meta">
                     <span class="blogv2-comment-limit" data-comment-limit>0/500</span>
-                    <button type="submit" class="blogv2-btn small" disabled>Отправить</button>
+                    <button type="submit" class="blogv2-btn small" ${isAuthorized ? 'disabled' : 'disabled title="Требуется вход"'}>Отправить</button>
                   </div>
                 </form>
               </div>
@@ -845,6 +864,7 @@
 
       const likeBtn = target.closest('[data-like]');
       if (likeBtn) {
+        if (!requireAuthorizedAction()) return;
         const postId = likeBtn.getAttribute('data-like');
         animateReaction(likeBtn, event);
         updatePost(postId, (post) => ({ ...post, likes: (post.likes || 0) + 1 }));
@@ -853,6 +873,7 @@
 
       const saveBtn = target.closest('[data-save]');
       if (saveBtn) {
+        if (!requireAuthorizedAction()) return;
         const postId = saveBtn.getAttribute('data-save');
         animateReaction(saveBtn, event);
         updatePost(postId, (post) => ({ ...post, saved: !post.saved }));
@@ -861,6 +882,7 @@
 
       const reactBtn = target.closest('[data-react-kind]');
       if (reactBtn) {
+        if (!requireAuthorizedAction()) return;
         const postId = reactBtn.getAttribute('data-react-post');
         const reactionType = reactBtn.getAttribute('data-react-kind');
         if (!postId || !reactionType) return;
@@ -885,6 +907,7 @@
 
       const pollBtn = target.closest('[data-poll-option]');
       if (pollBtn) {
+        if (!requireAuthorizedAction()) return;
         const optionId = pollBtn.getAttribute('data-poll-option');
         const poll = state.admin.hydrationPoll;
         if (!optionId || !poll || !poll.id || !poll.active) return;
@@ -925,6 +948,7 @@
 
       const commentLikeBtn = target.closest('[data-comment-like]');
       if (commentLikeBtn) {
+        if (!requireAuthorizedAction()) return;
         const payload = commentLikeBtn.getAttribute('data-comment-like') || '';
         const [postId, commentId] = payload.split(':');
         animateReaction(commentLikeBtn, event);
@@ -944,6 +968,7 @@
       const postId = form.getAttribute('data-comment-form');
       if (!postId) return;
       event.preventDefault();
+      if (!requireAuthorizedAction()) return;
       const textarea = form.querySelector('textarea[name="text"]');
       if (!(textarea instanceof HTMLTextAreaElement)) return;
       const text = textarea.value.trim();
@@ -1156,8 +1181,14 @@
 
     const sort = localStorage.getItem(SORT_KEY);
     state.sort = sort === 'popular' ? 'popular' : 'new';
+    const savedDate = String(localStorage.getItem(WATER_DATE_KEY) || '');
+    if (savedDate !== currentDateKey()) {
+      state.water = 0;
+      saveWater();
+      return;
+    }
     const waterRaw = Number(localStorage.getItem(WATER_KEY));
-    state.water = Number.isFinite(waterRaw) ? Math.max(0, Math.min(HYDRATION_MAX, waterRaw)) : 1.2;
+    state.water = Number.isFinite(waterRaw) ? Math.max(0, Math.min(HYDRATION_MAX, waterRaw)) : 0;
   }
 
   function initHeroParallax() {
