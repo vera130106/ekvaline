@@ -581,6 +581,7 @@
   const CART_KEY = 'ekvaline_cart_items';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
   const ORDERS_KEY = 'ekvaline_orders_by_user';
+  const ORDER_SEQ_KEY = 'ekvaline_order_seq';
   const ADDRESSES_KEY = 'ekvaline_addresses_by_user';
   const BONUSES_KEY = 'ekvaline_bonuses_by_user';
   const WATER_MAX_QTY = 50;
@@ -649,6 +650,72 @@
     localStorage.setItem(key, JSON.stringify(all));
   }
 
+  function extractOrderNumber(rawId) {
+    if (typeof rawId === 'number' && Number.isFinite(rawId)) return Math.max(0, Math.floor(rawId));
+    const text = String(rawId || '').trim();
+    let match = text.match(/^ЛС-(\d{1,12})$/i);
+    if (match) return Number(match[1]) || 0;
+    match = text.match(/^ORD-(\d{6,})$/i);
+    if (match) return Number(match[1].slice(-6)) || 0;
+    match = text.match(/(\d{3,12})/);
+    if (match) return Number(match[1]) || 0;
+    return 0;
+  }
+
+  function formatOrderId(numberValue) {
+    const n = Math.max(1, Math.floor(Number(numberValue) || 1));
+    return `ЛС-${String(n).padStart(6, '0')}`;
+  }
+
+  function normalizeAllOrderIds() {
+    const allOrders = safeParse(localStorage.getItem(ORDERS_KEY), {});
+    if (!allOrders || typeof allOrders !== 'object') return;
+    let maxNum = Math.max(253000, Number(localStorage.getItem(ORDER_SEQ_KEY)) || 0);
+
+    Object.keys(allOrders).forEach((uid) => {
+      const list = Array.isArray(allOrders[uid]) ? allOrders[uid] : [];
+      list.forEach((order) => {
+        const num = extractOrderNumber(order?.id);
+        if (num > maxNum) maxNum = num;
+      });
+    });
+
+    const used = new Set();
+    let changed = false;
+    Object.keys(allOrders).forEach((uid) => {
+      const list = Array.isArray(allOrders[uid]) ? allOrders[uid] : [];
+      allOrders[uid] = list.map((order) => {
+        const currentId = String(order?.id || '');
+        const currentNum = extractOrderNumber(currentId);
+        const isGoodFormat = /^ЛС-\d{6,}$/i.test(currentId);
+        const canKeep = isGoodFormat && currentNum > 0 && !used.has(currentNum);
+        if (canKeep) {
+          used.add(currentNum);
+          return order;
+        }
+        if (isGoodFormat && currentNum > 0 && !used.has(currentNum)) {
+          used.add(currentNum);
+          return order;
+        }
+        maxNum += 1;
+        while (used.has(maxNum)) maxNum += 1;
+        used.add(maxNum);
+        changed = true;
+        return { ...order, id: formatOrderId(maxNum) };
+      });
+    });
+
+    if (changed) localStorage.setItem(ORDERS_KEY, JSON.stringify(allOrders));
+    localStorage.setItem(ORDER_SEQ_KEY, String(maxNum));
+  }
+
+  function nextOrderId() {
+    let seq = Math.max(253000, Number(localStorage.getItem(ORDER_SEQ_KEY)) || 0);
+    seq += 1;
+    localStorage.setItem(ORDER_SEQ_KEY, String(seq));
+    return formatOrderId(seq);
+  }
+
   function parsePrice(value) {
     const matches = String(value || '')
       .replace(/\s/g, '')
@@ -656,6 +723,8 @@
     if (!matches || !matches.length) return 0;
     return Number(matches[matches.length - 1]) || 0;
   }
+
+  normalizeAllOrderIds();
 
   function isWaterProduct(title) {
     return /вода\s*18\.?9л/i.test(String(title || ''));
@@ -1678,7 +1747,7 @@
 
       const orders = readByUser(ORDERS_KEY, String(user.id), []);
       orders.unshift({
-        id: `ORD-${Date.now()}`,
+        id: nextOrderId(),
         createdAt: new Date().toISOString(),
         status: hasPreorderItems ? 'pending_operator' : 'new',
         items,
