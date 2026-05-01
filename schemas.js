@@ -117,6 +117,37 @@ const adminUserPatchSchema = Joi.object({
   role: Joi.string().valid('client', 'operator', 'manager', 'admin').optional(),
 }).min(1);
 
+const adminUserCreateSchema = Joi.object({
+  first_name: Joi.string().trim().min(2).max(NAME_MAX).required(),
+  last_name: Joi.string().trim().max(NAME_MAX).allow('').optional(),
+  email: Joi.string().trim().lowercase().max(EMAIL_MAX).email({ tlds: { allow: false } }).required(),
+  phone: Joi.string().pattern(/^7\d{10}$/).required(),
+  password: passwordSchema.required(),
+  role: Joi.string().valid('operator', 'manager', 'admin').required(),
+});
+
+const adminProductCreateSchema = Joi.object({
+  category_id: Joi.number().integer().positive().required(),
+  name: Joi.string().trim().min(2).max(180).required(),
+  description: Joi.string().trim().max(400).allow('').optional(),
+  price: Joi.number().min(0).max(1_000_000).required(),
+  volume_liters: Joi.number().min(0).max(1000).allow(null).optional(),
+  stock: Joi.number().integer().min(0).max(1_000_000).required(),
+  sort_order: Joi.number().integer().min(0).max(99999).optional(),
+  hidden: Joi.number().valid(0, 1).optional(),
+});
+
+const adminProductPatchSchema = Joi.object({
+  category_id: Joi.number().integer().positive().optional(),
+  name: Joi.string().trim().min(2).max(180).optional(),
+  description: Joi.string().trim().max(400).allow('').optional(),
+  price: Joi.number().min(0).max(1_000_000).optional(),
+  volume_liters: Joi.number().min(0).max(1000).allow(null).optional(),
+  stock: Joi.number().integer().min(0).max(1_000_000).optional(),
+  sort_order: Joi.number().integer().min(0).max(99999).optional(),
+  hidden: Joi.number().valid(0, 1).optional(),
+}).min(1);
+
 const orderCreateSchema = Joi.object({
   address: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
   delivery_date: Joi.string()
@@ -140,8 +171,20 @@ const orderCreateSchema = Joi.object({
 
 const orderPatchSchema = Joi.object({
   status: Joi.string()
-    .valid('processing', 'confirmed', 'courier', 'on_way', 'delivered', 'cancelled')
+    .valid('new', 'pending_operator', 'processing', 'confirmed', 'courier', 'on_way', 'delivered', 'cancelled')
     .optional(),
+  address: Joi.string().trim().min(5).max(ADDRESS_MAX).optional(),
+  delivery_date: Joi.string()
+    .pattern(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .messages({ 'string.pattern.base': 'Дата доставки: формат ГГГГ-ММ-ДД.' }),
+  delivery_slot: Joi.string().trim().min(3).max(SLOT_MAX).optional(),
+  payment_method: Joi.string().trim().min(2).max(64).optional(),
+  zone: Joi.string().trim().min(2).max(120).optional(),
+  driver: Joi.string().trim().max(120).allow('').optional(),
+  pickup: Joi.number().valid(0, 1).optional(),
+  total_sum: Joi.number().min(0).max(1_000_000_000).optional(),
+  items_json: Joi.string().trim().min(2).max(20000).optional(),
   courier_note: Joi.string().trim().max(NOTE_MAX).allow('').optional(),
 }).min(1);
 
@@ -203,6 +246,9 @@ module.exports = {
   profileSchema,
   feedbackSchema,
   adminUserPatchSchema,
+  adminUserCreateSchema,
+  adminProductCreateSchema,
+  adminProductPatchSchema,
   orderCreateSchema,
   orderPatchSchema,
   orderClientPatchSchema,

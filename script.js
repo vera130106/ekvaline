@@ -6,7 +6,7 @@
     'manager@ekvaline.local': { password: 'AquaManager2026', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
     'manager@ekvaline.demo': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
     'operator@ekvaline.demo': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
-    'admin@ekvaline.demo': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'operator.html' },
+    'admin@ekvaline.demo': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'admin.html' },
   };
 
   const loginTrigger = document.querySelector('[data-auth-login]');
@@ -377,7 +377,11 @@
       window.location.href = 'manager.html';
       return;
     }
-    if (user.role === 'operator' || user.role === 'admin') {
+    if (user.role === 'admin') {
+      window.location.href = 'admin.html';
+      return;
+    }
+    if (user.role === 'operator') {
       window.location.href = 'operator.html';
       return;
     }

@@ -14,11 +14,28 @@
   const TOTAL_SUM = document.getElementById('opxTotalSum');
   const TOTAL_ITEMS = document.getElementById('opxTotalItems');
   const NEW_COUNT = document.getElementById('opxNewCount');
+  const TAB_ORDERS = document.getElementById('opxTabOrders');
+  const TAB_MAP = document.getElementById('opxTabMap');
+  const TAB_REPORTS = document.getElementById('opxTabReports');
   const TOAST = document.getElementById('opxToast');
   const TOAST_TEXT = document.getElementById('opxToastText');
+  const ZONE_MAP_OVERLAY = document.getElementById('opxZoneMapOverlay');
+  const ZONE_MAP_CANVAS = document.getElementById('opxZoneMapCanvas');
+  const ZONE_MAP_CLOSE = document.getElementById('opxCloseZoneMap');
+  const REPORTS_OVERLAY = document.getElementById('opxReportsOverlay');
+  const REPORTS_DATE_FROM = document.getElementById('opxReportsDateFrom');
+  const REPORTS_DATE_TO = document.getElementById('opxReportsDateTo');
+  const REPORTS_BUILD_BTN = document.getElementById('opxReportsBuildBtn');
+  const REPORTS_CLOSE = document.getElementById('opxCloseReports');
+  const REPORTS_BODY = document.getElementById('opxReportsBody');
+  const REPORTS_ORDERS = document.getElementById('opxReportOrdersCount');
+  const REPORTS_ITEMS = document.getElementById('opxReportItemsCount');
+  const REPORTS_SUM = document.getElementById('opxReportTotalSum');
+  const REPORTS_DELIVERED = document.getElementById('opxReportDeliveredCount');
   const ORDER_MODAL = document.getElementById('opxOrderModal');
   const ORDER_TAB_BTNS = Array.from(document.querySelectorAll('[data-opx-ord-tab]'));
   const ORDER_PANELS = Array.from(document.querySelectorAll('[data-opx-ord-panel]'));
+  const ORDER_JOURNAL_LIST = document.getElementById('opxOrderJournalList');
   const ORDER_MODAL_CLOSE = document.getElementById('opxModalClose');
   const ORDER_MODAL_TITLE = document.getElementById('opxModalTitle');
   const MODAL_ORDER_ID = document.getElementById('opxModalOrderId');
@@ -39,6 +56,7 @@
   const MODAL_PICKUP = document.getElementById('opxModalPickup');
   const MODAL_PRODUCT = document.getElementById('opxModalProduct');
   const MODAL_QTY = document.getElementById('opxModalQty');
+  const MODAL_UNIT_PRICE = document.getElementById('opxModalUnitPrice');
   const MODAL_SUM = document.getElementById('opxModalSum');
   const MODAL_DRIVER = document.getElementById('opxModalDriver');
   const MODAL_NOTE = document.getElementById('opxModalNote');
@@ -57,6 +75,9 @@
   const CLIENT_ORDERS_HISTORY = document.getElementById('opxClientOrdersHistory');
   const CLIENT_PRICE_MODE = document.getElementById('opxClientPriceMode');
   const CLIENT_PRICE_VALUE = document.getElementById('opxClientPriceValue');
+  const CLIENT_PRICE_PRODUCT = document.getElementById('opxClientPriceProduct');
+  const CLIENT_PRICE_PRODUCT_VALUE = document.getElementById('opxClientPriceProductValue');
+  const CLIENT_PRICE_ITEMS = document.getElementById('opxClientPriceItems');
   const CLIENT_JOURNAL_LIST = document.getElementById('opxClientJournalList');
   const OPEN_CLIENT_MAP_BTN = document.getElementById('opxOpenClientMapBtn');
   const CLIENT_MAP_MODAL = document.getElementById('opxClientMapModal');
@@ -92,12 +113,15 @@
     streetCache: {},
     clientCardTab: 'client',
     orderModalTab: 'basic',
+    zoneMapOpen: false,
+    reportsOpen: false,
   };
   const CLIENT_PRICE_OVERRIDES_KEY = 'ekvaline_client_price_overrides';
+  const CLIENT_PRODUCT_PRICES_KEY = 'ekvaline_client_product_prices';
   const ORDER_JOURNAL_KEY = 'ekvaline_order_journal';
 
   const couriers = ['Казаченко Сергей', 'Комаров Сергей', 'Лукашин Евгений', 'Макаров Александр', 'Кравцов Илья'];
-  const products = ['Вода питьевая 18.9 л "ЭкваЛайн"', 'Вода 18.9 л "ЭкваЛайн" + помпа'];
+  const products = ['Вода', 'Тара', 'Помпа электрическая', 'Помпа механическая', 'Кулер верхний', 'Кулер нижний', 'Стаканчики'];
   const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона'];
   const streetFallback = [
     'Салмышская', 'Родимцева', 'Пролетарская', 'Просторная', 'Терешковой', 'Чкалова', 'Советская',
@@ -107,13 +131,15 @@
   ];
   let clientMap = null;
   let clientMapMarker = null;
+  let zoneMap = null;
+  let zoneMapLayer = null;
   const statusLabels = {
     new: 'Новый',
-    pending_operator: 'Требует оператора',
+    pending_operator: 'В обработке',
     processing: 'В обработке',
     confirmed: 'Подтвержден',
-    courier: 'Передан курьеру',
-    on_way: 'В пути',
+    courier: 'В работе',
+    on_way: 'В работе',
     delivered: 'Доставлен',
     cancelled: 'Отменен',
   };
@@ -123,9 +149,25 @@
     '17:00-21:00': { from: '17:00', to: '21:00' },
     '09:00-17:00': { from: '09:00', to: '17:00' },
   };
+  const ZONE_COLORS = {
+    'Подхват': '#e53935',
+    'Степной': '#fb8c00',
+    'Центр': '#1e88e5',
+    delivered: '#43a047',
+  };
+  const ZONE_CENTERS = {
+    'Подхват': [51.805, 55.108],
+    'Степной': [51.838, 55.165],
+    'Центр': [51.772, 55.102],
+  };
   const PRODUCT_PRICE_MAP = {
-    'Вода питьевая 18.9 л "ЭкваЛайн"': 190,
-    'Вода 18.9 л "ЭкваЛайн" + помпа': 260,
+    'Вода': 220,
+    'Тара': 150,
+    'Помпа электрическая': 1800,
+    'Помпа механическая': 350,
+    'Кулер верхний': 8900,
+    'Кулер нижний': 12500,
+    'Стаканчики': 120,
   };
   const ORENBURG_VIEWBOX = {
     left: 54.85,
@@ -236,6 +278,72 @@
     return Array.isArray(map[String(orderId || '').trim()]) ? map[String(orderId || '').trim()] : [];
   }
 
+  function journalActionLabel(action) {
+    const map = {
+      order_create: 'Создан заказ',
+      order_patch: 'Изменён заказ',
+      order_client_update: 'Изменён заказ клиентом',
+      order_cancel: 'Заказ отменён',
+      admin_address_create: 'Добавлен адрес доставки',
+      admin_address_patch: 'Изменён адрес доставки',
+      admin_address_delete: 'Удалён адрес доставки',
+      admin_zone_patch: 'Изменена зона доставки',
+      manager_settings: 'Изменены настройки менеджером',
+      admin_user_patch: 'Изменён пользователь админом',
+      login: 'Вход в систему',
+      logout: 'Выход из системы',
+    };
+    return map[String(action || '')] || String(action || 'Изменение');
+  }
+
+  function renderJournalListHtml(entries) {
+    if (!entries.length) return '<p class="opx-cc-empty">Изменений пока нет.</p>';
+    return entries
+      .map((entry) => {
+        const ts = entry.created_at || entry.at;
+        const dt = ruDateTime(ts);
+        const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(ts || '');
+        if (entry.action) {
+          const actor = `[${String(entry.actor_role || 'system')}] ${String(entry.actor_name || 'Система')}`;
+          const details = String(entry.detail || '').trim();
+          const msg = details ? `${journalActionLabel(entry.action)} (${details})` : journalActionLabel(entry.action);
+          return `<div class="opx-cc-item"><strong>${escapeHtml(dtText)}</strong><span>${escapeHtml(actor)}: ${escapeHtml(msg)}</span></div>`;
+        }
+        return `<div class="opx-cc-item"><strong>${escapeHtml(dtText)}</strong><span>${escapeHtml(
+          String(entry.actor || 'Система')
+        )}: ${escapeHtml(String(entry.message || 'Изменение'))}</span></div>`;
+      })
+      .join('');
+  }
+
+  async function fetchServerJournal(orderId) {
+    const api = window.EkvalineAPI;
+    if (!api || !orderId) return [];
+    const response = await api.json(`/api/orders/${encodeURIComponent(orderId)}/journal`);
+    if (!response.ok) return [];
+    return Array.isArray(response.data?.journal) ? response.data.journal : [];
+  }
+
+  async function renderOrderJournal(order) {
+    if (!(ORDER_JOURNAL_LIST instanceof HTMLElement)) return;
+    if (!order?.id) {
+      ORDER_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Заказ не выбран.</p>';
+      return;
+    }
+    try {
+      const [serverEntries, localEntries] = await Promise.all([
+        fetchServerJournal(order.id),
+        Promise.resolve(getOrderJournal(order.id)),
+      ]);
+      const merged = [...serverEntries, ...localEntries].sort(
+        (a, b) => new Date(b.created_at || b.at || 0).getTime() - new Date(a.created_at || a.at || 0).getTime()
+      );
+      ORDER_JOURNAL_LIST.innerHTML = renderJournalListHtml(merged.slice(0, 300));
+    } catch {
+      ORDER_JOURNAL_LIST.innerHTML = renderJournalListHtml(getOrderJournal(order.id));
+    }
+  }
+
   function nextMondayIsoDate() {
     const d = new Date();
     const day = d.getDay();
@@ -276,10 +384,61 @@
     });
   }
 
+  function ensureProductOptions() {
+    if (MODAL_PRODUCT instanceof HTMLSelectElement) {
+      MODAL_PRODUCT.innerHTML = products.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+    }
+    if (CLIENT_PRICE_PRODUCT instanceof HTMLSelectElement) {
+      CLIENT_PRICE_PRODUCT.innerHTML = products.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+    }
+  }
+
+  function readClientProductPrices() {
+    return readStore(CLIENT_PRODUCT_PRICES_KEY, {});
+  }
+
+  function normalizeProductName(rawName) {
+    const name = String(rawName || '').trim().toLowerCase();
+    if (!name) return products[0];
+    if (name.includes('вода')) return 'Вода';
+    if (name.includes('тара')) return 'Тара';
+    if (name.includes('электр') && name.includes('помп')) return 'Помпа электрическая';
+    if (name.includes('механ') && name.includes('помп')) return 'Помпа механическая';
+    if (name.includes('кулер') && (name.includes('верх') || name.includes('напольн'))) return 'Кулер верхний';
+    if (name.includes('кулер') && (name.includes('ниж') || name.includes('aquaos'))) return 'Кулер нижний';
+    if (name.includes('стакан')) return 'Стаканчики';
+    return products.includes(rawName) ? rawName : products[0];
+  }
+
+  function baseUnitPrice(productName, qty) {
+    if (productName === 'Вода') {
+      if (qty <= 1) return 220;
+      if (qty <= 4) return 190;
+      if (qty <= 50) return 175;
+      return 175;
+    }
+    return PRODUCT_PRICE_MAP[productName] || 0;
+  }
+
+  function getClientProductPrice(clientKey, productName) {
+    const store = readClientProductPrices();
+    const byClient = store[clientKey];
+    if (!byClient || typeof byClient !== 'object') return null;
+    const value = Number(byClient[productName]);
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+  }
+
+  function getDefaultPriceForOrder(order, productName) {
+    const key = normalizeClientKey(order);
+    const qty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
+    return getClientProductPrice(key, productName) || baseUnitPrice(productName, qty);
+  }
+
   function currentGoodsTotal() {
-    const title = String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : '');
-    const qty = Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1);
-    const unit = PRODUCT_PRICE_MAP[title] || 190;
+    const title = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
+    const qty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
+    if (MODAL_QTY instanceof HTMLInputElement) MODAL_QTY.value = String(qty);
+    const unit = Math.max(0, Number(MODAL_UNIT_PRICE instanceof HTMLInputElement ? MODAL_UNIT_PRICE.value : 0) || 0);
     return Math.round(unit * qty);
   }
 
@@ -293,11 +452,261 @@
     return statusLabels[key] || '—';
   }
 
+  function normalizeZoneName(value) {
+    const z = String(value || '').toLowerCase().trim();
+    if (!z) return 'Подхват';
+    if (z.includes('степ')) return 'Степной';
+    if (z.includes('центр')) return 'Центр';
+    return 'Подхват';
+  }
+
+  function markerColorForOrder(order) {
+    if (String(order?.status || '').toLowerCase() === 'delivered') return ZONE_COLORS.delivered;
+    return ZONE_COLORS[normalizeZoneName(order?.zone)] || ZONE_COLORS['Подхват'];
+  }
+
+  function markerCoordsForOrder(order, indexInZone) {
+    const zone = normalizeZoneName(order?.zone);
+    const center = ZONE_CENTERS[zone] || ZONE_CENTERS['Подхват'];
+    const ring = Math.floor(indexInZone / 8);
+    const step = (indexInZone % 8) * (Math.PI / 4);
+    const delta = 0.003 + ring * 0.0015;
+    const lat = center[0] + Math.sin(step) * delta;
+    const lng = center[1] + Math.cos(step) * delta;
+    return [lat, lng];
+  }
+
+  function ensureZoneMap() {
+    if (!(ZONE_MAP_CANVAS instanceof HTMLElement) || !window.L) return false;
+    if (zoneMap) return true;
+    zoneMap = window.L.map(ZONE_MAP_CANVAS, { zoomControl: true, attributionControl: true }).setView([51.78, 55.11], 11);
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(zoneMap);
+    zoneMapLayer = window.L.layerGroup().addTo(zoneMap);
+    return true;
+  }
+
+  function renderZoneFallback() {
+    if (!(ZONE_MAP_CANVAS instanceof HTMLElement)) return;
+    const zoneOrder = ['Подхват', 'Степной', 'Центр'];
+    const zoneColors = {
+      'Подхват': '#e53935',
+      'Степной': '#fb8c00',
+      'Центр': '#1e88e5',
+      delivered: '#43a047',
+    };
+    const source = state.filtered.length ? state.filtered : state.orders;
+    const grouped = { 'Подхват': [], 'Степной': [], 'Центр': [] };
+    source.forEach((o) => {
+      const zone = normalizeZoneName(o.zone);
+      if (!grouped[zone]) grouped[zone] = [];
+      grouped[zone].push(o);
+    });
+    ZONE_MAP_CANVAS.innerHTML = `
+      <div class="opx-zone-map-fallback">
+        ${zoneOrder
+          .map((zone) => {
+            const rows = grouped[zone] || [];
+            return `<section class="opx-zone-block">
+              <h4>${zone}</h4>
+              <div class="opx-zone-orders">
+                ${
+                  rows.length
+                    ? rows
+                        .slice(0, 40)
+                        .map((o) => {
+                          const color = String(o.status) === 'delivered' ? zoneColors.delivered : zoneColors[zone];
+                          return `<div class="opx-zone-order" style="background:${color}">${displayOrderId(o.id)} · ${escapeHtml(
+                            String(o.client || 'Клиент')
+                          )}</div>`;
+                        })
+                        .join('')
+                    : '<div class="opx-cc-empty">Нет заказов</div>'
+                }
+              </div>
+            </section>`;
+          })
+          .join('')}
+      </div>
+    `;
+  }
+
+  function renderZoneMapMarkers() {
+    if (!state.zoneMapOpen || !zoneMap || !zoneMapLayer) return;
+    zoneMapLayer.clearLayers();
+    const counters = { 'Подхват': 0, 'Степной': 0, 'Центр': 0 };
+    const source = state.filtered.length ? state.filtered : state.orders;
+    source.forEach((order) => {
+      const zone = normalizeZoneName(order.zone);
+      const idx = counters[zone] || 0;
+      counters[zone] = idx + 1;
+      const coords = markerCoordsForOrder(order, idx);
+      const color = markerColorForOrder(order);
+      const marker = window.L.circleMarker(coords, {
+        radius: 8,
+        color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.9,
+      });
+      const orderId = displayOrderId(order.id);
+      marker.bindPopup(
+        `<strong>${orderId}</strong><br/>${escapeHtml(String(order.client || 'Клиент'))}<br/>${escapeHtml(
+          String(order.address || '')
+        )}<br/>Зона: ${escapeHtml(zone)}<br/>Статус: ${escapeHtml(statusLabel(order.status))}`
+      );
+      marker.addTo(zoneMapLayer);
+    });
+  }
+
+  function openZoneMapOverlay() {
+    if (!(ZONE_MAP_OVERLAY instanceof HTMLElement)) return;
+    state.zoneMapOpen = true;
+    ZONE_MAP_OVERLAY.hidden = false;
+    TAB_MAP?.classList.add('is-active');
+    TAB_ORDERS?.classList.remove('is-active');
+    window.setTimeout(() => {
+      if (ensureZoneMap()) {
+        zoneMap?.invalidateSize();
+        renderZoneMapMarkers();
+      } else {
+        renderZoneFallback();
+      }
+    }, 60);
+  }
+
+  function closeZoneMapOverlay() {
+    if (!(ZONE_MAP_OVERLAY instanceof HTMLElement)) return;
+    state.zoneMapOpen = false;
+    ZONE_MAP_OVERLAY.hidden = true;
+    TAB_MAP?.classList.remove('is-active');
+    TAB_ORDERS?.classList.add('is-active');
+    if (!(window.L) && ZONE_MAP_CANVAS instanceof HTMLElement) {
+      ZONE_MAP_CANVAS.innerHTML = '';
+    }
+  }
+
+  function closeReportsOverlay() {
+    if (!(REPORTS_OVERLAY instanceof HTMLElement)) return;
+    state.reportsOpen = false;
+    REPORTS_OVERLAY.hidden = true;
+    TAB_REPORTS?.classList.remove('is-active');
+    TAB_ORDERS?.classList.add('is-active');
+  }
+
+  function normalizePaymentKind(value) {
+    const v = String(value || '').toLowerCase();
+    if (v.includes('нал')) return 'Наличные';
+    if (v.includes('безнал') || v.includes('card') || v.includes('карт')) return 'Безнал';
+    if (v.includes('бонус')) return 'Бонусы';
+    return 'Прочее';
+  }
+
+  function orderItems(order) {
+    try {
+      const parsed = JSON.parse(order.items_json || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function buildReportsData() {
+    const from = REPORTS_DATE_FROM instanceof HTMLInputElement ? REPORTS_DATE_FROM.value : '';
+    const to = REPORTS_DATE_TO instanceof HTMLInputElement ? REPORTS_DATE_TO.value : '';
+    const filtered = state.orders.filter((o) => {
+      const d = isoDate(o.delivery_date || o.created_at);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+    const agg = new Map();
+    let ordersCount = filtered.length;
+    let itemsCount = 0;
+    let totalSum = 0;
+    let delivered = 0;
+
+    filtered.forEach((o) => {
+      if (String(o.status) === 'delivered') delivered += 1;
+      totalSum += Number(o.total_sum) || 0;
+      const driver = String(o.driver || 'Не назначен').trim() || 'Не назначен';
+      const payment = normalizePaymentKind(o.payment_method);
+      const items = orderItems(o);
+      if (!items.length) items.push({ title: parseProduct(o.items_json, 0), qty: parseQty(o.items_json) || 1 });
+      items.forEach((it) => {
+        const product = normalizeProductName(it.title || 'Товар');
+        const qty = Number(it.qty) || 0;
+        const unit = Number(it.unit_price) || baseUnitPrice(product, Math.max(1, qty));
+        const sum = Math.round(unit * qty);
+        itemsCount += qty;
+        const key = `${driver}|${product}|${payment}`;
+        const row = agg.get(key) || { driver, product, payment, qty: 0, sum: 0, orders: new Set() };
+        row.qty += qty;
+        row.sum += sum;
+        row.orders.add(String(o.id));
+        agg.set(key, row);
+      });
+    });
+
+    return {
+      rows: Array.from(agg.values())
+        .map((r) => ({ ...r, orders: r.orders.size }))
+        .sort((a, b) => a.driver.localeCompare(b.driver, 'ru') || a.product.localeCompare(b.product, 'ru')),
+      totals: { ordersCount, itemsCount, totalSum, delivered },
+    };
+  }
+
+  function renderReports() {
+    if (!(REPORTS_BODY instanceof HTMLElement)) return;
+    const { rows, totals } = buildReportsData();
+    REPORTS_BODY.innerHTML = rows.length
+      ? rows
+          .map(
+            (r) => `<tr>
+        <td>${escapeHtml(r.driver)}</td>
+        <td>${escapeHtml(r.product)}</td>
+        <td>${escapeHtml(r.payment)}</td>
+        <td>${r.qty}</td>
+        <td>${money(r.sum)}</td>
+        <td>${r.orders}</td>
+      </tr>`
+          )
+          .join('')
+      : '<tr><td colspan="6">Нет данных за выбранный период.</td></tr>';
+    if (REPORTS_ORDERS) REPORTS_ORDERS.textContent = String(totals.ordersCount);
+    if (REPORTS_ITEMS) REPORTS_ITEMS.textContent = String(totals.itemsCount);
+    if (REPORTS_SUM) REPORTS_SUM.textContent = `${money(totals.totalSum)} ₽`;
+    if (REPORTS_DELIVERED) REPORTS_DELIVERED.textContent = String(totals.delivered);
+  }
+
+  function openReportsOverlay() {
+    if (!(REPORTS_OVERLAY instanceof HTMLElement)) return;
+    closeZoneMapOverlay();
+    state.reportsOpen = true;
+    REPORTS_OVERLAY.hidden = false;
+    TAB_REPORTS?.classList.add('is-active');
+    TAB_ORDERS?.classList.remove('is-active');
+    if (REPORTS_DATE_FROM instanceof HTMLInputElement && !REPORTS_DATE_FROM.value) {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      REPORTS_DATE_FROM.value = isoDate(d);
+    }
+    if (REPORTS_DATE_TO instanceof HTMLInputElement && !REPORTS_DATE_TO.value) {
+      REPORTS_DATE_TO.value = isoDate(new Date());
+    }
+    renderReports();
+  }
+
   function setModalValue(el, value) {
     const prepared = String(value || '—');
     if (!el) return;
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
       el.value = prepared;
+      if (el instanceof HTMLSelectElement && el.value !== prepared && el.options.length) {
+        el.selectedIndex = 0;
+      }
       return;
     }
     el.textContent = prepared;
@@ -352,11 +761,24 @@
   function parseProduct(itemsJson, fallbackIndex) {
     try {
       const items = JSON.parse(itemsJson || '[]');
-      if (Array.isArray(items) && items.length && items[0].title) return String(items[0].title);
+      if (Array.isArray(items) && items.length && items[0].title) return normalizeProductName(String(items[0].title));
     } catch {
       /* noop */
     }
     return products[fallbackIndex % products.length];
+  }
+
+  function parseUnitPrice(itemsJson) {
+    try {
+      const items = JSON.parse(itemsJson || '[]');
+      if (Array.isArray(items) && items.length) {
+        const unit = Number(items[0].unit_price);
+        if (Number.isFinite(unit) && unit >= 0) return Math.round(unit);
+      }
+    } catch {
+      /* noop */
+    }
+    return null;
   }
 
   function readUsersMap() {
@@ -494,12 +916,10 @@
       return;
     }
     const rows = Array.isArray(r.data?.orders) ? r.data.orders : [];
-    state.orders = augmentDemoOrders(
-      rows.map((o) => ({
-        ...o,
-        client: resolveClientName(o, null),
-      }))
-    );
+    state.orders = rows.map((o) => ({
+      ...o,
+      client: resolveClientName(o, null),
+    }));
   }
 
   function applyFilters() {
@@ -518,12 +938,13 @@
     const orderId = displayOrderId(order.id);
     const product = parseProduct(order.items_json, fallbackIndex);
     const qty = parseQty(order.items_json);
+    const unitPrice = parseUnitPrice(order.items_json);
     const dateParts = ruDateTime(order.created_at);
     const createdAt =
       typeof dateParts === 'object' ? `${dateParts.datePart} ${dateParts.timePart}` : String(dateParts || '—');
     if (ORDER_MODAL_TITLE instanceof HTMLElement) ORDER_MODAL_TITLE.textContent = `Заказ ${orderId}`;
     setModalValue(MODAL_ORDER_ID, orderId);
-    setModalValue(MODAL_STATUS, statusLabel(order.status));
+    setModalValue(MODAL_STATUS, String(order.status || 'new'));
     setModalValue(MODAL_CLIENT, String(order.client || '—'));
     setModalValue(MODAL_PHONE, String(order.phone || 'Телефон не указан'));
     setModalValue(MODAL_ADDRESS, String(order.address || '—'));
@@ -533,8 +954,9 @@
     setModalSlot(String(order.delivery_slot || '09:00-14:00'));
     setModalValue(MODAL_PAYMENT, String(order.payment_method || 'налич.'));
     if (MODAL_PICKUP instanceof HTMLInputElement) MODAL_PICKUP.checked = Boolean(order.pickup);
-    setModalValue(MODAL_PRODUCT, product);
+    setModalValue(MODAL_PRODUCT, normalizeProductName(product));
     setModalValue(MODAL_QTY, String(Math.max(1, qty || 1)));
+    setModalValue(MODAL_UNIT_PRICE, String(unitPrice != null ? unitPrice : getDefaultPriceForOrder(order, product)));
     setModalValue(MODAL_SUM, `${money(order.total_sum)} ₽`);
     setModalValue(MODAL_DRIVER, String(order.driver || ''));
     setModalValue(MODAL_NOTE, String(order.courier_note || ''));
@@ -542,10 +964,11 @@
     setOrderModalTab(state.orderModalTab || 'basic');
   }
 
-  function saveOrderModalChanges() {
+  async function saveOrderModalChanges() {
     const order = getActiveOrder();
     if (!order) return;
     const prevDate = order.delivery_date;
+    const prevStatus = String(order.status || '');
     const prevSlot = order.delivery_slot;
     const prevPayment = order.payment_method;
     const prevZone = order.zone;
@@ -560,24 +983,63 @@
     const pickup = MODAL_PICKUP instanceof HTMLInputElement ? MODAL_PICKUP.checked : false;
     const driver = String(MODAL_DRIVER instanceof HTMLSelectElement ? MODAL_DRIVER.value : '').trim();
     const note = String(MODAL_NOTE instanceof HTMLTextAreaElement ? MODAL_NOTE.value : '').trim();
+    const status = String(MODAL_STATUS instanceof HTMLSelectElement ? MODAL_STATUS.value || order.status : order.status);
     const goodsTitle = String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : '').trim();
-    const goodsQty = Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1);
+    const goodsQty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
+    if (MODAL_QTY instanceof HTMLInputElement) MODAL_QTY.value = String(goodsQty);
     if (!deliveryDate || !slot || !payment || !zone) {
       showToast('Заполните дату, интервал и форму оплаты');
       return;
     }
+    const goodsUnitPrice = Math.max(
+      0,
+      Number(MODAL_UNIT_PRICE instanceof HTMLInputElement ? MODAL_UNIT_PRICE.value : 0) || 0
+    );
+    const itemsJson = goodsTitle
+      ? JSON.stringify([{ title: goodsTitle, qty: goodsQty, unit_price: goodsUnitPrice }])
+      : order.items_json;
+    const nextTotal = currentGoodsTotal();
+    const payload = {
+      status,
+      delivery_date: deliveryDate,
+      delivery_slot: slot,
+      payment_method: payment,
+      zone,
+      driver,
+      pickup: pickup ? 1 : 0,
+      items_json: itemsJson,
+      total_sum: nextTotal,
+      courier_note: note,
+    };
+    const api = window.EkvalineAPI;
+    if (api) {
+      try {
+        const response = await api.json(`/api/orders/${encodeURIComponent(order.id)}`, {
+          method: 'PATCH',
+          body: payload,
+        });
+        if (!response.ok) {
+          showToast(response.data?.error || 'Не удалось сохранить заказ в базе');
+          return;
+        }
+        api.resetCsrf();
+      } catch {
+        showToast('Ошибка сети: не удалось сохранить заказ в базе');
+        return;
+      }
+    }
     order.zone = zone;
+    order.status = status;
     order.delivery_date = deliveryDate;
     order.delivery_slot = slot;
     order.payment_method = payment;
     order.pickup = pickup;
     order.driver = driver;
-    if (goodsTitle) {
-      order.items_json = JSON.stringify([{ title: goodsTitle, qty: goodsQty }]);
-    }
-    order.total_sum = currentGoodsTotal();
+    order.items_json = itemsJson;
+    order.total_sum = nextTotal;
     order.courier_note = note;
     const changes = [];
+    if (prevStatus !== order.status) changes.push(`статус: ${statusLabel(prevStatus)} -> ${statusLabel(order.status)}`);
     if (prevZone !== order.zone) changes.push(`зона: ${prevZone || '—'} -> ${order.zone}`);
     if (prevDate !== order.delivery_date) changes.push(`дата доставки: ${ruDate(prevDate)} -> ${ruDate(order.delivery_date)}`);
     if (prevSlot !== order.delivery_slot) changes.push(`интервал: ${prevSlot || '—'} -> ${order.delivery_slot}`);
@@ -591,6 +1053,7 @@
     render();
     const idx = state.filtered.findIndex((o) => String(o.id).trim() === state.activeOrderId);
     fillOrderModal(order, idx >= 0 ? idx : 0);
+    renderOrderJournal(order);
     showToast('Заказ обновлен');
   }
 
@@ -602,16 +1065,14 @@
     if (index < 0) return;
     state.activeOrderIndex = index;
     if (!getOrderJournal(state.filtered[index].id).length) {
-      const initialMessage =
-        String(state.filtered[index].status) === 'pending_operator'
-          ? 'Клиент прислал заявку, оператор обработал заявку'
-          : 'Оператор создал заказ';
+      const initialMessage = 'Оператор создал заказ';
       appendOrderJournal(
         state.filtered[index].id,
         `${initialMessage} (${ruDate(state.filtered[index].created_at)} ${ruDateTime(state.filtered[index].created_at).timePart})`
       );
     }
     fillOrderModal(state.filtered[index], index);
+    renderOrderJournal(state.filtered[index]);
     ORDER_MODAL.classList.add('is-open');
     ORDER_MODAL.hidden = false;
     ORDER_MODAL.setAttribute('aria-hidden', 'false');
@@ -686,22 +1147,38 @@
       .join('');
   }
 
-  function renderClientJournal(order) {
+  async function renderClientJournal(order) {
     if (!(CLIENT_JOURNAL_LIST instanceof HTMLElement)) return;
-    const entries = getOrderJournal(order?.id);
-    if (!entries.length) {
-      CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Изменений пока нет.</p>';
+    const api = window.EkvalineAPI;
+    if (!api || !order?.id) {
+      const localEntries = getOrderJournal(order?.id);
+      if (!localEntries.length) {
+        CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Изменений пока нет.</p>';
+        return;
+      }
+      CLIENT_JOURNAL_LIST.innerHTML = localEntries
+        .map((entry) => {
+          const dt = ruDateTime(entry.at);
+          const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(entry.at || '');
+          return `<div class="opx-cc-item"><strong>${dtText}</strong><span>${escapeHtml(entry.actor)}: ${escapeHtml(
+            entry.message
+          )}</span></div>`;
+        })
+        .join('');
       return;
     }
-    CLIENT_JOURNAL_LIST.innerHTML = entries
-      .map((entry) => {
-        const dt = ruDateTime(entry.at);
-        const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(entry.at || '');
-        return `<div class="opx-cc-item"><strong>${dtText}</strong><span>${escapeHtml(entry.actor)}: ${escapeHtml(
-          entry.message
-        )}</span></div>`;
-      })
-      .join('');
+    try {
+      const response = await api.json(`/api/orders/${encodeURIComponent(order.id)}/journal`);
+      if (!response.ok) throw new Error(response.data?.error || 'journal_failed');
+      const entries = Array.isArray(response.data?.journal) ? response.data.journal : [];
+      if (!entries.length) {
+        CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Изменений пока нет.</p>';
+        return;
+      }
+      CLIENT_JOURNAL_LIST.innerHTML = renderJournalListHtml(entries);
+    } catch {
+      CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Не удалось загрузить журнал изменений.</p>';
+    }
   }
 
   function fillClientPrice(order) {
@@ -710,6 +1187,14 @@
     const saved = all[key] || { mode: 'none', amount: '' };
     if (CLIENT_PRICE_MODE instanceof HTMLSelectElement) CLIENT_PRICE_MODE.value = String(saved.mode || 'none');
     if (CLIENT_PRICE_VALUE instanceof HTMLInputElement) CLIENT_PRICE_VALUE.value = saved.amount ? String(saved.amount) : '';
+    const currentProduct = String(CLIENT_PRICE_PRODUCT instanceof HTMLSelectElement ? CLIENT_PRICE_PRODUCT.value : products[0]);
+    const itemPrice = getClientProductPrice(key, currentProduct) || PRODUCT_PRICE_MAP[currentProduct] || 0;
+    if (CLIENT_PRICE_PRODUCT_VALUE instanceof HTMLInputElement) CLIENT_PRICE_PRODUCT_VALUE.value = String(itemPrice);
+    if (CLIENT_PRICE_ITEMS instanceof HTMLElement) {
+      const byClient = readClientProductPrices()[key] || {};
+      const rows = products.map((p) => `${p}: ${Number(byClient[p] || PRODUCT_PRICE_MAP[p] || 0)} ₽`);
+      CLIENT_PRICE_ITEMS.innerHTML = rows.map((r) => `<div class="opx-cc-item"><span>${escapeHtml(r)}</span></div>`).join('');
+    }
   }
 
   function closeClientMapModal() {
@@ -1065,6 +1550,22 @@
     }
     writeStore(CLIENT_PRICE_OVERRIDES_KEY, priceStore);
 
+    const productName = String(CLIENT_PRICE_PRODUCT instanceof HTMLSelectElement ? CLIENT_PRICE_PRODUCT.value : '').trim();
+    const productPrice = Math.round(
+      Number(CLIENT_PRICE_PRODUCT_VALUE instanceof HTMLInputElement ? CLIENT_PRICE_PRODUCT_VALUE.value : 0) || 0
+    );
+    if (productName) {
+      const productStore = readClientProductPrices();
+      const byClient = (productStore[clientKey] && typeof productStore[clientKey] === 'object') ? productStore[clientKey] : {};
+      if (productPrice > 0) {
+        byClient[productName] = productPrice;
+      } else {
+        delete byClient[productName];
+      }
+      productStore[clientKey] = byClient;
+      writeStore(CLIENT_PRODUCT_PRICES_KEY, productStore);
+    }
+
     const changes = [];
     if (prevClient !== order.client) changes.push(`имя/организация: ${prevClient || '—'} -> ${order.client}`);
     if (prevPhone !== order.phone) changes.push(`телефон: ${prevPhone || '—'} -> ${order.phone || '—'}`);
@@ -1076,6 +1577,7 @@
     const idx = state.filtered.findIndex((o) => String(o.id).trim() === state.activeOrderId);
     fillOrderModal(order, idx >= 0 ? idx : 0);
     renderClientJournal(order);
+    renderOrderJournal(order);
     renderClientOrdersHistory(order);
     closeClientMapModal();
     closeClientCardModal();
@@ -1100,6 +1602,7 @@
       .map((o, i) => {
         const product = parseProduct(o.items_json, i);
         const qty = parseQty(o.items_json);
+        const zoneName = normalizeZoneName(o.zone || districts[i % districts.length]);
         const dt = ruDateTime(o.created_at);
         const createdDate = typeof dt === 'object' ? dt.datePart : '—';
         const createdTime = typeof dt === 'object' ? dt.timePart : '—';
@@ -1107,7 +1610,7 @@
         const phoneLine = `<span class="opx-phone">${phone || 'Телефон не указан'}</span>`;
         const orderId = displayOrderId(o.id);
         return `
-          <tr data-opx-order-id="${escapeHtml(String(o.id))}">
+          <tr data-opx-order-id="${escapeHtml(String(o.id))}" class="${String(o.status) === 'delivered' ? 'opx-row-delivered' : ''}">
             <td title="${orderId}"><button type="button" class="opx-order-link" data-opx-open-order="${escapeHtml(String(o.id))}">${orderId}</button></td>
             <td>${periodBySlot(o.delivery_slot)}</td>
             <td><span class="opx-dt"><span class="opx-dt-date">${createdDate}</span><span class="opx-dt-time">${createdTime}</span></span></td>
@@ -1118,13 +1621,15 @@
             <td>${qty}</td>
             <td>${money(o.total_sum)}</td>
             <td>${o.payment_method || 'налич.'}</td>
-            <td>${districts[i % districts.length]}</td>
+            <td>${zoneName}</td>
             <td>${couriers[i % couriers.length]}</td>
             <td class="opx-wrap opx-note" title="${String(o.courier_note || '')}">${String(o.courier_note || '')}</td>
           </tr>
         `;
       })
       .join('');
+    renderZoneMapMarkers();
+    if (state.reportsOpen) renderReports();
   }
 
   function setRelativeDay(kind) {
@@ -1139,6 +1644,7 @@
   }
 
   function bind() {
+    ensureProductOptions();
     SEARCH?.addEventListener('input', () => {
       state.query = String(SEARCH.value || '');
       applyFilters();
@@ -1171,6 +1677,19 @@
       render();
       showToast('Список обновлен');
     });
+    TAB_MAP?.addEventListener('click', openZoneMapOverlay);
+    TAB_ORDERS?.addEventListener('click', closeZoneMapOverlay);
+    TAB_ORDERS?.addEventListener('click', closeReportsOverlay);
+    TAB_REPORTS?.addEventListener('click', openReportsOverlay);
+    ZONE_MAP_CLOSE?.addEventListener('click', closeZoneMapOverlay);
+    REPORTS_CLOSE?.addEventListener('click', closeReportsOverlay);
+    REPORTS_BUILD_BTN?.addEventListener('click', renderReports);
+    REPORTS_DATE_FROM?.addEventListener('change', renderReports);
+    REPORTS_DATE_TO?.addEventListener('change', renderReports);
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.zoneMapOpen) closeZoneMapOverlay();
+      if (event.key === 'Escape' && state.reportsOpen) closeReportsOverlay();
+    });
     LOGOUT?.addEventListener('click', () => {
       localStorage.removeItem(CURRENT_USER_KEY);
       window.location.href = 'index.html';
@@ -1198,11 +1717,41 @@
     MODAL_CANCEL_BTN?.addEventListener('click', closeOrderModal);
     ORDER_TAB_BTNS.forEach((btn) => {
       btn.addEventListener('click', () => {
-        setOrderModalTab(String(btn.getAttribute('data-opx-ord-tab') || 'basic'));
+        const tabId = String(btn.getAttribute('data-opx-ord-tab') || 'basic');
+        setOrderModalTab(tabId);
+        if (tabId === 'journal') {
+          const order = getActiveOrder();
+          if (order) renderOrderJournal(order);
+        }
       });
     });
     MODAL_PRODUCT?.addEventListener('change', updateGoodsSumPreview);
     MODAL_QTY?.addEventListener('input', updateGoodsSumPreview);
+    MODAL_UNIT_PRICE?.addEventListener('input', updateGoodsSumPreview);
+    MODAL_PRODUCT?.addEventListener('change', () => {
+      const order = getActiveOrder();
+      const product = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
+      const defaultPrice = order ? getDefaultPriceForOrder(order, product) : baseUnitPrice(product, 1);
+      if (MODAL_UNIT_PRICE instanceof HTMLInputElement) MODAL_UNIT_PRICE.value = String(defaultPrice);
+      updateGoodsSumPreview();
+    });
+    MODAL_QTY?.addEventListener('input', () => {
+      const order = getActiveOrder();
+      const product = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
+      const defaultPrice = order
+        ? getDefaultPriceForOrder(order, product)
+        : baseUnitPrice(product, Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1)));
+      if (MODAL_UNIT_PRICE instanceof HTMLInputElement) MODAL_UNIT_PRICE.value = String(defaultPrice);
+      updateGoodsSumPreview();
+    });
+    CLIENT_PRICE_PRODUCT?.addEventListener('change', () => {
+      const order = getActiveOrder();
+      if (!order) return;
+      const key = normalizeClientKey(order);
+      const product = String(CLIENT_PRICE_PRODUCT instanceof HTMLSelectElement ? CLIENT_PRICE_PRODUCT.value : '');
+      const price = getClientProductPrice(key, product) || PRODUCT_PRICE_MAP[product] || 0;
+      if (CLIENT_PRICE_PRODUCT_VALUE instanceof HTMLInputElement) CLIENT_PRICE_PRODUCT_VALUE.value = String(price);
+    });
     MODAL_SLOT_BTNS.forEach((btn) => {
       btn.addEventListener('click', () => {
         setModalSlot(String(btn.getAttribute('data-opx-slot') || '09:00-14:00'));

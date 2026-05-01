@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ЭкваЛайн — Админ-панель</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="admin-page">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html"><img src="assets/logo.png" alt="ЭкваЛайн" class="brand-logo" /></a>
+        <nav class="menu">
+          <a href="index.html">Главная</a>
+          <a href="catalog.html">Каталог</a>
+          <a href="operator.html">Оператор</a>
+          <a href="manager.html">Менеджер</a>
+          <a href="admin.html" class="active">Админ</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container admin-panel">
+      <section class="admin-card">
+        <h1>Админ-панель</h1>
+        <p>Управление пользователями, товарами и настройками сайта.</p>
+      </section>
+
+      <section class="admin-grid">
+        <article class="admin-card">
+          <h2>Создать сотрудника</h2>
+          <form id="adminCreateUserForm" class="admin-form">
+            <input name="first_name" placeholder="Имя" required />
+            <input name="last_name" placeholder="Фамилия" />
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="phone" placeholder="Телефон 7XXXXXXXXXX" required />
+            <input name="password" type="text" placeholder="Пароль" required />
+            <select name="role" required>
+              <option value="operator">Оператор</option>
+              <option value="manager">Менеджер</option>
+              <option value="admin">Админ</option>
+            </select>
+            <button class="solid-btn" type="submit">Создать</button>
+          </form>
+          <p id="adminUserMsg" class="admin-msg"></p>
+        </article>
+
+        <article class="admin-card">
+          <h2>Пользователи</h2>
+          <div id="adminUsersList" class="admin-list"></div>
+        </article>
+      </section>
+
+      <section class="admin-card">
+        <h2>Товары каталога</h2>
+        <form id="adminCreateProductForm" class="admin-form admin-form-wide">
+          <select name="category_id" id="adminProductCategory" required></select>
+          <input name="name" placeholder="Название товара" required />
+          <input name="price" type="number" min="0" step="1" placeholder="Цена" required />
+          <input name="stock" type="number" min="0" step="1" placeholder="Остаток" required />
+          <input name="sort_order" type="number" min="0" step="1" placeholder="Сортировка" />
+          <select name="hidden">
+            <option value="0">Показывать</option>
+            <option value="1">Скрыть</option>
+          </select>
+          <button class="solid-btn" type="submit">Добавить товар</button>
+        </form>
+        <p id="adminProductMsg" class="admin-msg"></p>
+        <div id="adminProductsList" class="admin-list"></div>
+      </section>
+
+      <section class="admin-card">
+        <h2>Настройки сайта</h2>
+        <form id="adminSettingsForm" class="admin-form">
+          <input name="workLine" placeholder="Режим работы" required />
+          <textarea name="communityIntro" rows="2" placeholder="Текст сообщества"></textarea>
+          <textarea name="deliverySlotsText" rows="3" placeholder="Слоты доставки, каждый с новой строки"></textarea>
+          <button class="solid-btn" type="submit">Сохранить настройки</button>
+        </form>
+        <p id="adminSettingsMsg" class="admin-msg"></p>
+      </section>
+    </main>
+
+    <script src="api-client.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>

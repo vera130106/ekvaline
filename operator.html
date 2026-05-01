@@ -22,12 +22,10 @@
     <main class="opx-shell">
       <header class="opx-topbar">
         <nav class="opx-tabs" aria-label="Разделы">
-          <button type="button" class="opx-tab is-active">Заказы</button>
-          <button type="button" class="opx-tab" disabled>Маршруты</button>
-          <button type="button" class="opx-tab" disabled>Карта</button>
+          <button type="button" class="opx-tab is-active" id="opxTabOrders">Заказы</button>
+          <button type="button" class="opx-tab" id="opxTabMap">Карта</button>
           <button type="button" class="opx-tab" disabled>Расходы</button>
-          <button type="button" class="opx-tab" disabled>Звонки</button>
-          <button type="button" class="opx-tab" disabled>Отчёты</button>
+          <button type="button" class="opx-tab" id="opxTabReports">Отчёты</button>
           <button type="button" class="opx-tab" disabled>Справочники</button>
           <button type="button" class="opx-tab" disabled>Настройки</button>
         </nav>
@@ -54,7 +52,6 @@
         <select id="opxStatusFilter" class="opx-select">
           <option value="all">Все статусы</option>
           <option value="new">Новый</option>
-          <option value="pending_operator">Требует оператора</option>
           <option value="processing">В обработке</option>
           <option value="confirmed">Подтвержден</option>
           <option value="courier">Передан курьеру</option>
@@ -109,13 +106,65 @@
       </footer>
     </main>
 
+    <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
+      <div class="opx-zone-map-toolbar">
+        <div class="opx-zone-map-title">Карта зон и заказов</div>
+        <div class="opx-zone-map-legend">
+          <span><i class="opx-zone-dot is-red"></i>Подхват</span>
+          <span><i class="opx-zone-dot is-orange"></i>Степной</span>
+          <span><i class="opx-zone-dot is-blue"></i>Центр</span>
+          <span><i class="opx-zone-dot is-green"></i>Доставлен</span>
+        </div>
+        <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
+      </div>
+      <div id="opxZoneMapCanvas" class="opx-zone-map-canvas"></div>
+    </div>
+
+    <div id="opxReportsOverlay" class="opx-reports-overlay" hidden>
+      <div class="opx-reports-toolbar">
+        <div class="opx-reports-title">Отчёты оператора</div>
+        <label>с <input type="date" id="opxReportsDateFrom" class="opx-input opx-date-input" /></label>
+        <label>по <input type="date" id="opxReportsDateTo" class="opx-input opx-date-input" /></label>
+        <button type="button" class="opx-modal-btn" id="opxReportsBuildBtn">Сформировать</button>
+        <button type="button" class="opx-modal-btn" id="opxCloseReports">Закрыть отчёты</button>
+      </div>
+      <div class="opx-reports-content">
+        <div class="opx-reports-cards">
+          <article class="opx-reports-card"><small>Заказов</small><strong id="opxReportOrdersCount">0</strong></article>
+          <article class="opx-reports-card"><small>Товаров, шт</small><strong id="opxReportItemsCount">0</strong></article>
+          <article class="opx-reports-card"><small>Сумма, ₽</small><strong id="opxReportTotalSum">0</strong></article>
+          <article class="opx-reports-card"><small>Доставлено</small><strong id="opxReportDeliveredCount">0</strong></article>
+        </div>
+        <div class="opx-reports-table-wrap">
+          <table class="opx-reports-table">
+            <thead>
+              <tr>
+                <th>Водитель</th>
+                <th>Товар</th>
+                <th>Оплата</th>
+                <th>Кол-во</th>
+                <th>Сумма, ₽</th>
+                <th>Заказов</th>
+              </tr>
+            </thead>
+            <tbody id="opxReportsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="opxOrderModal" class="opx-modal" hidden>
       <div class="opx-modal-backdrop" data-opx-modal-close="backdrop"></div>
       <section class="opx-modal-card" role="dialog" aria-modal="true" aria-labelledby="opxModalTitle">
         <header class="opx-modal-topline">
           <h2 id="opxModalTitle" class="opx-modal-title">Заказ</h2>
           <div class="opx-modal-top-right">
-            <span class="opx-modal-status-pill" id="opxModalStatus">Новый</span>
+            <select class="opx-modal-status-pill" id="opxModalStatus" aria-label="Статус заказа">
+              <option value="new">Новый</option>
+              <option value="confirmed">Подтвержден</option>
+              <option value="courier">В работе</option>
+              <option value="delivered">Доставлен</option>
+            </select>
             <button type="button" id="opxModalClose" class="opx-modal-close" aria-label="Закрыть">✕</button>
           </div>
         </header>
@@ -123,8 +172,7 @@
         <nav class="opx-modal-tabs" aria-label="Вкладки заказа">
           <button type="button" class="opx-modal-tab is-active" data-opx-ord-tab="basic">Основное</button>
           <button type="button" class="opx-modal-tab" data-opx-ord-tab="goods">Товары</button>
-          <button type="button" class="opx-modal-tab" disabled>Маршрут</button>
-          <button type="button" class="opx-modal-tab" disabled>Журнал</button>
+          <button type="button" class="opx-modal-tab" data-opx-ord-tab="journal">Журнал</button>
         </nav>
 
         <section class="opx-ord-panel" data-opx-ord-panel="basic">
@@ -217,13 +265,15 @@
               <label class="opx-modal-field">
                 <span class="opx-modal-label">Товар</span>
                 <select id="opxModalProduct" class="opx-modal-input">
-                  <option value='Вода питьевая 18.9 л "ЭкваЛайн"'>Вода питьевая 18.9 л "ЭкваЛайн"</option>
-                  <option value='Вода 18.9 л "ЭкваЛайн" + помпа'>Вода 18.9 л "ЭкваЛайн" + помпа</option>
                 </select>
               </label>
               <label class="opx-modal-field">
                 <span class="opx-modal-label">Количество</span>
-                <input id="opxModalQty" class="opx-modal-input" type="number" min="1" step="1" />
+                <input id="opxModalQty" class="opx-modal-input" type="number" min="1" max="50" step="1" />
+              </label>
+              <label class="opx-modal-field">
+                <span class="opx-modal-label">Цена за шт., ₽</span>
+                <input id="opxModalUnitPrice" class="opx-modal-input" type="number" min="0" step="1" />
               </label>
               <label class="opx-modal-field">
                 <span class="opx-modal-label">Сумма, ₽</span>
@@ -233,9 +283,15 @@
           </section>
         </section>
 
+        <section class="opx-ord-panel" data-opx-ord-panel="journal" hidden>
+          <section class="opx-modal-section">
+            <h3 class="opx-modal-section-title">Журнал изменений заказа</h3>
+            <div id="opxOrderJournalList" class="opx-cc-list"></div>
+          </section>
+        </section>
+
         <div class="opx-modal-actions">
           <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxModalSaveBtn">Сохранить</button>
-          <button type="button" class="opx-modal-btn">Печать</button>
           <button type="button" class="opx-modal-btn" id="opxModalCancelBtn">Отмена</button>
         </div>
       </section>
@@ -293,7 +349,16 @@
               <span class="opx-modal-label">Сумма, ₽</span>
               <input id="opxClientPriceValue" class="opx-modal-input" type="number" min="0" step="1" placeholder="Например: 1200" />
             </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Товар для персональной цены</span>
+              <select id="opxClientPriceProduct" class="opx-modal-input"></select>
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Цена товара, ₽</span>
+              <input id="opxClientPriceProductValue" class="opx-modal-input" type="number" min="0" step="1" placeholder="Например: 220" />
+            </label>
           </div>
+          <div id="opxClientPriceItems" class="opx-cc-list"></div>
         </section>
         <section class="opx-modal-section opx-cc-panel" data-opx-cc-panel="journal" hidden>
           <h3 class="opx-modal-section-title">Журнал изменений</h3>
