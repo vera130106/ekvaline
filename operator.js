@@ -563,10 +563,12 @@
 
   function openZoneMapOverlay() {
     if (!(ZONE_MAP_OVERLAY instanceof HTMLElement)) return;
+    closeReportsOverlay();
     state.zoneMapOpen = true;
     ZONE_MAP_OVERLAY.hidden = false;
     TAB_MAP?.classList.add('is-active');
     TAB_ORDERS?.classList.remove('is-active');
+    TAB_REPORTS?.classList.remove('is-active');
     window.setTimeout(() => {
       if (ensureZoneMap()) {
         zoneMap?.invalidateSize();
@@ -582,7 +584,7 @@
     state.zoneMapOpen = false;
     ZONE_MAP_OVERLAY.hidden = true;
     TAB_MAP?.classList.remove('is-active');
-    TAB_ORDERS?.classList.add('is-active');
+    if (!state.reportsOpen) TAB_ORDERS?.classList.add('is-active');
     if (!(window.L) && ZONE_MAP_CANVAS instanceof HTMLElement) {
       ZONE_MAP_CANVAS.innerHTML = '';
     }
@@ -593,7 +595,15 @@
     state.reportsOpen = false;
     REPORTS_OVERLAY.hidden = true;
     TAB_REPORTS?.classList.remove('is-active');
+    if (!state.zoneMapOpen) TAB_ORDERS?.classList.add('is-active');
+  }
+
+  function switchToOrdersView() {
+    closeZoneMapOverlay();
+    closeReportsOverlay();
     TAB_ORDERS?.classList.add('is-active');
+    TAB_MAP?.classList.remove('is-active');
+    TAB_REPORTS?.classList.remove('is-active');
   }
 
   function normalizePaymentKind(value) {
@@ -684,6 +694,7 @@
   function openReportsOverlay() {
     if (!(REPORTS_OVERLAY instanceof HTMLElement)) return;
     closeZoneMapOverlay();
+    TAB_MAP?.classList.remove('is-active');
     state.reportsOpen = true;
     REPORTS_OVERLAY.hidden = false;
     TAB_REPORTS?.classList.add('is-active');
@@ -1678,8 +1689,7 @@
       showToast('Список обновлен');
     });
     TAB_MAP?.addEventListener('click', openZoneMapOverlay);
-    TAB_ORDERS?.addEventListener('click', closeZoneMapOverlay);
-    TAB_ORDERS?.addEventListener('click', closeReportsOverlay);
+    TAB_ORDERS?.addEventListener('click', switchToOrdersView);
     TAB_REPORTS?.addEventListener('click', openReportsOverlay);
     ZONE_MAP_CLOSE?.addEventListener('click', closeZoneMapOverlay);
     REPORTS_CLOSE?.addEventListener('click', closeReportsOverlay);

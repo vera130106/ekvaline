@@ -8684,6 +8684,11 @@ a.is-manager-locked {
   border-top: 1px solid #d8e0ea;
 }
 
+/* display:flex у класса перебивает стандартное [hidden] — явно скрываем */
+.opx-zone-map-overlay[hidden] {
+  display: none !important;
+}
+
 .opx-zone-map-toolbar {
   display: flex;
   align-items: center;
@@ -8766,7 +8771,6 @@ a.is-manager-locked {
   color: #fff;
   font-size: 12px;
 }
-}
 
 .opx-reports-overlay {
   position: fixed;
@@ -8775,6 +8779,10 @@ a.is-manager-locked {
   background: #f5f8fc;
   display: flex;
   flex-direction: column;
+}
+
+.opx-reports-overlay[hidden] {
+  display: none !important;
 }
 
 .opx-reports-toolbar {
