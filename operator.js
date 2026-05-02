@@ -203,7 +203,7 @@
 
   function geoCacheKeyForOrder(order) {
     const k = normalizedGeoKey(String(order?.address || ''));
-    if (k) return `${k}@geov3`;
+    if (k) return `${k}@geov4`;
     return `__orphan:${String(order?.id ?? '')}`;
   }
 
@@ -240,18 +240,134 @@
     return 'Оренбург';
   }
 
+  function normalizeParsedHouse(raw) {
+    if (raw == null || raw === '') return '';
+    let h = String(raw).trim().replace(/^[\s,;-]+/, '');
+    h = h.replace(/\s+/g, '');
+    return h;
+  }
+
+  /** Убираем тип улицы, остаётся имя для сопоставления с Nominatim. */
+  function stripRussianStreetPrefix(line) {
+    return String(line || '').replace(
+      /^(ул\.?|улица|проспект|пр-кт|пр\.|переулок|пер\.|шоссе|бульвар|б-р\.?|мкр\.?|микрорайон|набережная|наб\.?)\s+/iu,
+      ''
+    ).trim();
+  }
+
+  /** «Салмышская 41» / «..., д. 5» без отдельного фрагмента с домом. */
+  function trailingHouseFromLine(line) {
+    let l = String(line || '').trim();
+    let house = '';
+    let m = /\b(?:д(?:ом)?\.?)\s*(\d+[\w\-\/а-яА-Я]*)$/iu.exec(l);
+    if (m) {
+      house = normalizeParsedHouse(m[1]);
+      l = l.slice(0, m.index).trim();
+      return { line: l, house };
+    }
+    m = /^(.*?)\s+(\d+[а-яА-Я]?|\d+\/\d+)$/u.exec(l);
+    if (m && m[1].trim().length >= 2)
+      return { line: m[1].trim(), house: normalizeParsedHouse(m[2]) };
+    return { line: l, house: '' };
+  }
+
+  /**
+   * Токены адреса (без города и индекса) для скоринга результатов Nominatim,
+   * если основной парсер улицы не сработал.
+   */
+  function addressTokensForLoosePick(addressRaw) {
+    const parts = cleanOrderAddressForGeocode(addressRaw)
+      .split(/[,;]/u)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const out = [];
+    for (const rawPart of parts) {
+      let p = rawPart.replace(/^\d{6}\s*,?\s*/, '');
+      if (/^(?:г\.?\s*)?оренбург$/iu.test(p) || /^россия$/iu.test(p)) continue;
+      if (/^\+?\d[\d\s().\-]{9,}$/.test(rawPart.trim())) continue;
+      let t = normalizeStreetToken(stripRussianStreetPrefix(p)).replace(/\s/g, '');
+      if (/^\d{1,5}$/.test(t)) continue;
+      if (
+        !/^д(?:ом)?.?$/.test(t) &&
+        t.length >= 4 &&
+        !/^дом/.test(normalizeStreetToken(p))
+      )
+        out.push(t);
+    }
+    return out;
+  }
+
   /** Улица и дом для второго запроса к API (узкий поиск дома по Оренбургу). */
   function parseRussianStreetHouseFromAddress(addressRaw) {
-    const s = cleanOrderAddressForGeocode(addressRaw);
-    const re = /(?:^|[,\s])(?:ул\.?|улица)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-]*)?/i;
-    const m = s.match(re);
-    if (m && m[1]) {
-      let house = String(m[2] || '').trim();
-      house = house.replace(/^[\s,;-]+/, '');
-      const street = m[1].replace(/\.$/, '').trim();
-      return { street, house };
+    const s0 = cleanOrderAddressForGeocode(addressRaw);
+    if (!s0) return null;
+    const s = s0.replace(/^\s*\d{6}\s*,?\s*/, '').trim();
+
+    const typedPatterns = [
+      /(?:^|[,\s])(?:ул\.?|улица)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])(?:проспект|пр-кт|пр\.)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])(?:переулок|пер\.)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])шоссе\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])(?:бульвар|б-р\.?)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])(?:микрорайон|мкр\.?)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+      /(?:^|[,\s])(?:набережная|наб\.?)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-а-яА-Я]*)?/iu,
+    ];
+    for (let ri = 0; ri < typedPatterns.length; ri += 1) {
+      const m = s.match(typedPatterns[ri]);
+      if (!m || !m[1]) continue;
+      const th = trailingHouseFromLine(m[1].trim());
+      const hn = normalizeParsedHouse(m[2]) || th.house;
+      const street = stripRussianStreetPrefix(th.line).replace(/\.$/, '').trim();
+      if (street.length >= 2) return { street, house: hn };
     }
-    return null;
+
+    const inlinePatterns = [
+      /\b(?:ул\.?|улица)\s+([А-Яа-яЁё\s\-«»"']{2,80}?)\s+(?:д\.?|дом\.?)?\s*(\d+[\w\-\/а-яА-Я]*)/iu,
+      /\b(?:проспект|пр-кт|пр\.)\s+([А-Яа-яЁё\s\-«»"']{2,80}?)\s+(?:д\.?|дом\.?)?\s*(\d+[\w\-\/а-яА-Я]*)/iu,
+      /\bпереулок\s+([А-Яа-яЁё\s\-«»"']{2,80}?)\s+(?:д\.?|дом\.?)?\s*(\d+[\w\-\/а-яА-Я]*)/iu,
+    ];
+    for (let ii = 0; ii < inlinePatterns.length; ii += 1) {
+      const m = s.match(inlinePatterns[ii]);
+      if (!m || !m[1]) continue;
+      return {
+        street: stripRussianStreetPrefix(m[1].trim()).replace(/\.$/, '').trim(),
+        house: normalizeParsedHouse(m[2]),
+      };
+    }
+
+    const body = s0.split(/[,;]/u).map((p) => p.trim()).filter(Boolean);
+    const parts = body.filter(
+      (p) => !/^\d{6}$/.test(p) && !/^(?:г\.?\s*)?оренбург$/iu.test(p) && !/^россия$/iu.test(p)
+    );
+    if (!parts.length) return null;
+
+    if (parts.length === 1) {
+      const splitOnce = trailingHouseFromLine(stripRussianStreetPrefix(parts[0]));
+      const hs = normalizeParsedHouse(splitOnce.house);
+      const nm = stripRussianStreetPrefix(splitOnce.line || '').replace(/\.$/, '').trim();
+      return nm.length >= 2 ? { street: nm, house: hs } : null;
+    }
+
+    let lastPart = parts[parts.length - 1];
+    let house = '';
+    let streetBlob = '';
+
+    const dmEnd = /^(?:д\.?|дом\.?)\s*(\d+[\w\-\/а-яА-Я]*)$/iu.exec(lastPart);
+    const loneNum = /^(\d+[а-яА-Я]?|\d+\/\d+)$/u.exec(lastPart);
+    if (dmEnd) {
+      house = dmEnd[1];
+      streetBlob = parts.length >= 2 ? parts[parts.length - 2] : '';
+    } else if (loneNum) {
+      house = loneNum[1];
+      streetBlob = parts.length >= 2 ? parts[parts.length - 2] : '';
+    } else {
+      streetBlob = lastPart;
+    }
+
+    const split = trailingHouseFromLine(stripRussianStreetPrefix(streetBlob || ''));
+    house = normalizeParsedHouse(house) || split.house;
+    const street = split.line.replace(/\.$/, '').trim();
+    return street.length >= 2 ? { street, house } : null;
   }
 
   /** Очередь: один межзапросный интервал Nominatim на все источники (карта + prefetch). */
@@ -311,11 +427,59 @@
     const wantedHouse = parsed?.house ? String(parsed.house).trim() : '';
 
     if (!wantedStreet) {
-      for (let i = 0; i < list.length; i += 1) {
-        const lat = Number(list[i].lat);
-        const lon = Number(list[i].lon);
-        if (coordsInOrenburgView(lat, lon)) return nominatimResultFromItem(list[i]);
+      const looseTokens = addressTokensForLoosePick(addressRaw);
+      let hnLoose =
+        parsed && parsed.house ? normalizeParsedHouse(parsed.house).toLowerCase() : '';
+      if (!hnLoose) {
+        const segs = cleanOrderAddressForGeocode(addressRaw)
+          .split(/[,;]/u)
+          .map((x) => x.trim())
+          .filter(Boolean);
+        const lm = /^(\d+[а-яА-Я]?|\d+\/\d+)$/iu.exec(segs[segs.length - 1] || '');
+        if (lm) hnLoose = lm[1].replace(/\s/g, '').toLowerCase();
       }
+
+      let bestLoose = null;
+      let bestLooseScore = -1;
+      for (let i = 0; i < list.length; i += 1) {
+        const item = list[i];
+        const lat = Number(item.lat);
+        const lon = Number(item.lon);
+        if (!coordsInOrenburgView(lat, lon)) continue;
+
+        let score = Number(item.importance);
+        score = Number.isFinite(score) ? Math.min(8, score * 5) : 0;
+
+        if (looseTokens.length) {
+          const disp = normalizedGeoKey(String(item.display_name || '')).replace(/\s/g, '');
+          for (let ti = 0; ti < looseTokens.length; ti += 1) {
+            const tok = looseTokens[ti];
+            if (!tok || tok.length < 4) continue;
+            if (disp.includes(tok)) score += 38;
+            else {
+              const st = tok.slice(0, Math.min(7, tok.length));
+              if (st.length >= 5 && disp.includes(st)) score += 23;
+            }
+          }
+        }
+        if (hnLoose) {
+          const apiH = String((item.address || {}).house_number || '')
+            .replace(/\s/g, '')
+            .toLowerCase();
+          if (apiH && (apiH === hnLoose || apiH.includes(hnLoose) || hnLoose.includes(apiH))) score += 30;
+        }
+
+        const tCls = `${item.class || ''} ${item.type || ''}`;
+        if (/building|house|residential|address/i.test(tCls)) score += 8;
+
+        if (score > bestLooseScore) {
+          bestLooseScore = score;
+          bestLoose = item;
+        }
+      }
+      /* Не принимаем случайную первую точку в bbox без совпадения с текстом адреса. */
+      const minLoose = looseTokens.length >= 2 ? 44 : looseTokens.length === 1 ? 30 : -1;
+      if (bestLoose && looseTokens.length && bestLooseScore >= minLoose) return nominatimResultFromItem(bestLoose);
       return null;
     }
 
@@ -1574,30 +1738,6 @@
     return pickBestNominatimItem(list, pickSrc);
   }
 
-  function softlyFitZoneMarkers(markerByOrderId) {
-    if (!(zoneMap && markerByOrderId && markerByOrderId.size)) return;
-    const pts = [...markerByOrderId.values()].map((m) => m.getLatLng());
-    try {
-      if (pts.length === 1) {
-        zoneMap.setView(pts[0], 14, { animate: true, duration: 0.45 });
-      } else if (pts.length >= 2) {
-        const b = window.L.latLngBounds(pts);
-        if (typeof zoneMap.flyToBounds === 'function') {
-          zoneMap.flyToBounds(b, { padding: [28, 36], maxZoom: 15, duration: 0.55 });
-        } else {
-          zoneMap.fitBounds(b, {
-            padding: [28, 36],
-            maxZoom: 15,
-            animate: true,
-            duration: 0.55,
-          });
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
   async function rebuildZoneMarkersInternal() {
     const generation = ++zoneMarkersBuildGeneration;
     if (!state.zoneMapOpen || !zoneMapLayer || !window.L) return;
@@ -1649,8 +1789,6 @@
       markerByOrderId.set(String(order.id), marker);
     }
 
-    softlyFitZoneMarkers(markerByOrderId);
-
     /** Координаты из фона (prefetch), появились до открытия карты — сразу подставить. */
     {
       const dupSnap = Object.create(null);
@@ -1664,7 +1802,6 @@
         const mk = markerByOrderId.get(String(order.id));
         if (mk) mk.setLatLng(microJitterLatLng(cr.lat, cr.lng, dupIdx));
       }
-      softlyFitZoneMarkers(markerByOrderId);
     }
 
     const refineKeysFinal = [...addrRawByGeoKey.keys()].filter(
@@ -1701,7 +1838,6 @@
       }
     }
 
-    if (generation === zoneMarkersBuildGeneration) softlyFitZoneMarkers(markerByOrderId);
   }
 
   async function geocodeByFields(city, street, house, addressRawForPick) {
@@ -1717,7 +1853,7 @@
       viewbox: `${ORENBURG_VIEWBOX.left},${ORENBURG_VIEWBOX.top},${ORENBURG_VIEWBOX.right},${ORENBURG_VIEWBOX.bottom}`,
       'accept-language': 'ru',
       city,
-      street: house ? `${house}, ${street}` : street,
+      street: [street, house].filter(Boolean).join(', '),
       country: 'Россия',
     });
     const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
@@ -1749,7 +1885,7 @@
     const housePart = parsed.house ? String(parsed.house).trim() : '';
 
     await nominatimThrottleZoneMap();
-    const narrowQ = `Оренбург, ул. ${parsed.street}${housePart ? `, ${housePart}` : ''}, Россия`;
+    const narrowQ = `Оренбург, ${parsed.street}${housePart ? `, ${housePart}` : ''}, Россия`;
     const narrow = await geocodeAddress(narrowQ, addressRaw);
     if (
       narrow &&
