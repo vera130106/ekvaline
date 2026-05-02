@@ -203,7 +203,7 @@
 
   function geoCacheKeyForOrder(order) {
     const k = normalizedGeoKey(String(order?.address || ''));
-    if (k) return k;
+    if (k) return `${k}@geov3`;
     return `__orphan:${String(order?.id ?? '')}`;
   }
 
@@ -256,6 +256,107 @@
 
   /** Очередь: один межзапросный интервал Nominatim на все источники (карта + prefetch). */
   let nominatimQueueTailZone = Promise.resolve();
+
+  function nominatimResultFromItem(item) {
+    if (!item) return null;
+    const lat = Number(item.lat);
+    const lon = Number(item.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return {
+      lat,
+      lon,
+      address: String(item.display_name || '').trim(),
+      details: item.address || {},
+    };
+  }
+
+  function normalizeStreetToken(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/\b(улица|ул\.?|проспект|пр-кт|переулок|пер\.?|шоссе|бульвар|б-р|микрорайон|мкр\.?)\b/g, ' ')
+      .replace(/[^а-яё0-9\s/]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function streetTokensMatch(roadField, displayName, wantedStreet) {
+    const w = normalizeStreetToken(wantedStreet).replace(/\s/g, '');
+    if (w.length < 3) return false;
+    const bundle = normalizeStreetToken(`${roadField || ''} ${displayName || ''}`).replace(/\s/g, '');
+    if (!bundle) return false;
+    if (bundle.includes(w)) return true;
+    const stem = w.slice(0, Math.min(8, w.length));
+    return stem.length >= 5 && bundle.includes(stem);
+  }
+
+  function houseTokensMatch(houseFromApi, wantedHouse) {
+    if (!wantedHouse) return true;
+    const w = String(wantedHouse).replace(/\s/g, '').toLowerCase();
+    if (!w) return true;
+    const h = String(houseFromApi || '')
+      .replace(/\s/g, '')
+      .toLowerCase();
+    if (!h) return false;
+    return h === w || h.includes(w) || w.includes(h);
+  }
+
+  /**
+   * Nominatim часто ставит на первое место не тот объект. Берём лучший кандидат по совпадению улицы/дома.
+   */
+  function pickBestNominatimItem(list, addressRaw) {
+    if (!Array.isArray(list) || !list.length) return null;
+    const parsed = parseRussianStreetHouseFromAddress(addressRaw);
+    const wantedStreet = parsed?.street || '';
+    const wantedHouse = parsed?.house ? String(parsed.house).trim() : '';
+
+    if (!wantedStreet) {
+      for (let i = 0; i < list.length; i += 1) {
+        const lat = Number(list[i].lat);
+        const lon = Number(list[i].lon);
+        if (coordsInOrenburgView(lat, lon)) return nominatimResultFromItem(list[i]);
+      }
+      return null;
+    }
+
+    let best = null;
+    let bestScore = -1;
+    for (let i = 0; i < list.length; i += 1) {
+      const item = list[i];
+      const lat = Number(item.lat);
+      const lon = Number(item.lon);
+      if (!coordsInOrenburgView(lat, lon)) continue;
+      const addr = item.address || {};
+      const road = [addr.road, addr.street, addr.pedestrian, addr.residential, addr.neighbourhood].filter(Boolean).join(' ');
+      const disp = String(item.display_name || '');
+      let score = 0;
+      if (streetTokensMatch(road, disp, wantedStreet)) score += 55;
+      else if (normalizedGeoKey(disp).includes(normalizedGeoKey(wantedStreet).replace(/\s/g, ''))) score += 38;
+
+      const hn = String(addr.house_number || addr.house || '').trim();
+      if (wantedHouse && houseTokensMatch(hn, wantedHouse)) score += 45;
+      else if (wantedHouse && normalizedGeoKey(disp).includes(String(wantedHouse).toLowerCase())) score += 28;
+
+      const t = `${item.class || ''} ${item.type || ''} ${addr.type || ''}`;
+      if (/building|house|residential|address|place/i.test(t)) score += 10;
+      if (/^house$/i.test(String(item.osm_type)) || String(item.category || '') === 'building') score += 4;
+
+      const imp = Number(item.importance);
+      if (Number.isFinite(imp)) score += Math.min(10, imp * 6);
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = item;
+      }
+    }
+
+    let minOk = 42;
+    if (wantedStreet && wantedHouse) minOk = 52;
+    else if (wantedStreet) minOk = 40;
+
+    if (!best || bestScore < minOk) return null;
+    return nominatimResultFromItem(best);
+  }
 
   async function nominatimThrottleZoneMap() {
     const exec = nominatimQueueTailZone.then(async () => {
@@ -1453,10 +1554,11 @@
     };
   }
 
-  async function geocodeAddress(query) {
+  async function geocodeAddress(query, addressRawForPick) {
+    const pickSrc = addressRawForPick != null && String(addressRawForPick).trim() ? String(addressRawForPick) : String(query);
     const params = new URLSearchParams({
       format: 'jsonv2',
-      limit: '1',
+      limit: '14',
       addressdetails: '1',
       bounded: '1',
       viewbox: `${ORENBURG_VIEWBOX.left},${ORENBURG_VIEWBOX.top},${ORENBURG_VIEWBOX.right},${ORENBURG_VIEWBOX.bottom}`,
@@ -1469,13 +1571,7 @@
     if (!response.ok) return null;
     const list = await response.json();
     if (!Array.isArray(list) || !list.length) return null;
-    const first = list[0];
-    return {
-      lat: Number(first.lat),
-      lon: Number(first.lon),
-      address: String(first.display_name || '').trim(),
-      details: first.address || {},
-    };
+    return pickBestNominatimItem(list, pickSrc);
   }
 
   function softlyFitZoneMarkers(markerByOrderId) {
@@ -1608,10 +1704,14 @@
     if (generation === zoneMarkersBuildGeneration) softlyFitZoneMarkers(markerByOrderId);
   }
 
-  async function geocodeByFields(city, street, house) {
+  async function geocodeByFields(city, street, house, addressRawForPick) {
+    const pickSrc =
+      addressRawForPick != null && String(addressRawForPick).trim()
+        ? String(addressRawForPick)
+        : `${city}, ${street} ${house}`;
     const params = new URLSearchParams({
       format: 'jsonv2',
-      limit: '1',
+      limit: '12',
       addressdetails: '1',
       bounded: '1',
       viewbox: `${ORENBURG_VIEWBOX.left},${ORENBURG_VIEWBOX.top},${ORENBURG_VIEWBOX.right},${ORENBURG_VIEWBOX.bottom}`,
@@ -1626,41 +1726,49 @@
     if (!response.ok) return null;
     const list = await response.json();
     if (!Array.isArray(list) || !list.length) return null;
-    const first = list[0];
-    return {
-      lat: Number(first.lat),
-      lon: Number(first.lon),
-      address: String(first.display_name || '').trim(),
-      details: first.address || {},
-    };
+    return pickBestNominatimItem(list, pickSrc);
   }
 
   /** Два последовательных запроса (общий текст + город/улица/дом) под политику Nominatim. */
   async function geocodeDeliveryAddressOnce(addressRaw) {
     await nominatimThrottleZoneMap();
-    const first = await geocodeAddress(buildZoneMapGeocodeQuery(addressRaw));
+    const broad = await geocodeAddress(buildZoneMapGeocodeQuery(addressRaw), addressRaw);
     if (
-      first &&
-      Number.isFinite(first.lat) &&
-      Number.isFinite(first.lon) &&
-      coordsInOrenburgView(first.lat, first.lon)
+      broad &&
+      Number.isFinite(broad.lat) &&
+      Number.isFinite(broad.lon) &&
+      coordsInOrenburgView(broad.lat, broad.lon)
     ) {
-      return { lat: first.lat, lng: first.lon };
+      return { lat: broad.lat, lng: broad.lon };
     }
 
     const parsed = parseRussianStreetHouseFromAddress(addressRaw);
     if (!parsed || !parsed.street) return null;
 
-    await nominatimThrottleZoneMap();
     const city = inferCityFromAddress(addressRaw);
-    const second = await geocodeByFields(city, parsed.street, parsed.house || '');
+    const housePart = parsed.house ? String(parsed.house).trim() : '';
+
+    await nominatimThrottleZoneMap();
+    const narrowQ = `Оренбург, ул. ${parsed.street}${housePart ? `, ${housePart}` : ''}, Россия`;
+    const narrow = await geocodeAddress(narrowQ, addressRaw);
     if (
-      second &&
-      Number.isFinite(second.lat) &&
-      Number.isFinite(second.lon) &&
-      coordsInOrenburgView(second.lat, second.lon)
+      narrow &&
+      Number.isFinite(narrow.lat) &&
+      Number.isFinite(narrow.lon) &&
+      coordsInOrenburgView(narrow.lat, narrow.lon)
     ) {
-      return { lat: second.lat, lng: second.lon };
+      return { lat: narrow.lat, lng: narrow.lon };
+    }
+
+    await nominatimThrottleZoneMap();
+    const byFields = await geocodeByFields(city, parsed.street, housePart, addressRaw);
+    if (
+      byFields &&
+      Number.isFinite(byFields.lat) &&
+      Number.isFinite(byFields.lon) &&
+      coordsInOrenburgView(byFields.lat, byFields.lon)
+    ) {
+      return { lat: byFields.lat, lng: byFields.lon };
     }
     return null;
   }
@@ -1836,12 +1944,12 @@
 
     let result = null;
     if (streetValue) {
-      result = await geocodeByFields(cityValue, streetValue, houseValue);
+      result = await geocodeByFields(cityValue, streetValue, houseValue, structuredQuery);
     }
     for (let i = 0; i < uniqAttempts.length; i += 1) {
       // Пробуем несколько форматов адреса, чтобы быстрее находить дом на карте.
       // eslint-disable-next-line no-await-in-loop
-      if (!result) result = await geocodeAddress(uniqAttempts[i]);
+      if (!result) result = await geocodeAddress(uniqAttempts[i], structuredQuery || uniqAttempts[i]);
       if (result) break;
     }
     if (!result || !clientMap) {
