@@ -479,10 +479,10 @@
   function ensureZoneMap() {
     if (!(ZONE_MAP_CANVAS instanceof HTMLElement) || !window.L) return false;
     if (zoneMap) return true;
-    zoneMap = window.L.map(ZONE_MAP_CANVAS, { zoomControl: true, attributionControl: true }).setView([51.78, 55.11], 11);
+    zoneMap = window.L.map(ZONE_MAP_CANVAS, { zoomControl: true, attributionControl: false }).setView([51.78, 55.11], 11);
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '',
     }).addTo(zoneMap);
     zoneMapLayer = window.L.layerGroup().addTo(zoneMap);
     return true;
@@ -545,11 +545,11 @@
       const coords = markerCoordsForOrder(order, idx);
       const color = markerColorForOrder(order);
       const marker = window.L.circleMarker(coords, {
-        radius: 8,
+        radius: 16,
         color,
-        weight: 2,
+        weight: 3,
         fillColor: color,
-        fillOpacity: 0.9,
+        fillOpacity: 0.88,
       });
       const orderId = displayOrderId(order.id);
       marker.bindPopup(

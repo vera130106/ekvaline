@@ -8737,6 +8737,11 @@ a.is-manager-locked {
   background: #eef3f9;
 }
 
+/* Карта зон: без блока атрибуции в углу (по запросу UI) */
+.opx-zone-map-canvas .leaflet-control-attribution {
+  display: none !important;
+}
+
 .opx-zone-map-fallback {
   height: 100%;
   display: grid;
