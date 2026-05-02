@@ -16,8 +16,8 @@ const db = openDatabase();
 const feedbackThrottle = new Map();
 
 const ROOT = __dirname;
-const PREFERRED_PORT = Number(process.env.PORT) || 3001;
-const PORT_FALLBACK_MAX = 10;
+/** Фиксированный порт: только из env PORT или 3001 (без автоматического перебора). */
+const LISTEN_PORT = Number(process.env.PORT) || 3001;
 
 app.set('trust proxy', 1);
 
@@ -794,12 +794,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера.' });
 });
 
-let listenPort = PREFERRED_PORT;
-const server = app.listen(listenPort);
+const server = app.listen(LISTEN_PORT);
 
 server.on('listening', () => {
   const addr = server.address();
-  const port = typeof addr === 'object' && addr ? addr.port : listenPort;
+  const port = typeof addr === 'object' && addr ? addr.port : LISTEN_PORT;
   // eslint-disable-next-line no-console
   console.log(`ЭкваЛайн: http://localhost:${port}`);
   // eslint-disable-next-line no-console
@@ -816,21 +815,9 @@ server.on('listening', () => {
 
 server.on('error', (err) => {
   if (err.code !== 'EADDRINUSE') throw err;
-  if (process.env.PORT) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `Порт ${listenPort} занят (задан PORT=${process.env.PORT}). Закройте другой процесс или укажите другой PORT.`
-    );
-    process.exit(1);
-  }
-  const taken = err.port;
-  listenPort += 1;
-  if (listenPort > PREFERRED_PORT + PORT_FALLBACK_MAX) {
-    // eslint-disable-next-line no-console
-    console.error(`Не удалось занять порт: ${PREFERRED_PORT}–${PREFERRED_PORT + PORT_FALLBACK_MAX} заняты.`);
-    process.exit(1);
-  }
   // eslint-disable-next-line no-console
-  console.warn(`Порт ${taken} занят, запуск на ${listenPort}...`);
-  server.listen(listenPort);
+  console.error(
+    `Порт ${LISTEN_PORT} занят. Останови другой процесс node (старый сервер) или задай другой PORT в .env.`
+  );
+  process.exit(1);
 });
