@@ -140,6 +140,8 @@
   let zoneMarkersBuildGeneration = 0;
   let zoneMarkersRedrawTimer = null;
   let zoneNominatimLastCall = 0;
+  let zoneCoordsPrefetchGeneration = 0;
+  let zoneCoordsPrefetchTimer = null;
 
   const statusLabels = {
     new: 'Новый',
@@ -158,10 +160,10 @@
     '09:00-17:00': { from: '09:00', to: '17:00' },
   };
   const ZONE_COLORS = {
-    'Подхват': '#e53935',
-    'Степной': '#fb8c00',
-    'Центр': '#1e88e5',
-    delivered: '#43a047',
+    Подхват: '#c62828',
+    Степной: '#ef6c00',
+    Центр: '#1565c0',
+    delivered: '#2e7d32',
   };
   const ZONE_CENTERS = {
     'Подхват': [51.805, 55.108],
@@ -231,11 +233,39 @@
     );
   }
 
+  function inferCityFromAddress(addressRaw) {
+    const s = cleanOrderAddressForGeocode(addressRaw);
+    const m = s.match(/г\\.?\s*([А-Яа-яЁё\-]+)/i);
+    if (m && m[1]) return m[1].trim();
+    return 'Оренбург';
+  }
+
+  /** Улица и дом для второго запроса к API (узкий поиск дома по Оренбургу). */
+  function parseRussianStreetHouseFromAddress(addressRaw) {
+    const s = cleanOrderAddressForGeocode(addressRaw);
+    const re = /(?:^|[,\s])(?:ул\.?|улица)\s+([^,]+?),?\s*(?:д\.?|дом)?\s*([\d]+\s*[\d\/\-]*)?/i;
+    const m = s.match(re);
+    if (m && m[1]) {
+      let house = String(m[2] || '').trim();
+      house = house.replace(/^[\s,;-]+/, '');
+      const street = m[1].replace(/\.$/, '').trim();
+      return { street, house };
+    }
+    return null;
+  }
+
+  /** Очередь: один межзапросный интервал Nominatim на все источники (карта + prefetch). */
+  let nominatimQueueTailZone = Promise.resolve();
+
   async function nominatimThrottleZoneMap() {
-    const now = Date.now();
-    const wait = Math.max(0, 1120 - (now - zoneNominatimLastCall));
-    if (wait) await new Promise((r) => setTimeout(r, wait));
-    zoneNominatimLastCall = Date.now();
+    const exec = nominatimQueueTailZone.then(async () => {
+      const now = Date.now();
+      const wait = Math.max(0, 1120 - (now - zoneNominatimLastCall));
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      zoneNominatimLastCall = Date.now();
+    });
+    nominatimQueueTailZone = exec.catch(() => {});
+    await exec;
   }
 
   function readUser() {
@@ -515,16 +545,19 @@
   }
 
   function normalizeZoneName(value) {
-    const z = String(value || '').toLowerCase().trim();
+    const z = String(value || '').toLowerCase().trim().replace(/^["']+|["']+$/g, '');
     if (!z) return 'Подхват';
     if (z.includes('степ')) return 'Степной';
     if (z.includes('центр')) return 'Центр';
+    if (z.includes('подхват')) return 'Подхват';
     return 'Подхват';
   }
 
-  function markerColorForOrder(order) {
+  /** Цвет кольца: зона заказа; доставлен — зелёный */
+  function markerStrokeColorForOrder(order) {
     if (String(order?.status || '').toLowerCase() === 'delivered') return ZONE_COLORS.delivered;
-    return ZONE_COLORS[normalizeZoneName(order?.zone)] || ZONE_COLORS['Подхват'];
+    const z = normalizeZoneName(order?.zone);
+    return ZONE_COLORS[z] || ZONE_COLORS['Подхват'];
   }
 
   function markerCoordsForOrder(order, indexInZone) {
@@ -566,10 +599,10 @@
     if (!(ZONE_MAP_CANVAS instanceof HTMLElement)) return;
     const zoneOrder = ['Подхват', 'Степной', 'Центр'];
     const zoneColors = {
-      'Подхват': '#e53935',
-      'Степной': '#fb8c00',
-      'Центр': '#1e88e5',
-      delivered: '#43a047',
+      Подхват: '#c62828',
+      Степной: '#ef6c00',
+      Центр: '#1565c0',
+      delivered: '#2e7d32',
     };
     const source = state.filtered.length ? state.filtered : state.orders;
     const grouped = { 'Подхват': [], 'Степной': [], 'Центр': [] };
@@ -646,7 +679,7 @@
     zoneMarkersRedrawTimer = window.setTimeout(() => {
       zoneMarkersRedrawTimer = null;
       void rebuildZoneMarkersInternal();
-    }, 220);
+    }, 90);
   }
 
   function openZoneMapOverlay() {
@@ -1012,11 +1045,13 @@
     const api = window.EkvalineAPI;
     if (!api) {
       state.orders = augmentDemoOrders(mapLocalOrders());
+      scheduleZoneCoordinatesPrefetch(state.orders);
       return;
     }
     const r = await api.json('/api/orders');
     if (!r.ok) {
       state.orders = augmentDemoOrders(mapLocalOrders());
+      scheduleZoneCoordinatesPrefetch(state.orders);
       return;
     }
     const rows = Array.isArray(r.data?.orders) ? r.data.orders : [];
@@ -1024,6 +1059,7 @@
       ...o,
       client: resolveClientName(o, null),
     }));
+    scheduleZoneCoordinatesPrefetch(state.orders);
   }
 
   function applyFilters() {
@@ -1442,50 +1478,47 @@
     };
   }
 
+  function softlyFitZoneMarkers(markerByOrderId) {
+    if (!(zoneMap && markerByOrderId && markerByOrderId.size)) return;
+    const pts = [...markerByOrderId.values()].map((m) => m.getLatLng());
+    try {
+      if (pts.length === 1) {
+        zoneMap.setView(pts[0], 14, { animate: true, duration: 0.45 });
+      } else if (pts.length >= 2) {
+        const b = window.L.latLngBounds(pts);
+        if (typeof zoneMap.flyToBounds === 'function') {
+          zoneMap.flyToBounds(b, { padding: [28, 36], maxZoom: 15, duration: 0.55 });
+        } else {
+          zoneMap.fitBounds(b, {
+            padding: [28, 36],
+            maxZoom: 15,
+            animate: true,
+            duration: 0.55,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function rebuildZoneMarkersInternal() {
     const generation = ++zoneMarkersBuildGeneration;
     if (!state.zoneMapOpen || !zoneMapLayer || !window.L) return;
 
-    zoneMapLayer.clearLayers();
-
     const source = state.filtered.length ? state.filtered : state.orders;
+    zoneMapLayer.clearLayers();
     if (!source.length) return;
 
-    const geoQueryByKey = new Map();
+    const addrRawByGeoKey = new Map();
     for (const order of source) {
       const gk = geoCacheKeyForOrder(order);
-      if (geoQueryByKey.has(gk)) continue;
-      if (!gk.startsWith('__orphan:')) geoQueryByKey.set(gk, buildZoneMapGeocodeQuery(String(order.address || '')));
+      if (!addrRawByGeoKey.has(gk)) addrRawByGeoKey.set(gk, String(order.address || ''));
     }
-
-    for (const geoKey of geoQueryByKey.keys()) {
-      if (generation !== zoneMarkersBuildGeneration) return;
-      if (ZONE_ADDRESS_COORD_CACHE.has(geoKey) || ZONE_ADDRESS_GEO_NO_RESULT.has(geoKey)) continue;
-      const query = geoQueryByKey.get(geoKey);
-      await nominatimThrottleZoneMap();
-      if (generation !== zoneMarkersBuildGeneration) return;
-      try {
-        const res = await geocodeAddress(query);
-        if (
-          res &&
-          Number.isFinite(res.lat) &&
-          Number.isFinite(res.lon) &&
-          coordsInOrenburgView(res.lat, res.lon)
-        ) {
-          ZONE_ADDRESS_COORD_CACHE.set(geoKey, { lat: res.lat, lng: res.lon });
-        } else {
-          ZONE_ADDRESS_GEO_NO_RESULT.add(geoKey);
-        }
-      } catch {
-        ZONE_ADDRESS_GEO_NO_RESULT.add(geoKey);
-      }
-    }
-
-    if (generation !== zoneMarkersBuildGeneration) return;
 
     const duplicateIndexByKey = Object.create(null);
     const counters = { Подхват: 0, Степной: 0, Центр: 0 };
-    const latLngCollected = [];
+    const markerByOrderId = new Map();
 
     for (const order of source) {
       if (generation !== zoneMarkersBuildGeneration) return;
@@ -1504,30 +1537,75 @@
         latLng = markerCoordsForOrder(order, idx);
       }
 
-      latLngCollected.push(latLng);
-      const ringColor = markerColorForOrder(order);
+      const ringColor = markerStrokeColorForOrder(order);
       const marker = window.L.circleMarker(latLng, {
-        radius: 20,
+        radius: 14,
         color: ringColor,
-        weight: 3,
+        weight: 2,
         fillColor: '#ffffff',
         fillOpacity: 0.95,
       });
-      marker.bindPopup(zoneMapPopupHtml(order, zone, ringColor), { maxWidth: 280, className: 'opx-zone-leaflet-popup' });
+      marker.bindPopup(zoneMapPopupHtml(order, zone, ringColor), {
+        maxWidth: 280,
+        className: 'opx-zone-leaflet-popup',
+      });
       marker.addTo(zoneMapLayer);
+      markerByOrderId.set(String(order.id), marker);
     }
 
-    if (generation !== zoneMarkersBuildGeneration || !zoneMap || !latLngCollected.length) return;
-    try {
-      if (latLngCollected.length === 1) {
-        zoneMap.setView(latLngCollected[0], 14);
-      } else if (latLngCollected.length >= 2) {
-        const bounds = window.L.latLngBounds(latLngCollected);
-        zoneMap.fitBounds(bounds, { padding: [40, 44], maxZoom: 15 });
+    softlyFitZoneMarkers(markerByOrderId);
+
+    /** Координаты из фона (prefetch), появились до открытия карты — сразу подставить. */
+    {
+      const dupSnap = Object.create(null);
+      for (const order of source) {
+        if (generation !== zoneMarkersBuildGeneration) return;
+        const geoKey = geoCacheKeyForOrder(order);
+        const dupIdx = dupSnap[geoKey] || 0;
+        dupSnap[geoKey] = dupIdx + 1;
+        const cr = ZONE_ADDRESS_COORD_CACHE.get(geoKey);
+        if (!cr || !Number.isFinite(cr.lat) || !Number.isFinite(cr.lng)) continue;
+        const mk = markerByOrderId.get(String(order.id));
+        if (mk) mk.setLatLng(microJitterLatLng(cr.lat, cr.lng, dupIdx));
       }
-    } catch {
-      // ignore bounds errors
+      softlyFitZoneMarkers(markerByOrderId);
     }
+
+    const refineKeysFinal = [...addrRawByGeoKey.keys()].filter(
+      (gk) =>
+        !gk.startsWith('__orphan:') && !ZONE_ADDRESS_COORD_CACHE.has(gk) && !ZONE_ADDRESS_GEO_NO_RESULT.has(gk)
+    );
+
+    for (const geoKey of refineKeysFinal) {
+      if (generation !== zoneMarkersBuildGeneration) return;
+      const rawAddr = addrRawByGeoKey.get(geoKey) || '';
+      let coord = null;
+      try {
+        coord = await geocodeDeliveryAddressOnce(rawAddr);
+      } catch {
+        coord = null;
+      }
+      if (generation !== zoneMarkersBuildGeneration) return;
+      if (coord && Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
+        ZONE_ADDRESS_COORD_CACHE.set(geoKey, coord);
+      } else {
+        ZONE_ADDRESS_GEO_NO_RESULT.add(geoKey);
+      }
+
+      if (generation !== zoneMarkersBuildGeneration || !coord) continue;
+
+      let di = 0;
+      for (const o of source) {
+        if (geoCacheKeyForOrder(o) !== geoKey) continue;
+        const mk = markerByOrderId.get(String(o.id));
+        if (mk) {
+          mk.setLatLng(microJitterLatLng(coord.lat, coord.lng, di));
+          di += 1;
+        }
+      }
+    }
+
+    if (generation === zoneMarkersBuildGeneration) softlyFitZoneMarkers(markerByOrderId);
   }
 
   async function geocodeByFields(city, street, house) {
@@ -1555,6 +1633,72 @@
       address: String(first.display_name || '').trim(),
       details: first.address || {},
     };
+  }
+
+  /** Два последовательных запроса (общий текст + город/улица/дом) под политику Nominatim. */
+  async function geocodeDeliveryAddressOnce(addressRaw) {
+    await nominatimThrottleZoneMap();
+    const first = await geocodeAddress(buildZoneMapGeocodeQuery(addressRaw));
+    if (
+      first &&
+      Number.isFinite(first.lat) &&
+      Number.isFinite(first.lon) &&
+      coordsInOrenburgView(first.lat, first.lon)
+    ) {
+      return { lat: first.lat, lng: first.lon };
+    }
+
+    const parsed = parseRussianStreetHouseFromAddress(addressRaw);
+    if (!parsed || !parsed.street) return null;
+
+    await nominatimThrottleZoneMap();
+    const city = inferCityFromAddress(addressRaw);
+    const second = await geocodeByFields(city, parsed.street, parsed.house || '');
+    if (
+      second &&
+      Number.isFinite(second.lat) &&
+      Number.isFinite(second.lon) &&
+      coordsInOrenburgView(second.lat, second.lon)
+    ) {
+      return { lat: second.lat, lng: second.lon };
+    }
+    return null;
+  }
+
+  function scheduleZoneCoordinatesPrefetch(orderList) {
+    if (zoneCoordsPrefetchTimer) window.clearTimeout(zoneCoordsPrefetchTimer);
+    zoneCoordsPrefetchTimer = window.setTimeout(() => {
+      zoneCoordsPrefetchTimer = null;
+      void prefetchZoneCoordinatesInBackground(orderList);
+    }, 380);
+  }
+
+  async function prefetchZoneCoordinatesInBackground(orderList) {
+    const batchId = ++zoneCoordsPrefetchGeneration;
+    const list = Array.isArray(orderList) ? orderList : [];
+    const uniq = new Map();
+    for (const o of list) {
+      const gk = geoCacheKeyForOrder(o);
+      if (uniq.has(gk) || gk.startsWith('__orphan:')) continue;
+      uniq.set(gk, String(o.address || ''));
+    }
+
+    for (const [gk, raw] of uniq) {
+      if (batchId !== zoneCoordsPrefetchGeneration) return;
+      if (ZONE_ADDRESS_COORD_CACHE.has(gk) || ZONE_ADDRESS_GEO_NO_RESULT.has(gk)) continue;
+      let coord = null;
+      try {
+        coord = await geocodeDeliveryAddressOnce(raw);
+      } catch {
+        coord = null;
+      }
+      if (batchId !== zoneCoordsPrefetchGeneration) return;
+      if (coord) ZONE_ADDRESS_COORD_CACHE.set(gk, coord);
+      else ZONE_ADDRESS_GEO_NO_RESULT.add(gk);
+    }
+
+    if (batchId !== zoneCoordsPrefetchGeneration) return;
+    if (state.zoneMapOpen) renderZoneMapMarkers();
   }
 
   async function suggestStreets(query) {
