@@ -1379,14 +1379,84 @@
     scheduleZoneCoordinatesPrefetch(state.orders);
   }
 
+  /** Поиск в таблице: работает поверх уже выбранного дня доставки и статуса. */
+  function normalizeOpSearchString(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function buildOrderSearchHaystack(o, orderIndexHint) {
+    const idShown = displayOrderId(o.id);
+    const idNum = extractOrderNumber(o.id);
+    const idNumStr = idNum > 0 ? String(idNum) : '';
+    const phoneDig = String(o.phone || '').replace(/\D/g, '');
+    let productLine = '';
+    try {
+      productLine = String(parseProduct(o.items_json, orderIndexHint) || '');
+    } catch {
+      productLine = '';
+    }
+    const parts = [
+      idShown,
+      idNumStr,
+      phoneDig,
+      o.client || '',
+      o.address || '',
+      o.courier_note || '',
+      o.phone || '',
+      productLine,
+      o.driver || '',
+      o.zone || '',
+    ];
+    return normalizeOpSearchString(parts.filter(Boolean).join(' ')).replace(/\s+/g, ' ');
+  }
+
+  function orderMatchesOpSearchQuery(o, rawQuery, orderIndexHint) {
+    const rawTrim = String(rawQuery ?? '').trim();
+    const normalized = normalizeOpSearchString(rawQuery);
+    if (!normalized) return true;
+    const hay = buildOrderSearchHaystack(o, orderIndexHint);
+
+    /** Только цифры (и типичное форматирование телефона) — номер заказа и телефон */
+    const onlyDigitsCompact = rawTrim.replace(/\D/g, '');
+    const looksDigitsOnly =
+      onlyDigitsCompact.length >= 4 &&
+      !/[а-яёa-z.:;_]/iu.test(rawTrim) &&
+      /^[\s+\d().\-–—]+$/.test(rawTrim);
+    if (looksDigitsOnly) {
+      const idNumVal = extractOrderNumber(o.id);
+      const idNumStr = idNumVal > 0 ? String(idNumVal) : '';
+      const phoneDig = String(o.phone || '').replace(/\D/g, '');
+      const rawIdLetters = normalizeOpSearchString(String(o.id ?? '')).replace(/^лс-/, '');
+      return (
+        (idNumStr && idNumStr.includes(onlyDigitsCompact)) ||
+        (phoneDig && phoneDig.includes(onlyDigitsCompact)) ||
+        hay.includes(onlyDigitsCompact) ||
+        (rawIdLetters && rawIdLetters.includes(onlyDigitsCompact))
+      );
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return true;
+
+    /** Каждое слово запроса (например «карпова» и «3») есть в суммарном поле заказа */
+    return tokens.every((tok) => {
+      if (tok.length === 1) return /^\d$/.test(tok) && hay.includes(tok);
+      return hay.includes(tok);
+    });
+  }
+
   function applyFilters() {
-    const q = state.query.toLowerCase().trim();
-    state.filtered = state.orders.filter((o) => {
+    const qRaw = state.query;
+    state.filtered = state.orders.filter((o, orderIndexHint) => {
       if (state.status !== 'all' && String(o.status) !== state.status) return false;
+      /** День «Сегодня» / календарь — по дате доставки (если её нет, по дате создания). */
       if (state.date && isoDate(o.delivery_date || o.created_at) !== state.date) return false;
-      if (!q) return true;
-      const row = `${displayOrderId(o.id)} ${o.client || ''} ${o.address || ''} ${o.courier_note || ''}`.toLowerCase();
-      return row.includes(q);
+      return orderMatchesOpSearchQuery(o, qRaw, orderIndexHint);
     });
   }
 

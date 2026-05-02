@@ -40,7 +40,13 @@
       <section class="opx-controls">
         <button type="button" class="opx-btn" id="opxCreateOrderBtn">Создать</button>
         <button type="button" class="opx-icon-btn" title="Обновить" id="opxRefreshBtn">⟳</button>
-        <input type="search" id="opxSearchInput" class="opx-input" placeholder="поиск..." />
+        <input
+          type="search"
+          id="opxSearchInput"
+          class="opx-input"
+          placeholder="улица, имя, номер заказа, телефон…"
+          aria-label="Поиск заказов в выбранном дне"
+        />
         <label class="opx-date-label" for="opxDateFilter">Дата доставки:</label>
         <button type="button" class="opx-step-btn" disabled>◀</button>
         <button type="button" class="opx-step-btn" data-opx-day="yesterday">Вчера</button>
