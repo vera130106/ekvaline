@@ -38,7 +38,7 @@
       </header>
 
       <section class="opx-controls">
-        <button type="button" class="opx-btn" disabled>Создать</button>
+        <button type="button" class="opx-btn" id="opxCreateOrderBtn">Создать</button>
         <button type="button" class="opx-icon-btn" title="Обновить" id="opxRefreshBtn">⟳</button>
         <input type="search" id="opxSearchInput" class="opx-input" placeholder="поиск..." />
         <label class="opx-date-label" for="opxDateFilter">Дата доставки:</label>
@@ -151,6 +151,112 @@
           </table>
         </div>
       </div>
+    </div>
+
+    <div id="opxNewOrderModal" class="opx-modal" hidden>
+      <div class="opx-modal-backdrop" data-opx-new-order-close></div>
+      <section class="opx-modal-card" role="dialog" aria-modal="true" aria-labelledby="opxNewOrderTitle">
+        <header class="opx-modal-topline">
+          <h2 id="opxNewOrderTitle" class="opx-modal-title">Новый заказ по звонку</h2>
+          <button type="button" id="opxNewOrderClose" class="opx-modal-close" aria-label="Закрыть">✕</button>
+        </header>
+        <section class="opx-modal-section">
+          <h3 class="opx-modal-section-title">Клиент и адрес</h3>
+          <div class="opx-modal-grid">
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Имя / организация</span>
+              <input id="opxNewOrderClient" type="text" class="opx-modal-input" placeholder="Как записать клиента" autocomplete="name" />
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Телефон</span>
+              <input id="opxNewOrderPhone" type="tel" class="opx-modal-input" placeholder="+7 900 000-00-00" autocomplete="tel" />
+            </label>
+            <label class="opx-modal-field opx-modal-field-wide">
+              <span class="opx-modal-label">Адрес доставки</span>
+              <textarea id="opxNewOrderAddress" class="opx-modal-input opx-modal-textarea" rows="3" placeholder="город, улица, дом или укажите на карте"></textarea>
+            </label>
+          </div>
+          <div class="opx-modal-client-actions">
+            <button type="button" class="opx-modal-btn" id="opxNewOrderMapBtn">Указать на карте</button>
+          </div>
+        </section>
+        <section class="opx-modal-section">
+          <h3 class="opx-modal-section-title">Доставка</h3>
+          <div class="opx-modal-grid opx-delivery-grid">
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Дата доставки</span>
+              <input id="opxNewOrderDeliveryDate" class="opx-modal-input" type="date" />
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Зона</span>
+              <select id="opxNewOrderZone" class="opx-modal-input">
+                <option value="Подхват">Подхват</option>
+                <option value="Степной">Степной</option>
+                <option value="Центр">Центр</option>
+                <option value="доп.зона">доп.зона</option>
+              </select>
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Водитель</span>
+              <select id="opxNewOrderDriver" class="opx-modal-input">
+                <option value="">Не выбран</option>
+                <option value="Казаченко Сергей">Казаченко Сергей</option>
+                <option value="Комаров Сергей">Комаров Сергей</option>
+                <option value="Лукашин Евгений">Лукашин Евгений</option>
+                <option value="Макаров Александр">Макаров Александр</option>
+                <option value="Кравцов Илья">Кравцов Илья</option>
+              </select>
+            </label>
+            <div class="opx-modal-field">
+              <span class="opx-modal-label">Интервал</span>
+              <div class="opx-mini-actions">
+                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="09:00-14:00">утро</button>
+                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="14:00-17:00">день</button>
+                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="17:00-21:00">вечер</button>
+                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="09:00-17:00">рабочее</button>
+              </div>
+              <input id="opxNewOrderSlot" class="opx-modal-input" readonly />
+            </label>
+            <label class="opx-modal-field opx-modal-field-payment">
+              <span class="opx-modal-label">Форма оплаты</span>
+              <select id="opxNewOrderPayment" class="opx-modal-input">
+                <option value="Наличная">Наличная</option>
+                <option value="Безнал">Безнал</option>
+                <option value="Рассчетный счет">Расчетный счет</option>
+              </select>
+            </label>
+            <label class="opx-modal-field opx-modal-field-wide">
+              <span class="opx-modal-label">Примечание</span>
+              <textarea id="opxNewOrderNote" class="opx-modal-input opx-modal-textarea"></textarea>
+            </label>
+          </div>
+        </section>
+        <section class="opx-modal-section">
+          <h3 class="opx-modal-section-title">Товар</h3>
+          <div class="opx-modal-grid">
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Позиция</span>
+              <select id="opxNewOrderProduct" class="opx-modal-input"></select>
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Количество</span>
+              <input id="opxNewOrderQty" class="opx-modal-input" type="number" min="1" max="50" step="1" value="1" />
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Цена за шт., ₽</span>
+              <input id="opxNewOrderUnitPrice" class="opx-modal-input" type="number" min="0" step="1" />
+            </label>
+            <label class="opx-modal-field">
+              <span class="opx-modal-label">Сумма</span>
+              <input id="opxNewOrderSumPreview" class="opx-modal-input" readonly />
+            </label>
+          </div>
+        </section>
+        <div class="opx-modal-actions">
+          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxNewOrderSaveBtn">Сохранить заказ</button>
+          <button type="button" class="opx-modal-btn" id="opxNewOrderCancelBtn">Отмена</button>
+        </div>
+      </section>
     </div>
 
     <div id="opxOrderModal" class="opx-modal" hidden>

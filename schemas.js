@@ -148,6 +148,25 @@ const adminProductPatchSchema = Joi.object({
   hidden: Joi.number().valid(0, 1).optional(),
 }).min(1);
 
+const operatorOrderCreateSchema = Joi.object({
+  customer_name: Joi.string().trim().min(2).max(NAME_MAX).required(),
+  customer_phone: Joi.string().trim().min(10).max(32).required(),
+  address: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
+  delivery_date: Joi.string()
+    .pattern(/^\d{4}-\d{2}-\d{2}$/)
+    .required()
+    .messages({ 'string.pattern.base': 'Дата доставки: формат ГГГГ-ММ-ДД.' }),
+  delivery_slot: Joi.string().trim().min(3).max(SLOT_MAX).required(),
+  payment_method: Joi.string().trim().min(2).max(64).required(),
+  zone: Joi.string().trim().max(120).allow('').optional(),
+  driver: Joi.string().trim().max(120).allow('').optional(),
+  courier_note: Joi.string().trim().max(NOTE_MAX).allow('').optional(),
+  pickup: Joi.number().valid(0, 1).optional(),
+  product_title: Joi.string().trim().min(1).max(180).required(),
+  qty: Joi.number().integer().min(1).max(50).required(),
+  unit_price: Joi.number().min(0).max(1_000_000).required(),
+});
+
 const orderCreateSchema = Joi.object({
   address: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
   delivery_date: Joi.string()
@@ -250,6 +269,7 @@ module.exports = {
   adminProductCreateSchema,
   adminProductPatchSchema,
   orderCreateSchema,
+  operatorOrderCreateSchema,
   orderPatchSchema,
   orderClientPatchSchema,
   managerSettingsSchema,

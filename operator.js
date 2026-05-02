@@ -96,6 +96,25 @@
   const CLIENT_MAP_CLEAR_BTN = document.getElementById('opxClientMapClearBtn');
   const CLIENT_MAP_SELECTED = document.getElementById('opxClientMapSelectedAddress');
   const CLIENT_MAP_CANVAS = document.getElementById('opxClientMapCanvas');
+  const CREATE_ORDER_BTN = document.getElementById('opxCreateOrderBtn');
+  const NEW_ORDER_MODAL = document.getElementById('opxNewOrderModal');
+  const NEW_ORDER_CLOSE = document.getElementById('opxNewOrderClose');
+  const NEW_ORDER_CANCEL = document.getElementById('opxNewOrderCancelBtn');
+  const NEW_ORDER_SAVE = document.getElementById('opxNewOrderSaveBtn');
+  const NEW_ORDER_CLIENT = document.getElementById('opxNewOrderClient');
+  const NEW_ORDER_PHONE = document.getElementById('opxNewOrderPhone');
+  const NEW_ORDER_ADDRESS = document.getElementById('opxNewOrderAddress');
+  const NEW_ORDER_MAP_BTN = document.getElementById('opxNewOrderMapBtn');
+  const NEW_ORDER_DELIVERY_DATE = document.getElementById('opxNewOrderDeliveryDate');
+  const NEW_ORDER_ZONE = document.getElementById('opxNewOrderZone');
+  const NEW_ORDER_DRIVER = document.getElementById('opxNewOrderDriver');
+  const NEW_ORDER_SLOT = document.getElementById('opxNewOrderSlot');
+  const NEW_ORDER_PAYMENT = document.getElementById('opxNewOrderPayment');
+  const NEW_ORDER_NOTE = document.getElementById('opxNewOrderNote');
+  const NEW_ORDER_PRODUCT = document.getElementById('opxNewOrderProduct');
+  const NEW_ORDER_QTY = document.getElementById('opxNewOrderQty');
+  const NEW_ORDER_UNIT_PRICE = document.getElementById('opxNewOrderUnitPrice');
+  const NEW_ORDER_SUM_PREVIEW = document.getElementById('opxNewOrderSumPreview');
 
   const state = {
     orders: [],
@@ -115,6 +134,9 @@
     orderModalTab: 'basic',
     zoneMapOpen: false,
     reportsOpen: false,
+    /** Куда записать адрес после «Выбрать» на карте: клиентская карточка или новый заказ */
+    clientMapApplyTarget: 'client',
+    newOrderModalOpen: false,
   };
   const CLIENT_PRICE_OVERRIDES_KEY = 'ekvaline_client_price_overrides';
   const CLIENT_PRODUCT_PRICES_KEY = 'ekvaline_client_product_prices';
@@ -1160,6 +1182,36 @@
     return n > 0 ? `ЛС-${String(n).padStart(6, '0')}` : 'ЛС-000000';
   }
 
+  function normalizePhoneRuDigits(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.length === 10 && /^9\d{9}$/.test(d)) d = `7${d}`;
+    if (d.length === 11 && d[0] === '8') d = `7${d.slice(1)}`;
+    if (d.length === 11 && d[0] === '7') return d;
+    return '';
+  }
+
+  function formatRuMobileFromDigits7(digits) {
+    const d = String(digits || '');
+    if (!(d.length === 11 && d[0] === '7')) return d ? `+${d}` : '';
+    return `+7 ${d.slice(1, 4)} ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9)}`;
+  }
+
+  function allocateNextLsOrderNumber() {
+    let maxNum = 0;
+    const used = new Set();
+    state.orders.forEach((item) => {
+      const n = extractOrderNumber(item?.id);
+      if (n > 0) {
+        used.add(n);
+        if (n > maxNum) maxNum = n;
+      }
+    });
+    if (maxNum < 253399) maxNum = 253399;
+    let cand = maxNum + 1;
+    while (used.has(cand)) cand += 1;
+    return cand;
+  }
+
   function parseProduct(itemsJson, fallbackIndex) {
     try {
       const items = JSON.parse(itemsJson || '[]');
@@ -1465,23 +1517,202 @@
   function openOrderModalById(orderId) {
     if (!(ORDER_MODAL instanceof HTMLElement)) return;
     const key = String(orderId || '').trim();
+    const order = state.orders.find((o) => String(o.id).trim() === key);
+    if (!order) return;
     state.activeOrderId = key;
-    const index = state.filtered.findIndex((o) => String(o.id).trim() === key);
-    if (index < 0) return;
+    const index = Math.max(0, state.filtered.findIndex((o) => String(o.id).trim() === key));
     state.activeOrderIndex = index;
-    if (!getOrderJournal(state.filtered[index].id).length) {
+    if (!getOrderJournal(order.id).length) {
       const initialMessage = 'Оператор создал заказ';
+      const dt = ruDateTime(order.created_at);
       appendOrderJournal(
-        state.filtered[index].id,
-        `${initialMessage} (${ruDate(state.filtered[index].created_at)} ${ruDateTime(state.filtered[index].created_at).timePart})`
+        order.id,
+        `${initialMessage} (${ruDate(order.created_at)} ${typeof dt === 'object' ? dt.timePart : ''})`.trim()
       );
     }
-    fillOrderModal(state.filtered[index], index);
-    renderOrderJournal(state.filtered[index]);
+    fillOrderModal(order, index);
+    renderOrderJournal(order);
     ORDER_MODAL.classList.add('is-open');
     ORDER_MODAL.hidden = false;
     ORDER_MODAL.setAttribute('aria-hidden', 'false');
     document.body.classList.add('opx-modal-open');
+  }
+
+  function closeNewOrderModal() {
+    state.newOrderModalOpen = false;
+    if (!(NEW_ORDER_MODAL instanceof HTMLElement)) return;
+    NEW_ORDER_MODAL.classList.remove('is-open');
+    NEW_ORDER_MODAL.hidden = true;
+    NEW_ORDER_MODAL.setAttribute('aria-hidden', 'true');
+    if (!(ORDER_MODAL instanceof HTMLElement && ORDER_MODAL.classList.contains('is-open'))) {
+      document.body.classList.remove('opx-modal-open');
+    }
+  }
+
+  function ensureNewOrderProductSelect() {
+    if (!(NEW_ORDER_PRODUCT instanceof HTMLSelectElement)) return;
+    NEW_ORDER_PRODUCT.innerHTML = products.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  }
+
+  function setNewOrderSlot(slotValue) {
+    if (!(NEW_ORDER_SLOT instanceof HTMLInputElement)) return;
+    const slot = SLOT_PRESETS[slotValue] ? slotValue : '09:00-14:00';
+    NEW_ORDER_SLOT.value = slot;
+    document.querySelectorAll('[data-opx-new-slot]').forEach((btn) => {
+      if (!(btn instanceof HTMLElement)) return;
+      btn.classList.toggle('is-active', btn.getAttribute('data-opx-new-slot') === slot);
+    });
+  }
+
+  function syncNewOrderUnitPriceDefault() {
+    if (!(NEW_ORDER_PRODUCT instanceof HTMLSelectElement) || !(NEW_ORDER_UNIT_PRICE instanceof HTMLInputElement)) return;
+    const product = normalizeProductName(String(NEW_ORDER_PRODUCT.value || ''));
+    const qty = Math.min(50, Math.max(1, Number(NEW_ORDER_QTY instanceof HTMLInputElement ? NEW_ORDER_QTY.value : 1) || 1));
+    NEW_ORDER_UNIT_PRICE.value = String(baseUnitPrice(product, qty));
+  }
+
+  function updateNewOrderSumPreview() {
+    if (!(NEW_ORDER_QTY instanceof HTMLInputElement) || !(NEW_ORDER_UNIT_PRICE instanceof HTMLInputElement)) return;
+    if (!(NEW_ORDER_SUM_PREVIEW instanceof HTMLInputElement)) return;
+    const qty = Math.min(50, Math.max(1, Number(NEW_ORDER_QTY.value) || 1));
+    NEW_ORDER_QTY.value = String(qty);
+    const unit = Math.max(0, Number(NEW_ORDER_UNIT_PRICE.value) || 0);
+    NEW_ORDER_SUM_PREVIEW.value = `${money(Math.round(unit * qty))} ₽`;
+  }
+
+  function openCreateOrderModal() {
+    if (!(NEW_ORDER_MODAL instanceof HTMLElement)) return;
+    ensureNewOrderProductSelect();
+    if (NEW_ORDER_CLIENT instanceof HTMLInputElement) NEW_ORDER_CLIENT.value = '';
+    if (NEW_ORDER_PHONE instanceof HTMLInputElement) NEW_ORDER_PHONE.value = '';
+    if (NEW_ORDER_ADDRESS instanceof HTMLTextAreaElement) NEW_ORDER_ADDRESS.value = '';
+    if (NEW_ORDER_NOTE instanceof HTMLTextAreaElement) NEW_ORDER_NOTE.value = '';
+    if (NEW_ORDER_DELIVERY_DATE instanceof HTMLInputElement) NEW_ORDER_DELIVERY_DATE.value = isoDate(new Date());
+    if (NEW_ORDER_ZONE instanceof HTMLSelectElement) NEW_ORDER_ZONE.value = 'Подхват';
+    if (NEW_ORDER_DRIVER instanceof HTMLSelectElement) NEW_ORDER_DRIVER.value = '';
+    if (NEW_ORDER_PAYMENT instanceof HTMLSelectElement) NEW_ORDER_PAYMENT.value = 'Наличная';
+    if (NEW_ORDER_PRODUCT instanceof HTMLSelectElement) NEW_ORDER_PRODUCT.value = products[0] || 'Вода';
+    if (NEW_ORDER_QTY instanceof HTMLInputElement) NEW_ORDER_QTY.value = '2';
+    syncNewOrderUnitPriceDefault();
+    setNewOrderSlot('09:00-14:00');
+    updateNewOrderSumPreview();
+    state.newOrderModalOpen = true;
+    NEW_ORDER_MODAL.hidden = false;
+    NEW_ORDER_MODAL.classList.add('is-open');
+    NEW_ORDER_MODAL.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('opx-modal-open');
+    setTimeout(() => NEW_ORDER_CLIENT?.focus(), 80);
+  }
+
+  async function saveNewOperatorOrder() {
+    const client = normalizeAddressPart(NEW_ORDER_CLIENT instanceof HTMLInputElement ? NEW_ORDER_CLIENT.value : '').trim();
+    const phoneDig = normalizePhoneRuDigits(NEW_ORDER_PHONE instanceof HTMLInputElement ? NEW_ORDER_PHONE.value : '');
+    const address = String(NEW_ORDER_ADDRESS instanceof HTMLTextAreaElement ? NEW_ORDER_ADDRESS.value : '').trim();
+    if (!client || client.length < 2) {
+      showToast('Укажите имя или организацию клиента');
+      return;
+    }
+    if (!phoneDig) {
+      showToast('Телефон: от 10 цифр, можно с +7 или 8');
+      return;
+    }
+    if (address.length < 8) {
+      showToast('Укажите адрес или выберите на карте');
+      return;
+    }
+    const zone = String(NEW_ORDER_ZONE instanceof HTMLSelectElement ? NEW_ORDER_ZONE.value : '').trim();
+    const deliveryDate = String(NEW_ORDER_DELIVERY_DATE instanceof HTMLInputElement ? NEW_ORDER_DELIVERY_DATE.value : '').trim();
+    const slot = String(NEW_ORDER_SLOT instanceof HTMLInputElement ? NEW_ORDER_SLOT.value : '').trim();
+    const payment = String(NEW_ORDER_PAYMENT instanceof HTMLSelectElement ? NEW_ORDER_PAYMENT.value : '').trim();
+    const driver = String(NEW_ORDER_DRIVER instanceof HTMLSelectElement ? NEW_ORDER_DRIVER.value : '').trim();
+    const note = String(NEW_ORDER_NOTE instanceof HTMLTextAreaElement ? NEW_ORDER_NOTE.value : '').trim();
+    const goodsTitle = normalizeProductName(String(NEW_ORDER_PRODUCT instanceof HTMLSelectElement ? NEW_ORDER_PRODUCT.value : '').trim());
+    const goodsQty = Math.min(
+      50,
+      Math.max(1, Number(NEW_ORDER_QTY instanceof HTMLInputElement ? NEW_ORDER_QTY.value : 1) || 1)
+    );
+    const goodsUnit = Math.max(0, Number(NEW_ORDER_UNIT_PRICE instanceof HTMLInputElement ? NEW_ORDER_UNIT_PRICE.value : 0) || 0);
+    if (!deliveryDate || !slot || !payment || !zone) {
+      showToast('Заполните дату доставки, интервал и оплату');
+      return;
+    }
+    const total = Math.round(goodsQty * goodsUnit);
+    const itemsJson = JSON.stringify([{ title: goodsTitle, qty: goodsQty, unit_price: goodsUnit }]);
+    const nowIso = new Date().toISOString();
+    const api = window.EkvalineAPI;
+    let newIdStr = '';
+
+    if (api) {
+      try {
+        const response = await api.json('/api/orders/operator', {
+          method: 'POST',
+          body: {
+            customer_name: client,
+            customer_phone: phoneDig,
+            address,
+            delivery_date: deliveryDate,
+            delivery_slot: slot,
+            payment_method: payment,
+            zone,
+            driver,
+            courier_note: note,
+            pickup: 0,
+            product_title: goodsTitle,
+            qty: goodsQty,
+            unit_price: goodsUnit,
+          },
+        });
+        if (!response.ok) {
+          showToast(response.data?.error || 'Не удалось сохранить заказ на сервере');
+          return;
+        }
+        api.resetCsrf();
+        await loadOrders();
+        newIdStr = String(response.data?.order?.id ?? '');
+        if (!newIdStr) {
+          showToast('Заказ сохранён. Обновите список, если строка не отобразилась.');
+          closeNewOrderModal();
+          applyFilters();
+          render();
+          return;
+        }
+      } catch {
+        showToast('Ошибка сети при создании заказа');
+        return;
+      }
+    } else {
+      const num = allocateNextLsOrderNumber();
+      const idLs = `ЛС-${String(num).padStart(6, '0')}`;
+      newIdStr = idLs;
+      const row = {
+        id: idLs,
+        status: 'new',
+        client,
+        phone: formatRuMobileFromDigits7(phoneDig),
+        address,
+        zone,
+        delivery_date: deliveryDate,
+        delivery_slot: slot,
+        payment_method: payment,
+        total_sum: total,
+        courier_note: note,
+        driver,
+        created_at: nowIso,
+        items_json: itemsJson,
+        pickup: false,
+      };
+      state.orders = [row, ...state.orders];
+    }
+
+    if (newIdStr) {
+      appendOrderJournal(newIdStr, `Заказ оформлен оператором по звонку (тел. ${phoneDig})`);
+    }
+    scheduleZoneCoordinatesPrefetch(state.orders);
+    applyFilters();
+    render();
+    closeNewOrderModal();
+    showToast('Заказ создан');
+    if (newIdStr) openOrderModalById(String(newIdStr));
   }
 
   function closeOrderModal() {
@@ -1489,7 +1720,11 @@
     ORDER_MODAL.classList.remove('is-open');
     ORDER_MODAL.hidden = true;
     ORDER_MODAL.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('opx-modal-open');
+    const keepBackdrop =
+      (NEW_ORDER_MODAL instanceof HTMLElement && NEW_ORDER_MODAL.classList.contains('is-open')) ||
+      (CLIENT_CARD_MODAL instanceof HTMLElement && CLIENT_CARD_MODAL.classList.contains('is-open')) ||
+      (CLIENT_MAP_MODAL instanceof HTMLElement && CLIENT_MAP_MODAL.classList.contains('is-open'));
+    if (!keepBackdrop) document.body.classList.remove('opx-modal-open');
   }
 
   function getActiveOrder() {
@@ -1610,6 +1845,7 @@
     CLIENT_MAP_MODAL.classList.remove('is-open');
     CLIENT_MAP_MODAL.hidden = true;
     CLIENT_MAP_MODAL.setAttribute('aria-hidden', 'true');
+    state.clientMapApplyTarget = 'client';
   }
 
   function normalizeAddressPart(value) {
@@ -1695,7 +1931,12 @@
     const composed = composeAddressFromFields();
     state.mapSelectedAddress = composed || String(address || '').trim();
     if (CLIENT_MAP_SELECTED instanceof HTMLElement) CLIENT_MAP_SELECTED.textContent = state.mapSelectedAddress || '—';
-    if (CLIENT_ADDRESS_INPUT instanceof HTMLInputElement) CLIENT_ADDRESS_INPUT.value = state.mapSelectedAddress || '';
+    if (state.clientMapApplyTarget === 'new') {
+      if (NEW_ORDER_ADDRESS instanceof HTMLTextAreaElement)
+        NEW_ORDER_ADDRESS.value = state.mapSelectedAddress || '';
+    } else if (CLIENT_ADDRESS_INPUT instanceof HTMLInputElement) {
+      CLIENT_ADDRESS_INPUT.value = state.mapSelectedAddress || '';
+    }
     if (CLIENT_MAP_SEARCH instanceof HTMLInputElement) CLIENT_MAP_SEARCH.value = composeAddressFromFields();
   }
 
@@ -2043,9 +2284,12 @@
     if (CLIENT_MAP_CITY instanceof HTMLInputElement && !normalizeAddressPart(CLIENT_MAP_CITY.value)) {
       CLIENT_MAP_CITY.value = 'Оренбург';
     }
-    const currentAddress = normalizeAddressPart(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '');
-    if (CLIENT_MAP_SEARCH instanceof HTMLInputElement && currentAddress && !normalizeAddressPart(CLIENT_MAP_SEARCH.value)) {
-      CLIENT_MAP_SEARCH.value = currentAddress;
+    const draft =
+      state.clientMapApplyTarget === 'new'
+        ? normalizeAddressPart(NEW_ORDER_ADDRESS instanceof HTMLTextAreaElement ? NEW_ORDER_ADDRESS.value : '')
+        : normalizeAddressPart(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '');
+    if (CLIENT_MAP_SEARCH instanceof HTMLInputElement && draft && !normalizeAddressPart(CLIENT_MAP_SEARCH.value)) {
+      CLIENT_MAP_SEARCH.value = draft;
     }
     CLIENT_MAP_MODAL.classList.add('is-open');
     CLIENT_MAP_MODAL.hidden = false;
@@ -2268,6 +2512,31 @@
     REPORTS_BUILD_BTN?.addEventListener('click', renderReports);
     REPORTS_DATE_FROM?.addEventListener('change', renderReports);
     REPORTS_DATE_TO?.addEventListener('change', renderReports);
+    CREATE_ORDER_BTN?.addEventListener('click', () => openCreateOrderModal());
+    NEW_ORDER_CLOSE?.addEventListener('click', closeNewOrderModal);
+    NEW_ORDER_CANCEL?.addEventListener('click', closeNewOrderModal);
+    NEW_ORDER_SAVE?.addEventListener('click', () => {
+      void saveNewOperatorOrder();
+    });
+    NEW_ORDER_MODAL?.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.hasAttribute('data-opx-new-order-close')) closeNewOrderModal();
+    });
+    NEW_ORDER_MAP_BTN?.addEventListener('click', () => {
+      state.clientMapApplyTarget = 'new';
+      openClientMapModal();
+    });
+    NEW_ORDER_PRODUCT?.addEventListener('change', () => {
+      syncNewOrderUnitPriceDefault();
+      updateNewOrderSumPreview();
+    });
+    NEW_ORDER_QTY?.addEventListener('input', updateNewOrderSumPreview);
+    NEW_ORDER_UNIT_PRICE?.addEventListener('input', updateNewOrderSumPreview);
+    document.querySelectorAll('[data-opx-new-slot]').forEach((slotBtn) => {
+      slotBtn.addEventListener('click', () => {
+        setNewOrderSlot(String(slotBtn.getAttribute('data-opx-new-slot') || '09:00-14:00'));
+      });
+    });
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && state.zoneMapOpen) closeZoneMapOverlay();
       if (event.key === 'Escape' && state.reportsOpen) closeReportsOverlay();
@@ -2363,7 +2632,10 @@
         setClientCardTab(String(btn.getAttribute('data-opx-cc-tab') || 'orders'));
       });
     });
-    OPEN_CLIENT_MAP_BTN?.addEventListener('click', openClientMapModal);
+    OPEN_CLIENT_MAP_BTN?.addEventListener('click', () => {
+      state.clientMapApplyTarget = 'client';
+      openClientMapModal();
+    });
     CLIENT_MAP_CLOSE?.addEventListener('click', closeClientMapModal);
     CLIENT_MAP_CANCEL?.addEventListener('click', closeClientMapModal);
     CLIENT_MAP_APPLY?.addEventListener('click', () => {
@@ -2371,7 +2643,11 @@
       if (address) {
         state.mapSelectedAddress = address;
         if (CLIENT_MAP_SELECTED instanceof HTMLElement) CLIENT_MAP_SELECTED.textContent = address;
-        if (CLIENT_ADDRESS_INPUT instanceof HTMLInputElement) CLIENT_ADDRESS_INPUT.value = address;
+        if (state.clientMapApplyTarget === 'new') {
+          if (NEW_ORDER_ADDRESS instanceof HTMLTextAreaElement) NEW_ORDER_ADDRESS.value = address;
+        } else if (CLIENT_ADDRESS_INPUT instanceof HTMLInputElement) {
+          CLIENT_ADDRESS_INPUT.value = address;
+        }
       }
       closeClientMapModal();
     });
@@ -2475,6 +2751,10 @@
     });
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
+      if (NEW_ORDER_MODAL instanceof HTMLElement && !NEW_ORDER_MODAL.hidden) {
+        closeNewOrderModal();
+        return;
+      }
       if (CLIENT_MAP_MODAL instanceof HTMLElement && !CLIENT_MAP_MODAL.hidden) {
         closeClientMapModal();
         return;

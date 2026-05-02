@@ -5,6 +5,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const Tokens = require('csrf');
 const { openDatabase } = require('./db');
 const { checkPostgresConnection } = require('./postgres');
@@ -117,6 +118,33 @@ async function recordLoginOk(userId) {
 }
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+async function ensurePhoneCallerUser(customerPhoneDigits, customerName) {
+  const existing = await db.prepare('SELECT * FROM users WHERE phone = ?').get(customerPhoneDigits);
+  if (existing) return existing;
+  const firstRaw = String(customerName || 'Клиент')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, schemas.NAME_MAX || 60);
+  const first = firstRaw.length >= 2 ? firstRaw : 'Клиент';
+  const email = `caller.${customerPhoneDigits}@phone.ekvaline.local`;
+  const randomPw = crypto.randomBytes(32).toString('base64url');
+  const password_hash = await bcrypt.hash(randomPw, 10);
+  try {
+    const r = await db
+      .prepare(
+        `INSERT INTO users (email, phone, password_hash, first_name, last_name, patronymic, role)
+         VALUES (?, ?, ?, ?, '', '', 'client')`
+      )
+      .run(email, customerPhoneDigits, password_hash, first);
+    const id = r.lastInsertRowid;
+    return await db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  } catch (e) {
+    const dup = await db.prepare('SELECT * FROM users WHERE phone = ?').get(customerPhoneDigits);
+    if (dup) return dup;
+    throw e;
+  }
+}
 
 const requireAuth = asyncHandler(async (req, res, next) => {
   const uid = req.session && req.session.userId;
@@ -407,6 +435,70 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   const user = await getUserById(req.user.id);
   res.json({ order, user: publicUser(user) });
 }));
+
+app.post(
+  '/api/orders/operator',
+  requireAuth,
+  requireRole('operator', 'manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.operatorOrderCreateSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    let phoneDigits = String(v.value.customer_phone || '').replace(/\D/g, '');
+    if (phoneDigits.length === 11 && phoneDigits[0] === '8') phoneDigits = `7${phoneDigits.slice(1)}`;
+    if (phoneDigits.length === 10 && phoneDigits[0] === '9') phoneDigits = `7${phoneDigits}`;
+    if (!(phoneDigits.length === 11 && phoneDigits[0] === '7')) {
+      return res.status(400).json({ error: 'Телефон: нужны 11 цифр в формате России (+7…).' });
+    }
+
+    const pickupVal = Number(v.value.pickup) === 1 ? 1 : 0;
+    const zoneVal = String(v.value.zone || '').trim() || null;
+    const driverVal = String(v.value.driver || '').trim() || null;
+
+    const customer = await ensurePhoneCallerUser(phoneDigits, v.value.customer_name);
+    const qty = Number(v.value.qty);
+    const unit = Number(v.value.unit_price);
+    const total_sum = Math.round(qty * unit);
+    const itemsJson = JSON.stringify([
+      {
+        title: String(v.value.product_title).trim(),
+        qty,
+        unit_price: unit,
+      },
+    ]);
+
+    let orderId;
+    try {
+      const o = await db
+        .prepare(
+          `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method,
+            bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum)
+           VALUES (?, ?, ?, ?, 'new', ?, 0, 0, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          customer.id,
+          v.value.address,
+          v.value.delivery_date,
+          v.value.delivery_slot,
+          v.value.payment_method,
+          itemsJson,
+          String(v.value.courier_note || '').trim(),
+          zoneVal,
+          driverVal,
+          pickupVal,
+          total_sum
+        );
+      orderId = o.lastInsertRowid;
+    } catch {
+      return res.status(500).json({ error: 'Не удалось сохранить заказ.' });
+    }
+
+    const orderRow = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    audit(db, req.user.id, 'order_operator_create', `id=${orderId}`, req.ip);
+    res.json({ order: orderRow });
+  })
+);
 
 app.get('/api/orders', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (req, res) => {
   const rows = await db
