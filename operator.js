@@ -485,6 +485,18 @@
       attribution: '',
     }).addTo(zoneMap);
     zoneMapLayer = window.L.layerGroup().addTo(zoneMap);
+    if (!zoneMap._opxPopupActionsBound) {
+      zoneMap._opxPopupActionsBound = true;
+      zoneMap.getContainer().addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-opx-zone-open-client]');
+        if (!btn || !zoneMap.getContainer().contains(btn)) return;
+        event.preventDefault();
+        const oid = btn.getAttribute('data-opx-zone-open-client');
+        if (!oid) return;
+        zoneMap.closePopup();
+        openClientCardFromMap(oid);
+      });
+    }
     return true;
   }
 
@@ -533,30 +545,58 @@
     `;
   }
 
+  function zoneMapPopupHtml(order, zone, ringColor) {
+    const orderId = escapeHtml(displayOrderId(order.id));
+    const client = escapeHtml(String(order.client || 'Клиент'));
+    const addr = escapeHtml(String(order.address || '').trim() || 'Адрес не указан');
+    const oid = String(order.id).replace(/"/g, '');
+    const status = escapeHtml(statusLabel(order.status));
+    return `
+      <div class="opx-zone-popup">
+        <div class="opx-zone-popup-head">
+          <span class="opx-zone-popup-num">${orderId}</span>
+          <span class="opx-zone-popup-zone" style="--opx-zone-ring:${ringColor}">${escapeHtml(zone)}</span>
+        </div>
+        <div class="opx-zone-popup-client">${client}</div>
+        <div class="opx-zone-popup-addr"><strong>Адрес:</strong><br/>${addr}</div>
+        <div class="opx-zone-popup-meta">Статус: ${status}</div>
+        <button type="button" class="opx-zone-popup-cc" data-opx-zone-open-client="${oid}">Карта клиента</button>
+      </div>
+    `.trim();
+  }
+
+  function openClientCardFromMap(orderId) {
+    const key = String(orderId ?? '').trim();
+    if (!key || !(CLIENT_CARD_MODAL instanceof HTMLElement)) return;
+    const order = state.orders.find((o) => String(o.id).trim() === key);
+    if (!order) {
+      showToast('Заказ не найден в списке');
+      return;
+    }
+    state.activeOrderId = key;
+    openClientCardModal();
+    document.body.classList.add('opx-modal-open');
+  }
+
   function renderZoneMapMarkers() {
     if (!state.zoneMapOpen || !zoneMap || !zoneMapLayer) return;
     zoneMapLayer.clearLayers();
-    const counters = { 'Подхват': 0, 'Степной': 0, 'Центр': 0 };
+    const counters = { Подхват: 0, Степной: 0, Центр: 0 };
     const source = state.filtered.length ? state.filtered : state.orders;
     source.forEach((order) => {
       const zone = normalizeZoneName(order.zone);
       const idx = counters[zone] || 0;
       counters[zone] = idx + 1;
       const coords = markerCoordsForOrder(order, idx);
-      const color = markerColorForOrder(order);
+      const ringColor = markerColorForOrder(order);
       const marker = window.L.circleMarker(coords, {
-        radius: 16,
-        color,
+        radius: 20,
+        color: ringColor,
         weight: 3,
-        fillColor: color,
-        fillOpacity: 0.88,
+        fillColor: '#ffffff',
+        fillOpacity: 0.95,
       });
-      const orderId = displayOrderId(order.id);
-      marker.bindPopup(
-        `<strong>${orderId}</strong><br/>${escapeHtml(String(order.client || 'Клиент'))}<br/>${escapeHtml(
-          String(order.address || '')
-        )}<br/>Зона: ${escapeHtml(zone)}<br/>Статус: ${escapeHtml(statusLabel(order.status))}`
-      );
+      marker.bindPopup(zoneMapPopupHtml(order, zone, ringColor), { maxWidth: 280, className: 'opx-zone-leaflet-popup' });
       marker.addTo(zoneMapLayer);
     });
   }
@@ -1123,6 +1163,9 @@
     CLIENT_CARD_MODAL.classList.remove('is-open');
     CLIENT_CARD_MODAL.hidden = true;
     CLIENT_CARD_MODAL.setAttribute('aria-hidden', 'true');
+    const orderModalOpen =
+      ORDER_MODAL instanceof HTMLElement && ORDER_MODAL.classList.contains('is-open');
+    if (!orderModalOpen) document.body.classList.remove('opx-modal-open');
   }
 
   function setClientCardTab(tabId) {
