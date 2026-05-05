@@ -20,6 +20,7 @@
           <a href="index.html">Главная</a>
           <a href="catalog.html">Каталог</a>
           <a href="operator.html">Оператор</a>
+          <a href="driver.html">Водитель</a>
           <a href="manager.html">Менеджер</a>
           <a href="admin.html" class="active">Админ</a>
         </nav>
@@ -41,11 +42,19 @@
             <input name="email" type="email" placeholder="Email" required />
             <input name="phone" placeholder="Телефон 7XXXXXXXXXX" required />
             <input name="password" type="text" placeholder="Пароль" required />
-            <select name="role" required>
+            <select name="role" id="adminCreateUserRole" required>
+              <option value="client">Клиент</option>
               <option value="operator">Оператор</option>
+              <option value="driver">Водитель</option>
               <option value="manager">Менеджер</option>
               <option value="admin">Админ</option>
             </select>
+            <input
+              type="text"
+              name="driver_route_label"
+              id="adminDriverRouteLabel"
+              placeholder="Для водителя: ФИО как у оператора в «Экспедитор»"
+            />
             <button class="solid-btn" type="submit">Создать</button>
           </form>
           <p id="adminUserMsg" class="admin-msg"></p>

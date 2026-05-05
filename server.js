@@ -4,14 +4,18 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const Tokens = require('csrf');
 const { openDatabase } = require('./db');
 const { checkPostgresConnection } = require('./postgres');
 const schemas = require('./schemas');
+const { mountGeocodeRoutes } = require('./geocode-proxy');
 
 const tokens = new Tokens();
+/** Уникальный идентификатор каждого запуска процесса (сброс «запомненного» входа на клиентах). */
+const CLIENT_BOOT_ID = crypto.randomBytes(12).toString('hex');
 const app = express();
 const db = openDatabase();
 const feedbackThrottle = new Map();
@@ -25,18 +29,35 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+const sessionPgStore =
+  db && db.pool
+    ? new pgSession({
+        pool: db.pool,
+        tableName: 'express_session',
+        createTableIfMissing: true,
+        pruneSessionInterval: 60 * 15,
+      })
+    : null;
+
 app.use(
   session({
+    store: sessionPgStore || undefined,
     name: 'ekvaline.sid',
     secret: process.env.SESSION_SECRET || 'ekvaline-dev-secret-change-in-production',
     resave: false,
-    saveUninitialized: true,
+    /** false: не засорять БД анонимными сессиями; после первого изменения sess (csrf/login) сохраняем. */
+    saveUninitialized: false,
     rolling: true,
     cookie: {
       maxAge: 2 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      /**
+       * По умолчанию false: иначе при NODE_ENV=production на http://localhost cookie с флагом Secure
+       * не сохраняется и «обычный» вход через POST /api/auth/login перестаёт создавать сессию.
+       * Для боевого HTTPS задайте в .env: USE_SECURE_COOKIES=true
+       */
+      secure: String(process.env.USE_SECURE_COOKIES || '').toLowerCase() === 'true',
     },
   })
 );
@@ -48,10 +69,33 @@ function audit(dbConn, userId, action, detail, ip) {
     .catch(() => {});
 }
 
+/** Сохранить сессию в хранилище до ответа (для PostgreSQL-стора иначе редирект в кабинет может опередить запись). */
+function saveSessionPromise(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.session) return resolve();
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+async function insertOrderAuditEvent(dbConn, orderId, action, reason, actorUserId, detail) {
+  const oid = Number(orderId);
+  if (!Number.isFinite(oid) || oid <= 0) return;
+  try {
+    await dbConn
+      .prepare(
+        `INSERT INTO order_audit_events (order_id, action, reason, actor_user_id, detail) VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(oid, String(action || 'event'), String(reason || '').slice(0, 2000), actorUserId ?? null, String(detail || '').slice(0, 8000));
+  } catch {
+    /* таблица может ещё не существовать до миграции */
+  }
+}
+
 function publicUser(row) {
   if (!row) return null;
   const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim();
-  return {
+  const drl = String(row.driver_route_label || '').trim();
+  const base = {
     id: row.id,
     email: row.email,
     phone: row.phone,
@@ -63,6 +107,35 @@ function publicUser(row) {
     bonus_balance: row.bonus_balance,
     blocked: !!row.blocked,
   };
+  if (row.role === 'driver') base.driver_route_label = drl || '';
+  else if (drl) base.driver_route_label = drl;
+  return base;
+}
+
+/** Отображаются у водителей: заказы, которые оператор ведёт как «в работе», уже с назначенным экспедитором. */
+const DRIVER_ORDER_STATUSES = ['pending_operator', 'confirmed', 'processing', 'courier', 'on_way'];
+
+async function assertDriverRouteLabelUnique(label, excludeUserId) {
+  const t = String(label || '').trim();
+  if (!t || t.length < 2) return;
+  const ex = Number(excludeUserId);
+  const x = Number.isFinite(ex) ? ex : 0;
+  const hit = await db
+    .prepare(
+      `SELECT id FROM users
+       WHERE trim(COALESCE(driver_route_label, '')) = trim(?)
+         AND COALESCE(trim(COALESCE(driver_route_label, '')), '') <> ''
+         AND id <> ?`
+    )
+    .get(t, x);
+  if (hit)
+    throw Object.assign(new Error('Метка экспедитора уже занята другим пользователем.'), {
+      status: 409,
+    });
+}
+
+function driverAssignedLabel(row) {
+  return row && row.role === 'driver' ? String(row.driver_route_label || '').trim() : '';
 }
 
 async function getUserById(id) {
@@ -186,6 +259,11 @@ app.get('/api/csrf', (req, res) => {
   res.json({ csrfToken });
 });
 
+app.get('/api/client-boot', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ bootId: CLIENT_BOOT_ID });
+});
+
 app.get('/api/public/settings', asyncHandler(async (req, res) => {
   const keys = ['workLine', 'deliverySlots', 'communityIntro'];
   const out = {};
@@ -205,6 +283,8 @@ app.get('/api/public/settings', asyncHandler(async (req, res) => {
   }
   res.json(out);
 }));
+
+mountGeocodeRoutes(app, { asyncHandler });
 
 app.get('/api/public/checkout-options', asyncHandler(async (req, res) => {
   let deliverySlots = ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00'];
@@ -273,6 +353,7 @@ app.post('/api/auth/register', csrfMiddleware, asyncHandler(async (req, res) => 
   const user = await getUserById(info.lastInsertRowid);
   req.session.userId = user.id;
   audit(db, user.id, 'register', `email=${email}`, req.ip);
+  await saveSessionPromise(req);
   res.json({ user: publicUser(user) });
 }));
 
@@ -296,6 +377,7 @@ app.post('/api/auth/login', csrfMiddleware, asyncHandler(async (req, res) => {
   await recordLoginOk(user.id);
   req.session.userId = user.id;
   audit(db, user.id, 'login', '', req.ip);
+  await saveSessionPromise(req);
   res.json({ user: publicUser(user) });
 }));
 
@@ -504,7 +586,8 @@ app.get('/api/orders', requireAuth, requireRole('operator', 'manager', 'admin'),
   const rows = await db
     .prepare(
       `SELECT o.*, u.email, u.phone, u.first_name, u.last_name
-       FROM orders o JOIN users u ON u.id = o.user_id
+       FROM orders o
+       LEFT JOIN users u ON u.id = o.user_id
        ORDER BY o.id DESC LIMIT 5000`
     )
     .all();
@@ -538,20 +621,116 @@ app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) =>
   res.json({ journal: rows });
 }));
 
+app.get('/api/orders/operator/audit-report', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (req, res) => {
+  const from = String(req.query.from || '').trim();
+  const to = String(req.query.to || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'Укажите период from и to в формате ГГГГ-ММ-ДД.' });
+  }
+  const rows = await db
+    .prepare(
+      `SELECT e.id, e.order_id, e.action, e.reason, e.detail, e.created_at,
+              COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email, 'Пользователь') AS actor_name,
+              COALESCE(u.role, '') AS actor_role
+       FROM order_audit_events e
+       LEFT JOIN users u ON u.id = e.actor_user_id
+       WHERE (e.created_at AT TIME ZONE 'Europe/Moscow')::date >= ?::date
+         AND (e.created_at AT TIME ZONE 'Europe/Moscow')::date <= ?::date
+       ORDER BY e.created_at DESC
+       LIMIT 3000`
+    )
+    .all(from, to);
+  res.json({ events: rows });
+}));
+
 app.post('/api/orders/:id/cancel', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
+  const vr = schemas.validate(schemas.orderCancelReasonSchema, req.body || {});
+  if (!vr.ok) return res.status(400).json({ error: vr.error });
   const order = await db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(id, req.user.id);
   if (!order) return res.status(404).json({ error: 'Заказ не найден.' });
   if (!['processing', 'confirmed'].includes(order.status)) {
     return res.status(400).json({ error: 'Этот заказ уже нельзя отменить.' });
   }
   await db.prepare("UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(id);
+  const reason = String(vr.value.reason || '').trim();
+  await insertOrderAuditEvent(db, id, 'order_cancel', reason, req.user.id, JSON.stringify({ source: 'cabinet_cancel' }));
   audit(db, req.user.id, 'order_cancel', `id=${id}`, req.ip);
   res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
 }));
 
+/** Маршруты до параметрических `/api/orders/:id`. */
+app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(async (req, res) => {
+  const label = driverAssignedLabel(req.user);
+  if (!label) return res.json({ orders: [], warn: 'Администратор не указал вашу метку экспедитора.' });
+  const rows = await db
+    .prepare(
+      `SELECT o.*,
+              trim(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS join_client_name,
+              u.email AS join_client_email,
+              u.phone AS join_client_phone
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       WHERE trim(COALESCE(o.driver, '')) = trim(?)
+         AND trim(COALESCE(o.driver, '')) <> ''
+         AND o.status IN ('pending_operator', 'confirmed', 'processing', 'courier', 'on_way')
+       ORDER BY CASE WHEN trim(COALESCE(o.delivery_date, '')) <> '' THEN 0 ELSE 1 END,
+              o.delivery_date ASC NULLS LAST,
+              o.created_at DESC,
+              o.id DESC`
+    )
+    .all(label);
+  const orders = rows.map((r) => {
+    const { join_client_name, join_client_email, join_client_phone, ...order } = r;
+    const nm = join_client_name && String(join_client_name).trim();
+    const clientDisp = nm && nm.length >= 2 ? nm : join_client_email || 'Клиент';
+    return {
+      ...order,
+      client: clientDisp,
+      phone: join_client_phone || null,
+      email_hint: join_client_email || null,
+    };
+  });
+  res.json({ orders });
+}));
+
+app.post(
+  '/api/driver/orders/:id/mark-delivered',
+  requireAuth,
+  requireRole('driver'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id заказа.' });
+    const label = driverAssignedLabel(req.user);
+    if (!label) return res.status(403).json({ error: 'Нет метки экспедитора в учётной записи.' });
+    const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден.' });
+    if (String(order.driver || '').trim() !== label) return res.status(403).json({ error: 'Это не ваш заказ.' });
+    if (!DRIVER_ORDER_STATUSES.includes(order.status)) {
+      return res.status(400).json({
+        error: 'Заказ уже доставлен, отменён или ещё не передан водителю оператором.',
+      });
+    }
+    await db
+      .prepare(`UPDATE orders SET status = 'delivered', updated_at = datetime('now') WHERE id = ?`)
+      .run(id);
+    await insertOrderAuditEvent(
+      db,
+      id,
+      'driver_mark_delivered',
+      'Доставлен (водитель)',
+      req.user.id,
+      JSON.stringify({ from_status: order.status })
+    );
+    audit(db, req.user.id, 'driver_delivered', `id=${id}`, req.ip);
+    res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
+  })
+);
+
 app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id заказа.' });
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
   if (!order) return res.status(404).json({ error: 'Заказ не найден.' });
 
@@ -559,6 +738,16 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   if (staffRoles.includes(req.user.role)) {
     const v = schemas.validate(schemas.orderPatchSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
+    const changeReason = String(v.value.change_reason || '').trim();
+    const requiresReason =
+      (v.value.delivery_date != null && v.value.delivery_date !== order.delivery_date) ||
+      (v.value.delivery_slot != null && v.value.delivery_slot !== order.delivery_slot) ||
+      (v.value.status != null && v.value.status === 'cancelled' && order.status !== 'cancelled');
+    if (requiresReason && changeReason.length < 3) {
+      return res.status(400).json({
+        error: 'Укажите причину переноса доставки или отмены заказа (не менее 3 символов).',
+      });
+    }
     const fields = [];
     const values = [];
     const allowed = [
@@ -574,15 +763,29 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
       'items_json',
       'courier_note',
     ];
+    const changedKeys = [];
     for (const key of allowed) {
       if (v.value[key] == null) continue;
       fields.push(`${key} = ?`);
       values.push(v.value[key]);
+      changedKeys.push(key);
     }
-    if (fields.length) {
-      values.push(id);
-      await db.prepare(`UPDATE orders SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+    if (!fields.length) {
+      const unchanged = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+      return res.json({ order: unchanged });
     }
+    values.push(id);
+    await db.prepare(`UPDATE orders SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+    let evtAction = 'operator_patch';
+    if (v.value.status === 'cancelled' && order.status !== 'cancelled') evtAction = 'order_status_cancelled';
+    else if (
+      (v.value.delivery_date != null && v.value.delivery_date !== order.delivery_date) ||
+      (v.value.delivery_slot != null && v.value.delivery_slot !== order.delivery_slot)
+    ) {
+      evtAction = 'order_reschedule';
+    }
+    const reasonForLog = changeReason || (requiresReason ? '—' : 'Изменение заказа (без переноса/отмены)');
+    await insertOrderAuditEvent(db, id, evtAction, reasonForLog, req.user.id, JSON.stringify({ changed: changedKeys }));
     audit(db, req.user.id, 'order_patch', `id=${id}`, req.ip);
     const updated = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     return res.json({ order: updated });
@@ -596,26 +799,35 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   if (!['processing', 'confirmed'].includes(order.status)) {
     return res.status(400).json({ error: 'Заказ на этой стадии нельзя изменить.' });
   }
-  const { address, delivery_date, delivery_slot } = v.value;
+  const { address, delivery_date, delivery_slot, change_reason } = v.value;
   const parts = [];
   const vals = [];
+  const touched = [];
   if (address != null) {
     parts.push('address = ?');
     vals.push(address);
+    touched.push('address');
   }
   if (delivery_date != null) {
     parts.push('delivery_date = ?');
     vals.push(delivery_date);
+    touched.push('delivery_date');
   }
   if (delivery_slot != null) {
     parts.push('delivery_slot = ?');
     vals.push(delivery_slot);
+    touched.push('delivery_slot');
   }
   if (!parts.length) {
     return res.status(400).json({ error: 'Укажите адрес, дату или интервал доставки.' });
   }
+  const cr = String(change_reason || '').trim();
+  if (cr.length < 3) {
+    return res.status(400).json({ error: 'Укажите причину изменения заказа (не менее 3 символов).' });
+  }
   vals.push(id);
   await db.prepare(`UPDATE orders SET ${parts.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals);
+  await insertOrderAuditEvent(db, id, 'client_patch', cr, req.user.id, JSON.stringify({ fields: touched }));
   audit(db, req.user.id, 'order_client_update', `id=${id}`, req.ip);
   res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
 }));
@@ -624,7 +836,7 @@ app.get('/api/admin/users', requireAuth, requireRole('admin'), asyncHandler(asyn
   const rows = await db
     .prepare(
       `SELECT id, email, phone, first_name, last_name, patronymic, role, blocked, bonus_balance, created_at,
-              login_attempts, locked_until
+              login_attempts, locked_until, driver_route_label
        FROM users ORDER BY id DESC LIMIT 2000`
     )
     .all();
@@ -643,11 +855,37 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), csrfMiddlew
   const target = await getUserById(targetId);
   if (!target) return res.status(404).json({ error: 'Пользователь не найден.' });
 
-  if (v.value.role != null) {
-    await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(v.value.role, targetId);
-  }
-  if (v.value.blocked != null) {
-    await db.prepare('UPDATE users SET blocked = ? WHERE id = ?').run(v.value.blocked, targetId);
+  try {
+    if (v.value.role != null) {
+      await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(v.value.role, targetId);
+      if (v.value.role !== 'driver') {
+        await db.prepare('UPDATE users SET driver_route_label = NULL WHERE id = ?').run(targetId);
+      }
+    }
+
+    if (v.value.driver_route_label !== undefined) {
+      const mid = await getUserById(targetId);
+      const effRole = String(mid.role || '');
+      if (effRole !== 'driver') {
+        return res.status(400).json({ error: 'Метку экспедитора можно задать только для роли «Водитель».' });
+      }
+      const lbl = String(v.value.driver_route_label ?? '').trim();
+      const store = lbl === '' ? null : lbl;
+      if (!store || store.length < 2) {
+        return res.status(400).json({
+          error: 'Укажите метку экспедитора — точно как ФИО в поле «Экспедитор» у оператора.',
+        });
+      }
+      await assertDriverRouteLabelUnique(store, targetId);
+      await db.prepare('UPDATE users SET driver_route_label = ? WHERE id = ?').run(store, targetId);
+    }
+
+    if (v.value.blocked != null) {
+      await db.prepare('UPDATE users SET blocked = ? WHERE id = ?').run(v.value.blocked, targetId);
+    }
+  } catch (e) {
+    if (e && e.status === 409) return res.status(409).json({ error: e.message });
+    throw e;
   }
   audit(db, req.user.id, 'admin_user_patch', `target=${targetId} ${JSON.stringify(v.value)}`, req.ip);
   const updated = await getUserById(targetId);
@@ -658,18 +896,33 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), csrfMiddleware, 
   const v = schemas.validate(schemas.adminUserCreateSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   const { first_name, last_name, email, phone, password, role } = v.value;
+  const drvLbl = String(v.value.driver_route_label || '').trim();
+  if (role === 'driver') {
+    if (drvLbl.length < 2) {
+      return res.status(400).json({
+        error: 'Для водителя укажите метку экспедитора — как у оператора в заказе (ФИО).',
+      });
+    }
+  }
   const exists = await db
     .prepare('SELECT id FROM users WHERE lower(email) = lower(?) OR phone = ?')
     .get(email, phone);
   if (exists) return res.status(409).json({ error: 'Email или телефон уже заняты.' });
 
+  try {
+    if (role === 'driver') await assertDriverRouteLabelUnique(drvLbl, 0);
+  } catch (e) {
+    if (e && e.status === 409) return res.status(409).json({ error: e.message });
+    throw e;
+  }
+
   const password_hash = bcrypt.hashSync(password, 12);
   const info = await db
     .prepare(
-      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, driver_route_label)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
     )
-    .run(email, phone, password_hash, first_name, last_name || '', role);
+    .run(email, phone, password_hash, first_name, last_name || '', role, role === 'driver' ? drvLbl : null);
   const user = await getUserById(info.lastInsertRowid);
   audit(db, req.user.id, 'admin_user_create', `target=${user.id} role=${role}`, req.ip);
   res.json({ user: publicUser(user) });

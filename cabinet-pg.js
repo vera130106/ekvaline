@@ -137,8 +137,12 @@
                         <label>Интервал
                           <input type="text" name="delivery_slot" maxlength="64" value="${order.delivery_slot || ''}" />
                         </label>
+                        <label>Причина изменения или переноса (обязательно при сохранении)
+                          <textarea name="change_reason" maxlength="2000" rows="3" placeholder="Укажите, почему меняются адрес или доставка"></textarea>
+                        </label>
                         <button type="submit" class="ghost-btn">Сохранить изменения</button>
-                      </form>`
+                      </form>
+                      <button type="button" class="ghost-btn cabinet-order-cancel" data-order-id="${order.id}">Отменить заказ…</button>`
                     : ''
                 }
               </article>
@@ -172,13 +176,13 @@
 
   async function bootstrap() {
     if (!api) {
-      if (userMeta) userMeta.textContent = 'API недоступен. Запустите проект через npm start.';
+      if (userMeta) userMeta.textContent = 'Не удалось открыть кабинет. Обновите страницу или зайдите с главной.';
       return;
     }
     const me = await api.json('/api/auth/me');
     if (!me.ok || !me.data?.user) {
       clearCurrentUser();
-      window.location.href = 'index.html';
+      window.location.href = 'index.html?need-login=1';
       return;
     }
     currentUser = me.data.user;
@@ -266,13 +270,45 @@
     const address = String(form.elements.namedItem('address')?.value || '').trim();
     const deliveryDate = String(form.elements.namedItem('delivery_date')?.value || '').trim();
     const deliverySlot = String(form.elements.namedItem('delivery_slot')?.value || '').trim();
+    const changeReasonRaw = form.elements.namedItem('change_reason');
+    const changeReason =
+      changeReasonRaw instanceof HTMLTextAreaElement ? String(changeReasonRaw.value || '').trim() : '';
     const payload = {};
     if (address) payload.address = address;
     if (deliveryDate) payload.delivery_date = deliveryDate;
     if (deliverySlot) payload.delivery_slot = deliverySlot;
     if (!Object.keys(payload).length) return;
+    if (changeReason.length < 3) {
+      window.alert('Укажите причину изменения заказа (не менее 3 символов).');
+      return;
+    }
+    payload.change_reason = changeReason;
     const response = await api.json(`/api/orders/${orderId}`, { method: 'PATCH', body: payload });
     if (!response.ok) return;
+    api.resetCsrf();
+    await reloadOrders();
+  });
+
+  document.addEventListener('click', async (event) => {
+    const target = event.target;
+    const btn = target instanceof Element ? target.closest('.cabinet-order-cancel') : null;
+    if (!(btn instanceof HTMLButtonElement) || !api) return;
+    const orderId = Number(btn.getAttribute('data-order-id'));
+    if (!Number.isInteger(orderId)) return;
+    const entered = window.prompt('Укажите причину отмены заказа (обязательно, не менее 3 символов):', '');
+    const reason = String(entered || '').trim();
+    if (reason.length < 3) {
+      window.alert('Без указания причины отмена невозможна.');
+      return;
+    }
+    const response = await api.json(`/api/orders/${encodeURIComponent(orderId)}/cancel`, {
+      method: 'POST',
+      body: { reason },
+    });
+    if (!response.ok) {
+      window.alert(response.data?.error || 'Не удалось отменить заказ.');
+      return;
+    }
     api.resetCsrf();
     await reloadOrders();
   });

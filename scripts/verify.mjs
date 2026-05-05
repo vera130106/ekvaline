@@ -32,11 +32,17 @@ const PUBLIC_WITH_TOPBAR = [
 const ROOT_JS = [
   'server.js',
   'db.js',
+  'postgres.js',
   'schemas.js',
   'app-core.js',
   'api-client.js',
   'script.js',
   'community.js',
+  'operator.js',
+  'manager.js',
+  'admin.js',
+  'driver.js',
+  'cabinet-pg.js',
 ];
 
 function read(rel) {
@@ -56,15 +62,23 @@ function checkSyntax() {
   ok(`Синтаксис Node (${ROOT_JS.length} файлов)`);
 }
 
+/** Индекс тега <script src="file.js"...> допускает cache-bust query: file.js?v=1 */
+function scriptSrcIndex(html, file) {
+  const esc = file.replace(/\./g, '\\.');
+  const re = new RegExp(`<script[^>]*\\bsrc=["']${esc}(?:\\?[^"']*)?["']`, 'i');
+  const m = re.exec(html);
+  return m ? m.index : -1;
+}
+
 function checkPublicHtml() {
   for (const name of PUBLIC_WITH_TOPBAR) {
     const html = read(name);
     if (!html.includes('id="topbarNotifications"')) {
       fail(`${name}: нет #topbarNotifications (колокольчик не подключится)`);
     }
-    const a = html.indexOf('src="app-core.js"');
-    const b = html.indexOf('src="api-client.js"');
-    const c = html.indexOf('src="script.js"');
+    const a = scriptSrcIndex(html, 'app-core.js');
+    const b = scriptSrcIndex(html, 'api-client.js');
+    const c = scriptSrcIndex(html, 'script.js');
     if (a === -1 || b === -1 || c === -1) {
       fail(`${name}: нужны скрипты app-core.js → api-client.js → script.js`);
     }
@@ -78,30 +92,31 @@ function checkPublicHtml() {
 function checkIndexCalc() {
   const html = read('index.html');
   for (const s of [
+    'id="water-calc"',
     'id="bottleMeter"',
     'id="calcPriceTotal"',
+    'id="litersValue"',
+    'id="planLineOne"',
     'assets/one-bottle.png',
     'assets/two-bottles.png',
     'assets/five-bottles.png',
-    'id="priceSingleValue"',
-    'calc-cost-panel',
   ]) {
     if (!html.includes(s)) fail(`index.html: ожидалось "${s}"`);
   }
   const js = read('script.js');
-  if (!js.includes('optimalDeliveryPlan')) fail('script.js: нет optimalDeliveryPlan');
+  if (!js.includes('function updateCalc')) fail('script.js: нет updateCalc');
   if (!js.includes('initTopbarNotifications')) fail('script.js: нет initTopbarNotifications');
   if (!js.includes('initNotificationsUI')) fail('script.js: нет вызова initNotificationsUI');
-  if (!js.includes('priceSingleValue')) fail('script.js: нет обновления панели стоимости');
+  if (!js.includes('calcPriceTotal')) fail('script.js: нет обновления ориентировочной суммы');
   ok('Главная + script.js: калькулятор и уведомления');
 }
 
 function checkCatalogImages() {
   const html = read('catalog.html');
-  for (const s of ['assets/popular-1.png', 'assets/popular-2.png', 'assets/popular-3.png']) {
+  for (const s of ['assets/product-18-9-white.png', 'assets/product-2-4.png', 'assets/product-5.png']) {
     if (!html.includes(s)) fail(`catalog.html: ожидалось изображение "${s}"`);
   }
-  ok('Каталог: три картинки popular-1…3');
+  ok('Каталог: ключевые изображения 18.9 л');
 }
 
 /** Опечатка `bottles.pn` не должна совпадать с корректным `bottles.png` (подстрока). */

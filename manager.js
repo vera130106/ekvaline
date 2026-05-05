@@ -1307,7 +1307,9 @@
 
   function enforceAccess() {
     const user = readCurrentUser();
-    if (!user || user.role !== 'manager') {
+    const role = String(user?.role || '').toLowerCase();
+    /** Как на сервере: GET/PUT `/api/manager/settings` — `requireRole('manager', 'admin')`. */
+    if (!user || (role !== 'manager' && role !== 'admin')) {
       window.location.href = 'index.html';
       return false;
     }

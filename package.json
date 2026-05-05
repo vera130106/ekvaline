@@ -6,10 +6,13 @@
     "start": "node server.js",
     "start:checked": "npm run verify && node server.js",
     "verify": "node scripts/verify.mjs",
-    "pg:setup": "node scripts/setup-postgres.js"
+    "pg:setup": "node scripts/setup-postgres.js",
+    "pg:seed-demo-orders": "node scripts/seed-demo-operator-orders.js",
+    "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
+    "connect-pg-simple": "^9.0.1",
     "cookie-parser": "^1.4.7",
     "csrf": "^3.1.0",
     "dotenv": "^17.4.2",

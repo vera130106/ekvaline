@@ -90,6 +90,8 @@ class PgDatabase {
     await seedIfEmpty(this.pool);
     await ensureDefaultDeliveryAddresses(this.pool);
     await ensureExtendedCatalog(this.pool);
+    await ensureDemoClientUser(this.pool);
+    await ensureDemoOperatorOrders(this.pool);
   }
 
   _normalizeSql(sql, args) {
@@ -245,6 +247,31 @@ async function migrate(pool) {
   await ensureColumnDefault(pool, 'orders', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'orders', 'updated_at', 'NOW()');
   await ensureOrdersCompatibility(pool);
+  await ensureOrderAuditEvents(pool);
+  await ensureUserDriverRouteLabel(pool);
+}
+
+/** Метка в учётке водителя = точное совпадение с полем orders.driver из панели оператора. */
+async function ensureUserDriverRouteLabel(pool) {
+  await ensureColumnExists(pool, 'users', 'driver_route_label', 'TEXT');
+}
+
+async function ensureOrderAuditEvents(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_audit_events (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool
+    .query(`CREATE INDEX IF NOT EXISTS idx_order_audit_events_created ON order_audit_events (created_at DESC)`)
+    .catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_audit_events_order ON order_audit_events (order_id)`).catch(() => {});
 }
 
 async function ensureIdentityDefault(pool, tableName) {
@@ -329,7 +356,7 @@ async function seedIfEmpty(pool) {
     ['operator@ekvaline.demo', '70000000003', 'OperatorEkva2026!', 'Оператор', 'Линии', 'operator'],
   ];
 
-  for (const s of staff) {
+    for (const s of staff) {
     await pool.query(
       `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
        VALUES ($1,$2,$3,$4,$5,$6,NOW()::text)`,
@@ -389,15 +416,15 @@ async function ensureDefaultDeliveryAddresses(pool) {
 }
 
 async function ensureExtendedCatalog(pool) {
-  const rows = [
+    const rows = [
     ['Электрическая помпа Smart', 1800, null, 25, 10, 'Аксессуары'],
     ['Упаковка воды 0.5л (12 шт)', 540, 0.5, 80, 11, 'Вода в бутылях'],
     ['Напольный кулер AquaOS', 12500, null, 5, 11, 'Оборудование'],
     ['Лимонный инфуз 1.5л', 280, 1.5, 100, 12, 'Вода в бутылях'],
     ['Стеклянная бутылка Eco', 950, null, 40, 13, 'Аксессуары'],
     ['Luxury Water Obsidian', 1500, null, 30, 14, 'Вода в бутылях'],
-  ];
-  for (const r of rows) {
+    ];
+    for (const r of rows) {
     const ex = await pool.query('SELECT id FROM products WHERE name = $1', [r[0]]);
     if (ex.rowCount > 0) continue;
     const cat = await pool.query('SELECT id FROM categories WHERE name = $1', [r[5]]);
@@ -407,6 +434,108 @@ async function ensureExtendedCatalog(pool) {
        VALUES ($1,$2,'',$3,$4,$5,$6,0)`,
       [cat.rows[0].id, r[0], r[1], r[2], r[3], r[4]]
     );
+  }
+}
+
+/** Общедоступная демо-учётка клиента для входа (если ещё нет в таблице users). */
+async function ensureDemoClientUser(pool) {
+  const ex = await pool.query('SELECT 1 FROM users WHERE lower(email) = lower($1) LIMIT 1', [
+    'demo.client@ekvaline.demo',
+  ]);
+  if (ex.rowCount > 0) return;
+  const rounds = 12;
+  try {
+    await pool.query(
+      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
+       VALUES ($1,$2,$3,$4,$5,'client', NOW()::text)`,
+      [
+        'demo.client@ekvaline.demo',
+        '79001112299',
+        bcrypt.hashSync('ClientDemo2026!', rounds),
+        'Демо',
+        'Клиент',
+      ]
+    );
+  } catch (e) {
+    if (e && e.code === '23505') return;
+    throw e;
+  }
+}
+
+const DEMO_OP_ORDER_NOTE_TAG = '§demo_op';
+
+/** Демо-заказы для панели оператора: при пустой таблице (и пока ни одного ряда с маркером демо). */
+async function ensureDemoOperatorOrders(pool) {
+  const demoPresent = await pool.query(
+    `SELECT 1 FROM orders WHERE position($1 IN coalesce(courier_note, '')) > 0 LIMIT 1`,
+    [DEMO_OP_ORDER_NOTE_TAG]
+  );
+  if (demoPresent.rowCount > 0) return;
+
+  const cnt = await pool.query('SELECT COUNT(*)::int AS n FROM orders');
+  if (cnt.rows[0].n > 0) return;
+
+  const products = await pool.query(
+    'SELECT id, name, price FROM products WHERE COALESCE(hidden, 0) = 0 ORDER BY id ASC LIMIT 1'
+  );
+  if (!products.rowCount) return;
+
+  const price = Number(products.rows[0].price) || 220;
+  const title = String(products.rows[0].name || 'Товар');
+  const mkItems = (qty) =>
+    JSON.stringify([{ title, qty: Number(qty), unit_price: price }]);
+  /** Маркер в примечании — повторная инициализация без дубликатов. */
+  function noteWithDemoTag(note) {
+    const s = String(note || '').trim();
+    const tag = DEMO_OP_ORDER_NOTE_TAG;
+    return s ? `${s} ${tag}` : tag;
+  }
+
+  let clientId;
+  const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1)', [
+    'demo.client@ekvaline.demo',
+  ]);
+  if (existing.rowCount > 0) {
+    clientId = existing.rows[0].id;
+  } else {
+    const hash = bcrypt.hashSync('ClientDemo2026!', 12);
+    const ins = await pool.query(
+      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
+       VALUES ($1,$2,$3,$4,$5,'client', NOW()::text) RETURNING id`,
+      ['demo.client@ekvaline.demo', '79001112299', hash, 'Демо', 'Клиент']
+    );
+    clientId = ins.rows[0].id;
+  }
+
+  const now = new Date();
+  const iso = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const d0 = iso(now);
+  const d1 = iso(new Date(now.getTime() + 86400000));
+  const dPrev = iso(new Date(now.getTime() - 86400000));
+  const slot1 = '09:00 – 14:00';
+  const slot2 = '14:00 – 17:00';
+  const slot3 = '17:00 – 21:00';
+  const pay = 'cash';
+
+  const rows = [
+    [clientId, 'Оренбург, ул. Чкалова, д. 15', d0, slot1, 'new', pay, mkItems(2), noteWithDemoTag(''), 'Центр', null, 0, Math.round(2 * price)],
+    [clientId, 'Оренбург, ул. Салмышская, д. 42', d0, slot2, 'pending_operator', pay, mkItems(1), noteWithDemoTag('Перед выездом набрать'), 'Степной', null, 0, Math.round(price)],
+    /** «Обработка» на сегодня — чтобы строки были видны в фильтре «В работе» + «Сегодня». */
+    [clientId, 'Оренбург, ул. Пушкинская, д. 10', d0, slot3, 'processing', pay, mkItems(2), noteWithDemoTag('Доставить до обеда'), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
+    [clientId, 'Оренбург, просп. Гагарина, д. 28', d1, slot1, 'confirmed', 'card', mkItems(3), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(3 * price)],
+    [clientId, 'Оренбург, ул. Комсомольская, д. 5', d1, slot3, 'processing', pay, mkItems(2), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
+    [clientId, 'Оренбург, ул. Пролетарская, д. 100', d0, slot1, 'courier', pay, mkItems(1), noteWithDemoTag(''), 'Доп. зона', 'Петров Пётр Петрович', 0, Math.round(price)],
+    [clientId, 'Оренбург, мкр. Ростоши-1, д. 8', d0, slot2, 'on_way', pay, mkItems(4), noteWithDemoTag('Домофон 045'), 'Окраина', 'Сидоров Сергей Сергеевич', 0, Math.round(4 * price)],
+    [clientId, 'Оренбург, ул. Кирова, д. 33', dPrev, slot1, 'delivered', pay, mkItems(2), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
+    [clientId, 'Оренбург, ул. Ленина, д. 7', d0, slot3, 'cancelled', pay, mkItems(1), noteWithDemoTag(''), 'Центр', null, 0, Math.round(price)],
+  ];
+
+  const insertSql = `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method,
+    bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum)
+    VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9,$10,$11,$12)`;
+  for (const row of rows) {
+    await pool.query(insertSql, row);
   }
 }
 
@@ -424,4 +553,4 @@ function openDatabase() {
   return singleton;
 }
 
-module.exports = { openDatabase };
+module.exports = { openDatabase, ensureDemoOperatorOrders };

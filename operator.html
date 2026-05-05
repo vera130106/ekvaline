@@ -4,12 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ЭкваЛайн — Панель оператора</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
-    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -24,16 +18,20 @@
         <nav class="opx-tabs" aria-label="Разделы">
           <button type="button" class="opx-tab is-active" id="opxTabOrders">Заказы</button>
           <button type="button" class="opx-tab" id="opxTabMap">Карта</button>
-          <button type="button" class="opx-tab" disabled>Расходы</button>
           <button type="button" class="opx-tab" id="opxTabReports">Отчёты</button>
-          <button type="button" class="opx-tab" disabled>Справочники</button>
           <button type="button" class="opx-tab" disabled>Настройки</button>
         </nav>
         <div class="opx-right">
-          <span class="opx-new-orders">Новые заказы <strong id="opxNewCount">0</strong></span>
-          <button type="button" class="opx-icon-btn" title="Профиль">👤</button>
-          <button type="button" class="opx-icon-btn" title="Справка">?</button>
-          <button type="button" class="opx-icon-btn opx-logout" id="opxLogoutBtn" title="Выйти">⎋</button>
+          <button
+            type="button"
+            class="opx-new-orders opx-new-orders-btn"
+            id="opxNewOrdersInboxBtn"
+            aria-haspopup="dialog"
+            title="Выберите заказ для проверки и подтверждения"
+          >
+            Новые заказы <strong id="opxNewCount">0</strong>
+          </button>
+          <button type="button" class="opx-icon-btn" id="opxLogoutBtn" title="Выйти из учётной записи">👤</button>
         </div>
       </header>
 
@@ -47,29 +45,63 @@
           placeholder="улица, имя, номер заказа, телефон…"
           aria-label="Поиск заказов в выбранном дне"
         />
-        <label class="opx-date-label" for="opxDateFilter">Дата доставки:</label>
-        <button type="button" class="opx-step-btn" disabled>◀</button>
+        <label class="opx-date-label" for="opxDateFilter" title="Дата доставки">Дата:</label>
+        <button type="button" class="opx-step-btn" id="opxDatePrevBtn" aria-label="Предыдущий день">
+          ◀
+        </button>
         <button type="button" class="opx-step-btn" data-opx-day="yesterday">Вчера</button>
         <button type="button" class="opx-step-btn is-active" data-opx-day="today">Сегодня</button>
         <button type="button" class="opx-step-btn" data-opx-day="tomorrow">Завтра</button>
-        <button type="button" class="opx-step-btn" disabled>▶</button>
+        <button type="button" class="opx-step-btn" id="opxDateNextBtn" aria-label="Следующий день">
+          ▶
+        </button>
         <input type="date" id="opxDateFilter" class="opx-input opx-date-input" />
         <button type="button" class="opx-icon-btn" title="Сброс даты" id="opxClearDateBtn">✕</button>
-        <select id="opxStatusFilter" class="opx-select">
-          <option value="all">Все статусы</option>
-          <option value="new">Новый</option>
-          <option value="processing">В обработке</option>
-          <option value="confirmed">Подтвержден</option>
-          <option value="courier">Передан курьеру</option>
-          <option value="on_way">В пути</option>
-          <option value="delivered">Доставлен</option>
-          <option value="cancelled">Отменен</option>
-        </select>
+        <div class="opx-controls-tail">
+          <button
+            type="button"
+            class="opx-btn opx-btn-secondary opx-btn-sm"
+            id="opxOrdersExportBtn"
+            title="Сохранить список в PDF (альбом) и открыть печать. Учитываются день доставки, поиск и фильтры."
+          >
+            Печать
+          </button>
+          <button type="button" class="opx-btn opx-btn-secondary" id="opxOpenFiltersBtn" aria-haspopup="dialog" title="Фильтры заказов">
+            Фильтры
+          </button>
+          <div
+            class="opx-bulk-inline"
+            id="opxBulkBar"
+            role="group"
+            aria-label="Массовая смена статуса по выбранным заказам"
+          >
+            <label class="opx-bulk-inline-cb" title="Выбрать все заказы на экране">
+              <input type="checkbox" id="opxBulkSelectAll" />
+              <span>Все</span>
+            </label>
+            <label
+              class="opx-bulk-inline-status"
+              title="Это не фильтр таблицы. Выберите статус и нажмите «Применить» — для строк, отмеченных галочкой слева."
+            >
+              <select id="opxBulkStatusSelect" class="opx-input opx-bulk-inline-select" aria-label="Статус для выбранных заказов">
+                <option value="confirmed">Подтверждён</option>
+                <option value="processing" selected>В работе</option>
+                <option value="courier">Передан курьеру</option>
+                <option value="on_way">В пути</option>
+                <option value="delivered">Доставлен</option>
+                <option value="new">Новый</option>
+              </select>
+            </label>
+            <button type="button" class="opx-btn opx-btn-sm" id="opxBulkApplyBtn">Применить</button>
+            <button type="button" class="opx-btn opx-btn-secondary opx-btn-sm" id="opxBulkClearBtn">Сброс</button>
+          </div>
+        </div>
       </section>
 
       <section class="opx-grid-wrap">
         <table class="opx-grid">
           <colgroup>
+            <col class="opx-c0" />
             <col class="opx-c1" />
             <col class="opx-c2" />
             <col class="opx-c3" />
@@ -86,6 +118,9 @@
           </colgroup>
           <thead>
             <tr>
+              <th class="opx-bulk-th" scope="col" title="Выбор строк для массовой смены статуса">
+                <span class="opx-bulk-th-lbl">✓</span>
+              </th>
               <th>№ заказа</th>
               <th>Период</th>
               <th>Дата и время заказа</th>
@@ -108,18 +143,27 @@
       <footer class="opx-footer">
         <span>Заказов: <strong id="opxOrdersCount">0</strong></span>
         <span>Общая сумма: <strong id="opxTotalSum">0 ₽</strong></span>
-        <span>Товаров: <strong id="opxTotalItems">0 шт.</strong></span>
+        <span class="opx-footer-pay-line" aria-label="Итого по форме оплаты">
+          <span class="opx-footer-pay"><span class="opx-footer-pay-lbl">налич.</span> <strong id="opxFooterPayCash">0 ₽</strong></span>
+          <span class="opx-footer-pay"><span class="opx-footer-pay-lbl">безнал.</span> <strong id="opxFooterPayNoncash">0 ₽</strong></span>
+          <span class="opx-footer-pay"><span class="opx-footer-pay-lbl">р/с</span> <strong id="opxFooterPaySettlement">0 ₽</strong></span>
+          <span class="opx-footer-pay"><span class="opx-footer-pay-lbl">карта</span> <strong id="opxFooterPayCard">0 ₽</strong></span>
+        </span>
+        <span>Бутылей 18,9 л: <strong id="opxFooterBottles">0</strong> шт.</span>
       </footer>
     </main>
+
+    <div id="opxOrdersPrintSheet" class="opx-orders-print-sheet" aria-hidden="true"></div>
 
     <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
       <div class="opx-zone-map-toolbar">
         <div class="opx-zone-map-title">Карта зон и заказов</div>
         <div class="opx-zone-map-legend">
-          <span><i class="opx-zone-dot is-red"></i>Подхват</span>
-          <span><i class="opx-zone-dot is-orange"></i>Степной</span>
-          <span><i class="opx-zone-dot is-blue"></i>Центр</span>
-          <span><i class="opx-zone-dot is-green"></i>Доставлен</span>
+          <span><span class="opx-zone-dot is-red" aria-hidden="true"></span>Подхват</span>
+          <span><span class="opx-zone-dot is-orange" aria-hidden="true"></span>Степной</span>
+          <span><span class="opx-zone-dot is-blue" aria-hidden="true"></span>Центр</span>
+          <span><span class="opx-zone-dot is-purple" aria-hidden="true"></span>доп.зона</span>
+          <span><span class="opx-zone-dot is-delivered" aria-hidden="true"></span>Доставлен</span>
         </div>
         <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
       </div>
@@ -127,155 +171,149 @@
     </div>
 
     <div id="opxReportsOverlay" class="opx-reports-overlay" hidden>
+      <header class="opx-reports-shell-top">
+        <nav class="opx-tabs" data-opx-reports-tabs aria-label="Разделы">
+          <button type="button" class="opx-tab" data-opx-reports-switch="orders">Заказы</button>
+          <button type="button" class="opx-tab" data-opx-reports-switch="map">Карта</button>
+          <button type="button" class="opx-tab is-active" data-opx-reports-switch="reports">Отчёты</button>
+          <button type="button" class="opx-tab" disabled>Настройки</button>
+        </nav>
+      </header>
       <div class="opx-reports-toolbar">
         <div class="opx-reports-title">Отчёты оператора</div>
         <label>с <input type="date" id="opxReportsDateFrom" class="opx-input opx-date-input" /></label>
         <label>по <input type="date" id="opxReportsDateTo" class="opx-input opx-date-input" /></label>
         <button type="button" class="opx-modal-btn" id="opxReportsBuildBtn">Сформировать</button>
+        <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsExcelBtn">Скачать Excel</button>
+        <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPrintBtn">Печать</button>
+        <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPdfBtn">Скачать PDF</button>
         <button type="button" class="opx-modal-btn" id="opxCloseReports">Закрыть отчёты</button>
       </div>
       <div class="opx-reports-content">
-        <div class="opx-reports-cards">
-          <article class="opx-reports-card"><small>Заказов</small><strong id="opxReportOrdersCount">0</strong></article>
-          <article class="opx-reports-card"><small>Товаров, шт</small><strong id="opxReportItemsCount">0</strong></article>
-          <article class="opx-reports-card"><small>Сумма, ₽</small><strong id="opxReportTotalSum">0</strong></article>
-          <article class="opx-reports-card"><small>Доставлено</small><strong id="opxReportDeliveredCount">0</strong></article>
-        </div>
-        <div class="opx-reports-table-wrap">
-          <table class="opx-reports-table">
-            <thead>
-              <tr>
-                <th>Водитель</th>
-                <th>Товар</th>
-                <th>Оплата</th>
-                <th>Кол-во</th>
-                <th>Сумма, ₽</th>
-                <th>Заказов</th>
-              </tr>
-            </thead>
-            <tbody id="opxReportsBody"></tbody>
-          </table>
+        <div class="opx-reports-layout">
+          <aside class="opx-reports-side opx-reports-no-print" aria-label="Выбор вида отчёта">
+            <p class="opx-reports-side-kicker">Разделы</p>
+            <nav class="opx-reports-side-nav" role="tablist" aria-orientation="vertical">
+              <button type="button" class="opx-reports-nav-btn is-active" role="tab" data-opx-report-pane="journal">
+                Журнал изменений
+              </button>
+              <button type="button" class="opx-reports-nav-btn" role="tab" data-opx-report-pane="forwarders">
+                По экспедиторам
+              </button>
+              <button type="button" class="opx-reports-nav-btn" role="tab" data-opx-report-pane="categories">
+                Категории товаров
+              </button>
+              <button type="button" class="opx-reports-nav-btn" role="tab" data-opx-report-pane="cancellations">
+                Отмены
+              </button>
+            </nav>
+          </aside>
+          <div class="opx-reports-main">
+            <div class="opx-reports-cards opx-reports-no-print">
+              <article class="opx-reports-card"><small>Заказов</small><strong id="opxReportOrdersCount">0</strong></article>
+              <article class="opx-reports-card"><small>Товаров, шт</small><strong id="opxReportItemsCount">0</strong></article>
+              <article class="opx-reports-card"><small>Сумма, ₽</small><strong id="opxReportTotalSum">0</strong></article>
+              <article class="opx-reports-card"><small>Доставлено</small><strong id="opxReportDeliveredCount">0</strong></article>
+            </div>
+            <div id="opxReportsPrintArea" class="opx-reports-print-area">
+              <section id="opxReportsPaneJournal" class="opx-reports-pane is-active" data-report-pane="journal" aria-labelledby="opxReportsJournalTitle">
+                <div class="opx-reports-pane-head">
+                  <h2 id="opxReportsJournalTitle" class="opx-reports-pane-title">Журнал изменений заказов</h2>
+                  <p id="opxReportsJournalMeta" class="opx-reports-pane-meta"></p>
+                </div>
+                <div class="opx-reports-table-wrap opx-reports-table-wrap--modern">
+                  <table class="opx-reports-table opx-reports-table--dense">
+                    <thead>
+                      <tr>
+                        <th>Дата и время</th>
+                        <th class="opx-num">Заказ</th>
+                        <th>Событие</th>
+                        <th>Кто</th>
+                        <th>Причина / комментарий</th>
+                      </tr>
+                    </thead>
+                    <tbody id="opxJournalReportBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section id="opxReportsPaneForwarders" class="opx-reports-pane" data-report-pane="forwarders" aria-labelledby="opxReportsForwardersTitle" hidden>
+                <div class="opx-reports-pane-head">
+                  <h2 id="opxReportsForwardersTitle" class="opx-visually-hidden">Финансовый отчёт по экспедиторам</h2>
+                  <div id="opxReportsHeading" class="opx-reports-heading"></div>
+                </div>
+                <div class="opx-reports-table-wrap opx-reports-table-wrap--modern">
+                  <table class="opx-reports-table opx-reports-table--financial" id="opxReportsTable">
+                    <thead id="opxReportsThead"></thead>
+                    <tbody id="opxReportsBody"></tbody>
+                    <tfoot id="opxReportsTfoot"></tfoot>
+                  </table>
+                </div>
+              </section>
+
+              <section id="opxReportsPaneCategories" class="opx-reports-pane" data-report-pane="categories" hidden>
+                <div class="opx-reports-pane-head">
+                  <h2 class="opx-reports-pane-title">Сводка по категориям</h2>
+                  <p id="opxReportsCategoriesMeta" class="opx-reports-pane-meta"></p>
+                </div>
+                <div id="opxReportsCategoriesMount" class="opx-reports-categories-mount"></div>
+              </section>
+
+              <section id="opxReportsPaneCancellations" class="opx-reports-pane" data-report-pane="cancellations" hidden>
+                <div class="opx-reports-pane-head">
+                  <h2 class="opx-reports-pane-title">Отмены заказов</h2>
+                  <p id="opxReportsCancelMeta" class="opx-reports-pane-meta"></p>
+                </div>
+                <div class="opx-reports-table-wrap opx-reports-table-wrap--modern">
+                  <table class="opx-reports-table opx-reports-table--dense">
+                    <thead>
+                      <tr>
+                        <th>Дата и время</th>
+                        <th class="opx-num">Заказ</th>
+                        <th>Кто</th>
+                        <th>Причина</th>
+                      </tr>
+                    </thead>
+                    <tbody id="opxCancelReportBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div id="opxNewOrderModal" class="opx-modal" hidden>
-      <div class="opx-modal-backdrop" data-opx-new-order-close></div>
-      <section class="opx-modal-card" role="dialog" aria-modal="true" aria-labelledby="opxNewOrderTitle">
+
+    <div id="opxNewOrdersModal" class="opx-modal opx-new-inbox-modal" hidden>
+      <div class="opx-modal-backdrop" data-opx-new-inbox-dismiss="backdrop"></div>
+      <section class="opx-modal-card opx-new-inbox-card" role="dialog" aria-modal="true" aria-labelledby="opxNewOrdersModalTitle">
         <header class="opx-modal-topline">
-          <h2 id="opxNewOrderTitle" class="opx-modal-title">Новый заказ по звонку</h2>
-          <button type="button" id="opxNewOrderClose" class="opx-modal-close" aria-label="Закрыть">✕</button>
+          <h2 id="opxNewOrdersModalTitle" class="opx-modal-title">Новые заказы на проверку</h2>
+          <button type="button" class="opx-modal-close" id="opxNewOrdersModalClose" aria-label="Закрыть">✕</button>
         </header>
-        <section class="opx-modal-section">
-          <h3 class="opx-modal-section-title">Клиент и адрес</h3>
-          <div class="opx-modal-grid">
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Имя / организация</span>
-              <input id="opxNewOrderClient" type="text" class="opx-modal-input" placeholder="Как записать клиента" autocomplete="name" />
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Телефон</span>
-              <input id="opxNewOrderPhone" type="tel" class="opx-modal-input" placeholder="+7 900 000-00-00" autocomplete="tel" />
-            </label>
-            <label class="opx-modal-field opx-modal-field-wide">
-              <span class="opx-modal-label">Адрес доставки</span>
-              <textarea id="opxNewOrderAddress" class="opx-modal-input opx-modal-textarea" rows="3" placeholder="город, улица, дом или укажите на карте"></textarea>
-            </label>
-          </div>
-          <div class="opx-modal-client-actions">
-            <button type="button" class="opx-modal-btn" id="opxNewOrderMapBtn">Указать на карте</button>
-          </div>
-        </section>
-        <section class="opx-modal-section">
-          <h3 class="opx-modal-section-title">Доставка</h3>
-          <div class="opx-modal-grid opx-delivery-grid">
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Дата доставки</span>
-              <input id="opxNewOrderDeliveryDate" class="opx-modal-input" type="date" />
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Зона</span>
-              <select id="opxNewOrderZone" class="opx-modal-input">
-                <option value="Подхват">Подхват</option>
-                <option value="Степной">Степной</option>
-                <option value="Центр">Центр</option>
-                <option value="доп.зона">доп.зона</option>
-              </select>
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Водитель</span>
-              <select id="opxNewOrderDriver" class="opx-modal-input">
-                <option value="">Не выбран</option>
-                <option value="Казаченко Сергей">Казаченко Сергей</option>
-                <option value="Комаров Сергей">Комаров Сергей</option>
-                <option value="Лукашин Евгений">Лукашин Евгений</option>
-                <option value="Макаров Александр">Макаров Александр</option>
-                <option value="Кравцов Илья">Кравцов Илья</option>
-              </select>
-            </label>
-            <div class="opx-modal-field">
-              <span class="opx-modal-label">Интервал</span>
-              <div class="opx-mini-actions">
-                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="09:00-14:00">утро</button>
-                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="14:00-17:00">день</button>
-                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="17:00-21:00">вечер</button>
-                <button type="button" class="opx-mini-btn opx-new-order-slot" data-opx-new-slot="09:00-17:00">рабочее</button>
-              </div>
-              <input id="opxNewOrderSlot" class="opx-modal-input" readonly />
-            </label>
-            <label class="opx-modal-field opx-modal-field-payment">
-              <span class="opx-modal-label">Форма оплаты</span>
-              <select id="opxNewOrderPayment" class="opx-modal-input">
-                <option value="Наличная">Наличная</option>
-                <option value="Безнал">Безнал</option>
-                <option value="Рассчетный счет">Расчетный счет</option>
-              </select>
-            </label>
-            <label class="opx-modal-field opx-modal-field-wide">
-              <span class="opx-modal-label">Примечание</span>
-              <textarea id="opxNewOrderNote" class="opx-modal-input opx-modal-textarea"></textarea>
-            </label>
-          </div>
-        </section>
-        <section class="opx-modal-section">
-          <h3 class="opx-modal-section-title">Товар</h3>
-          <div class="opx-modal-grid">
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Позиция</span>
-              <select id="opxNewOrderProduct" class="opx-modal-input"></select>
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Количество</span>
-              <input id="opxNewOrderQty" class="opx-modal-input" type="number" min="1" max="50" step="1" value="1" />
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Цена за шт., ₽</span>
-              <input id="opxNewOrderUnitPrice" class="opx-modal-input" type="number" min="0" step="1" />
-            </label>
-            <label class="opx-modal-field">
-              <span class="opx-modal-label">Сумма</span>
-              <input id="opxNewOrderSumPreview" class="opx-modal-input" readonly />
-            </label>
-          </div>
-        </section>
-        <div class="opx-modal-actions">
-          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxNewOrderSaveBtn">Сохранить заказ</button>
-          <button type="button" class="opx-modal-btn" id="opxNewOrderCancelBtn">Отмена</button>
-        </div>
+        <p class="opx-new-inbox-hint" id="opxNewOrdersModalHint"></p>
+        <div id="opxNewOrdersModalList" class="opx-new-inbox-list"></div>
+        <footer class="opx-new-inbox-foot">
+          <button type="button" class="opx-modal-btn opx-modal-btn-soft" id="opxNewOrdersModalDismiss">Закрыть</button>
+        </footer>
       </section>
     </div>
 
     <div id="opxOrderModal" class="opx-modal" hidden>
       <div class="opx-modal-backdrop" data-opx-modal-close="backdrop"></div>
-      <section class="opx-modal-card" role="dialog" aria-modal="true" aria-labelledby="opxModalTitle">
+      <div class="opx-order-modal-cluster">
+      <div class="opx-order-modal-anchor">
+      <section class="opx-modal-card opx-order-modal-card" role="dialog" aria-modal="true" aria-labelledby="opxModalTitle">
         <header class="opx-modal-topline">
           <h2 id="opxModalTitle" class="opx-modal-title">Заказ</h2>
           <div class="opx-modal-top-right">
             <select class="opx-modal-status-pill" id="opxModalStatus" aria-label="Статус заказа">
               <option value="new">Новый</option>
-              <option value="confirmed">Подтвержден</option>
-              <option value="courier">В работе</option>
+              <option value="confirmed">Подтверждён</option>
+              <option value="processing">В работе</option>
               <option value="delivered">Доставлен</option>
+              <option value="cancelled">Отменён</option>
             </select>
             <button type="button" id="opxModalClose" class="opx-modal-close" aria-label="Закрыть">✕</button>
           </div>
@@ -285,23 +323,42 @@
           <button type="button" class="opx-modal-tab is-active" data-opx-ord-tab="basic">Основное</button>
           <button type="button" class="opx-modal-tab" data-opx-ord-tab="goods">Товары</button>
           <button type="button" class="opx-modal-tab" data-opx-ord-tab="journal">Журнал</button>
+          <button type="button" class="opx-modal-tab" data-opx-ord-tab="notes">Заметки</button>
         </nav>
 
         <section class="opx-ord-panel" data-opx-ord-panel="basic">
         <section class="opx-modal-section">
           <h3 class="opx-modal-section-title">Клиент</h3>
           <div class="opx-modal-grid">
-            <label class="opx-modal-field">
+            <label class="opx-modal-field opx-modal-field-client-suggest">
               <span class="opx-modal-label">Клиент / организация</span>
-              <input id="opxModalClient" class="opx-modal-input" readonly />
+              <div class="opx-modal-client-suggest-wrap">
+                <input
+                  id="opxModalClient"
+                  type="search"
+                  class="opx-modal-input opx-modal-client-input-search"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  aria-autocomplete="list"
+                  aria-controls="opxModalClientSuggest"
+                />
+                <div
+                  id="opxModalClientSuggest"
+                  class="opx-modal-client-suggest"
+                  hidden
+                  role="listbox"
+                  aria-label="Найденные клиенты"
+                ></div>
+              </div>
             </label>
             <label class="opx-modal-field">
               <span class="opx-modal-label">Телефон</span>
-              <input id="opxModalPhone" class="opx-modal-input" readonly />
+              <input id="opxModalPhone" type="tel" class="opx-modal-input" autocomplete="tel" />
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Адрес доставки</span>
-              <input id="opxModalAddress" class="opx-modal-input" readonly />
+              <input id="opxModalAddress" type="text" class="opx-modal-input" autocomplete="street-address" />
             </label>
           </div>
           <div class="opx-modal-client-actions">
@@ -350,7 +407,7 @@
                 <button type="button" class="opx-mini-btn" data-opx-slot="09:00-14:00">утро</button>
                 <button type="button" class="opx-mini-btn" data-opx-slot="14:00-17:00">день</button>
                 <button type="button" class="opx-mini-btn" data-opx-slot="17:00-21:00">вечер</button>
-                <button type="button" class="opx-mini-btn" data-opx-slot="09:00-17:00">рабочее</button>
+                <button type="button" class="opx-mini-btn" data-opx-slot="09:00-17:00">9–17</button>
               </div>
               <input id="opxModalSlot" class="opx-modal-input" readonly />
             </label>
@@ -368,6 +425,7 @@
             </label>
           </div>
         </section>
+
         </section>
 
         <section class="opx-ord-panel" data-opx-ord-panel="goods" hidden>
@@ -402,11 +460,77 @@
           </section>
         </section>
 
+        <section class="opx-ord-panel" data-opx-ord-panel="notes" hidden>
+          <section class="opx-modal-section">
+            <h3 class="opx-modal-section-title">Заметки по клиенту</h3>
+            <div class="opx-order-notes-tools">
+              <button type="button" class="opx-order-notes-btn opx-order-notes-add" id="opxOrderNotesAdd">Добавить</button>
+              <button type="button" class="opx-order-notes-btn opx-order-notes-remove" id="opxOrderNotesDelete">Удалить</button>
+            </div>
+            <div class="opx-order-notes-table-scroll">
+              <table class="opx-order-notes-table">
+                <thead>
+                  <tr>
+                    <th class="opx-order-notes-num">#</th>
+                    <th>Тип заметки</th>
+                    <th>Информация</th>
+                  </tr>
+                </thead>
+                <tbody id="opxOrderNotesTbody"></tbody>
+              </table>
+            </div>
+            <h4 class="opx-order-notes-preview-title">Просмотр</h4>
+            <div class="opx-order-notes-bullet-card">
+              <ul id="opxOrderNotesBullets" class="opx-order-notes-bullets" aria-live="polite"></ul>
+            </div>
+          </section>
+        </section>
+
         <div class="opx-modal-actions">
-          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxModalSaveBtn">Сохранить</button>
-          <button type="button" class="opx-modal-btn" id="opxModalCancelBtn">Отмена</button>
+          <div class="opx-modal-actions-extra">
+            <button type="button" class="opx-modal-btn opx-modal-btn-danger" id="opxModalCancelOrderBtn">
+              Отменить заказ
+            </button>
+            <button type="button" class="opx-modal-btn opx-modal-btn-soft" id="opxModalRescheduleBtn">Перенести</button>
+          </div>
+          <div class="opx-modal-actions-save">
+            <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxModalSaveBtn">
+              Сохранить
+            </button>
+            <button type="button" class="opx-modal-btn" id="opxModalCancelBtn">Отмена</button>
+          </div>
         </div>
       </section>
+      <aside id="opxOrderNotesDock" class="opx-order-notes-dock" aria-label="Заметки по клиенту">
+        <h3 class="opx-order-notes-dock-title">Заметки</h3>
+        <ul id="opxOrderNotesDockList" class="opx-order-notes-dock-list" aria-live="polite"></ul>
+        <button type="button" class="opx-order-notes-dock-details" id="opxOrderNotesDockDetails">Подробно</button>
+      </aside>
+      </div>
+      </div>
+    </div>
+
+    <div id="opxOrderReasonOverlay" class="opx-order-reason-overlay" hidden aria-hidden="true">
+      <button type="button" class="opx-order-reason-backdrop" data-opx-order-reason-close="" aria-label="Закрыть"></button>
+      <div class="opx-order-reason-card" role="dialog" aria-modal="true" aria-labelledby="opxOrderReasonTitle">
+        <h3 id="opxOrderReasonTitle" class="opx-order-reason-title">Причина</h3>
+        <p id="opxOrderReasonHint" class="opx-order-reason-hint"></p>
+        <label class="opx-order-reason-field">
+          <span id="opxOrderReasonSpanLabel" class="opx-order-reason-label-span">Причина</span>
+          <textarea
+            id="opxOrderReasonText"
+            class="opx-modal-input opx-modal-textarea"
+            rows="3"
+            maxlength="500"
+          ></textarea>
+        </label>
+        <div class="opx-order-reason-actions">
+          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxOrderReasonConfirm">
+            Подтвердить
+          </button>
+          <button type="button" class="opx-modal-btn" id="opxOrderReasonDismiss">Отмена</button>
+        </div>
+      </div>
     </div>
 
     <div id="opxClientCardModal" class="opx-modal" hidden>
@@ -527,16 +651,104 @@
       </section>
     </div>
 
-    <div id="opxToast" class="opx-toast" hidden>
+    <div id="opxFiltersModal" class="opx-modal opx-filters-modal" hidden aria-labelledby="opxFiltersModalTitle">
+      <div class="opx-modal-backdrop" data-opx-filters-dismiss="backdrop"></div>
+      <section class="opx-filters-card" role="dialog" aria-modal="true">
+        <header class="opx-filters-head">
+          <h2 id="opxFiltersModalTitle" class="opx-filters-title">Фильтр выключен</h2>
+          <button type="button" class="opx-modal-close opx-filters-close" id="opxFiltersCloseBtn" aria-label="Закрыть">✕</button>
+        </header>
+        <div class="opx-filters-scroll">
+          <div class="opx-filters-row opx-filters-row--interval">
+            <span class="opx-filters-label">Интервал времени доставки</span>
+            <div class="opx-filters-control opx-filters-control--interval-slot">
+              <div class="opx-filters-slot-btns" role="group" aria-label="Интервал">
+                <button type="button" class="opx-filters-mini is-active" data-opx-adv-slot="all">все</button>
+                <button type="button" class="opx-filters-mini" data-opx-adv-slot="morning">утро</button>
+                <button type="button" class="opx-filters-mini" data-opx-adv-slot="day">день</button>
+                <button type="button" class="opx-filters-mini" data-opx-adv-slot="evening">вечер</button>
+                <button type="button" class="opx-filters-mini" data-opx-adv-slot="work">9–17</button>
+                <button type="button" class="opx-filters-mini" data-opx-adv-slot="unset">не задано</button>
+              </div>
+            </div>
+          </div>
+
+
+
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label">Форма оплаты</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvPayment" class="opx-filters-select" aria-label="Форма оплаты"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label"><span class="opx-filters-star">★</span> Зона доставки</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvZone" class="opx-filters-select" aria-label="Зона доставки"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label">Состояние заказа</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvOrderStatus" class="opx-filters-select" aria-label="Состояние заказа"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label">Водитель (экспедитор)</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvDriver" class="opx-filters-select" aria-label="Водитель"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label">День недели доставки</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvWeekday" class="opx-filters-select" aria-label="День недели"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label">Группа продукции</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvProduct" class="opx-filters-select" aria-label="Продукция"></select>
+            </div>
+          </div>
+
+          <div class="opx-filters-row">
+            <span class="opx-filters-label"><span class="opx-filters-star">★</span> Сумма заказа</span>
+            <div class="opx-filters-control">
+              <select id="opxAdvSumKind" class="opx-filters-select" aria-label="По сумме заказа">
+                <option value="all">Все</option>
+                <option value="positive">С суммой (больше 0 ₽)</option>
+                <option value="zero">Без суммы (0 ₽)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <footer class="opx-filters-foot">
+          <button type="button" class="opx-filters-outline" id="opxFiltersDisableBtn">Отключить фильтр</button>
+          <button type="button" class="opx-modal-btn opx-modal-btn-soft" id="opxFiltersCloseFooterBtn">Закрыть</button>
+        </footer>
+      </section>
+    </div>
+
+    <div id="opxToast" class="opx-toast" hidden role="status" aria-live="polite" aria-atomic="true">
       <div class="opx-toast-card"><p id="opxToastText"></p></div>
     </div>
 
     <script src="api-client.js"></script>
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
+    <script src="maps-runtime.js"></script>
     <script src="operator.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
   </body>
 </html>

@@ -14,6 +14,30 @@
   let products = [];
   let categories = [];
 
+  function escHtml(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function normalizeRuPhoneDigits(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.startsWith('8') && d.length === 11) d = `7${d.slice(1)}`;
+    return d.slice(0, 11);
+  }
+
+  function syncDriverLabelUi() {
+    const roleSel = document.getElementById('adminCreateUserRole');
+    const labelInp = document.getElementById('adminDriverRouteLabel');
+    if (!(roleSel instanceof HTMLSelectElement) || !(labelInp instanceof HTMLInputElement)) return;
+    const need = roleSel.value === 'driver';
+    labelInp.required = need;
+    labelInp.setAttribute('aria-required', need ? 'true' : 'false');
+  }
+
   function showMsg(el, text, ok = false) {
     if (!(el instanceof HTMLElement)) return;
     el.textContent = text || '';
@@ -24,6 +48,8 @@
     if (role === 'admin') return 'Админ';
     if (role === 'manager') return 'Менеджер';
     if (role === 'operator') return 'Оператор';
+    if (role === 'driver') return 'Водитель';
+    if (role === 'client') return 'Клиент';
     return role || 'Клиент';
   }
 
@@ -72,7 +98,7 @@
     usersList.innerHTML = users
       .map(
         (u) => `<div class="admin-row">
-      <div><strong>${u.first_name || ''} ${u.last_name || ''}</strong><br/><small>${u.email}</small></div>
+      <div><strong>${u.first_name || ''} ${u.last_name || ''}</strong><br/><small>${escHtml(u.email)}</small>${u.role === 'driver' ? `<br/><small class="admin-driver-label">Экспедитор: ${escHtml(u.driver_route_label || '—')}</small>` : ''}</div>
       <div>${u.phone || '—'}</div>
       <div>${roleLabel(u.role)}</div>
       <div>${u.blocked ? 'Заблокирован' : 'Активен'}</div>
@@ -80,9 +106,11 @@
         <select data-role-id="${u.id}">
           <option value="client" ${u.role === 'client' ? 'selected' : ''}>Клиент</option>
           <option value="operator" ${u.role === 'operator' ? 'selected' : ''}>Оператор</option>
+          <option value="driver" ${u.role === 'driver' ? 'selected' : ''}>Водитель</option>
           <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>Менеджер</option>
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Админ</option>
         </select>
+        <button data-driver-label-edit="${u.id}" class="ghost-btn" type="button" ${u.role === 'driver' ? '' : 'disabled title="Сначала роль Водитель"'} >Метка эксп.</button>
         <button data-block-id="${u.id}" class="ghost-btn">${u.blocked ? 'Разблокировать' : 'Блокировать'}</button>
       </div>
     </div>`
@@ -156,6 +184,7 @@
     if (!r.ok) return showMsg(userMsg, r.data?.error || 'Не удалось создать пользователя');
     api.resetCsrf();
     createUserForm.reset();
+    syncDriverLabelUi();
     showMsg(userMsg, 'Пользователь создан.', true);
     await loadUsers();
   }
@@ -202,6 +231,36 @@
   async function onUsersClick(event) {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    const labelEditId = target.getAttribute('data-driver-label-edit');
+    if (labelEditId) {
+      const user = users.find((u) => String(u.id) === labelEditId);
+      if (!user) return;
+      if (user.role !== 'driver') {
+        showMsg(userMsg, 'Сначала выберите роль «Водитель» в списке.', false);
+        return;
+      }
+      const next = window.prompt(
+        'Метка экспедитора (совпадает с ФИО в поле «Экспедитор» у оператора в заказе):',
+        user.driver_route_label || ''
+      );
+      if (next === null) return;
+      const trimmed = String(next).trim();
+      if (trimmed.length < 2) {
+        showMsg(userMsg, 'Метка: минимум 2 символа.', false);
+        return;
+      }
+      const r = await api.json(`/api/admin/users/${encodeURIComponent(labelEditId)}`, {
+        method: 'PATCH',
+        body: { driver_route_label: trimmed },
+      });
+      if (!r.ok) showMsg(userMsg, r.data?.error || 'Не удалось сохранить метку', false);
+      else {
+        api.resetCsrf();
+        showMsg(userMsg, 'Метка обновлена.', true);
+        await loadUsers();
+      }
+      return;
+    }
     const blockId = target.getAttribute('data-block-id');
     if (blockId) {
       const user = users.find((u) => String(u.id) === blockId);
@@ -264,6 +323,8 @@
 
   async function init() {
     if (!(await ensureAdmin())) return;
+    document.getElementById('adminCreateUserRole')?.addEventListener('change', syncDriverLabelUi);
+    syncDriverLabelUi();
     createUserForm?.addEventListener('submit', submitCreateUser);
     createProductForm?.addEventListener('submit', submitCreateProduct);
     settingsForm?.addEventListener('submit', submitSettings);

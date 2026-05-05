@@ -1,3 +1,14 @@
+/* ── Колокольчик уведомлений (до auth; вызывает app-core после загрузки) ── */
+(function initTopbarNotifications() {
+  const mount = document.getElementById('topbarNotifications');
+  if (!(mount instanceof HTMLElement) || mount.dataset.notifBootstrapped === '1') return;
+  mount.dataset.notifBootstrapped = '1';
+  const app = window.EkvalineApp;
+  if (app && typeof app.initNotificationsUI === 'function') {
+    app.initNotificationsUI(mount);
+  }
+})();
+
 /* ── Auth + cabinet (frontend only, no DB) ── */
 (function initAuthAndCabinet() {
   const USERS_KEY = 'ekvaline_users';
@@ -7,6 +18,12 @@
     'manager@ekvaline.demo': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
     'operator@ekvaline.demo': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
     'admin@ekvaline.demo': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'admin.html' },
+  };
+  /** Телефоны из сида БД (db.js), чтобы войти по номеру */
+  const DEMO_STAFF_PHONES = {
+    '70000000001': 'admin@ekvaline.demo',
+    '70000000002': 'manager@ekvaline.demo',
+    '70000000003': 'operator@ekvaline.demo',
   };
 
   const loginTrigger = document.querySelector('[data-auth-login]');
@@ -35,10 +52,22 @@
 
         <form id="authLoginForm" class="auth-form" novalidate>
           <label>Телефон или email
-            <input type="text" id="authLoginValue" placeholder="+7 (999) 123-45-67 или email" />
+            <input type="text" id="authLoginValue" placeholder="+7 (999) 123-45-67 или email" autocomplete="username" />
           </label>
           <label>Пароль
-            <input type="password" id="authLoginPassword" placeholder="Введите пароль" />
+            <span class="auth-password-wrap">
+              <input type="password" id="authLoginPassword" placeholder="Введите пароль" autocomplete="current-password" />
+              <button type="button" class="auth-password-toggle" id="authLoginPasswordToggle" aria-label="Показать пароль" aria-pressed="false">
+                <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                <svg class="auth-pw-icon auth-pw-icon-slash" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </span>
           </label>
           <p class="auth-error" id="authLoginError"></p>
           <button type="submit" class="auth-submit">Войти</button>
@@ -46,19 +75,43 @@
 
         <form id="authRegisterForm" class="auth-form hidden" novalidate>
           <label>Имя
-            <input type="text" id="authRegName" maxlength="40" placeholder="Ваше имя" />
+            <input type="text" id="authRegName" maxlength="40" placeholder="Ваше имя" autocomplete="name" />
           </label>
           <label>Email
-            <input type="email" id="authRegEmail" placeholder="example@mail.ru" />
+            <input type="email" id="authRegEmail" placeholder="example@mail.ru" autocomplete="email" />
           </label>
           <label>Телефон
-            <input type="tel" id="authRegPhone" maxlength="18" placeholder="+7 (999) 123-45-67" />
+            <input type="tel" id="authRegPhone" maxlength="18" placeholder="+7 (999) 123-45-67" autocomplete="tel" />
           </label>
           <label>Пароль
-            <input type="password" id="authRegPassword" minlength="8" maxlength="32" placeholder="Минимум 8 символов" />
+            <span class="auth-password-wrap">
+              <input type="password" id="authRegPassword" minlength="8" maxlength="128" placeholder="По требованиям сервера: буквы, цифра, символ" autocomplete="new-password" />
+              <button type="button" class="auth-password-toggle" id="authRegPasswordToggle" aria-label="Показать пароль" aria-pressed="false">
+                <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                <svg class="auth-pw-icon auth-pw-icon-slash" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </span>
           </label>
           <label>Повторите пароль
-            <input type="password" id="authRegPasswordConfirm" minlength="8" maxlength="32" placeholder="Повторите пароль" />
+            <span class="auth-password-wrap">
+              <input type="password" id="authRegPasswordConfirm" minlength="8" maxlength="128" placeholder="Повторите пароль" autocomplete="new-password" />
+              <button type="button" class="auth-password-toggle" id="authRegPasswordConfirmToggle" aria-label="Показать пароль" aria-pressed="false">
+                <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                <svg class="auth-pw-icon auth-pw-icon-slash" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </span>
           </label>
           <p class="auth-error" id="authRegisterError"></p>
           <button type="submit" class="auth-submit">Создать аккаунт</button>
@@ -110,6 +163,25 @@
   const authRegPassword = document.getElementById('authRegPassword');
   const authRegPasswordConfirm = document.getElementById('authRegPasswordConfirm');
   const authRegisterError = document.getElementById('authRegisterError');
+
+  function wireAuthPasswordToggle(toggleBtn, input) {
+    if (!(toggleBtn instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)) return;
+    function syncUi() {
+      const visible = input.type === 'text';
+      toggleBtn.classList.toggle('is-visible', visible);
+      toggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+      toggleBtn.setAttribute('aria-label', visible ? 'Скрыть пароль' : 'Показать пароль');
+    }
+    toggleBtn.addEventListener('click', () => {
+      input.type = input.type === 'password' ? 'text' : 'password';
+      syncUi();
+    });
+    syncUi();
+  }
+
+  wireAuthPasswordToggle(document.getElementById('authLoginPasswordToggle'), authLoginPassword);
+  wireAuthPasswordToggle(document.getElementById('authRegPasswordToggle'), authRegPassword);
+  wireAuthPasswordToggle(document.getElementById('authRegPasswordConfirmToggle'), authRegPasswordConfirm);
 
   const cabinet = document.getElementById('cabinet');
   const cabinetClose = document.getElementById('cabinetClose');
@@ -180,7 +252,14 @@
   }
 
   function isStrongPassword(value) {
-    return /^(?=.*[A-Za-zА-Яа-я])(?=.*\d).{8,32}$/.test(value);
+    const s = String(value || '');
+    if (s.length < 8 || s.length > 128) return false;
+    return (
+      /[A-ZА-ЯЁ]/.test(s) &&
+      /[a-zа-яё]/.test(s) &&
+      /\d/.test(s) &&
+      /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(s)
+    );
   }
 
   function escapeHtml(value) {
@@ -373,29 +452,27 @@
       openAuthModal('login');
       return;
     }
-    if (user.role === 'manager') {
+    const roleLc = String(user.role || 'client').toLowerCase();
+    if (roleLc === 'manager') {
       window.location.href = 'manager.html';
       return;
     }
-    if (user.role === 'admin') {
+    if (roleLc === 'admin') {
       window.location.href = 'admin.html';
       return;
     }
-    if (user.role === 'operator') {
+    if (roleLc === 'operator') {
       window.location.href = 'operator.html';
       return;
     }
-    window.location.href = 'cabinet.html';
-    return;
-
-    cabinetUserName.textContent = user.name;
-    cabinetUserMeta.textContent = `${user.email} · ${formatPhoneMask(user.phone)}`;
-    cabinet.classList.add('open');
-    cabinet.setAttribute('aria-hidden', 'false');
-    document.body.style.overflow = 'hidden';
-
-    const active = cabinetNavButtons.find((btn) => btn.classList.contains('active'));
-    renderCabinetSection(active?.dataset.cabinetSection || 'notifications', user);
+    if (roleLc === 'driver') {
+      window.location.href = 'driver.html';
+      return;
+    }
+    /** Отложить навигацию на тик цикла — чтобы браузер успел записать cookie сессии после login/register. */
+    window.setTimeout(() => {
+      window.location.href = 'cabinet.html';
+    }, 0);
   }
 
   function closeCabinet() {
@@ -416,12 +493,23 @@
     authRegisterError.textContent = '';
   }
 
+  function isStandaloneCabinetPage() {
+    try {
+      const name = (window.location.pathname || '').replace(/\\/g, '/').split('/').pop() || '';
+      return /^cabinet\.html$/i.test(name);
+    } catch {
+      return false;
+    }
+  }
+
   function updateHeaderAuth() {
     const user = readCurrentUser();
-    const isLoggedIn = Boolean(user) && user.role !== 'manager';
+    const roleLc = String(user?.role || '').toLowerCase();
+    const isLoggedIn = Boolean(user) && roleLc !== 'manager';
     loginTrigger.style.display = isLoggedIn ? 'none' : 'inline-flex';
     registerTrigger.style.display = isLoggedIn ? 'none' : 'inline-flex';
-    cabinetTrigger.style.display = isLoggedIn ? 'inline-flex' : 'none';
+    const onCabinetPage = isStandaloneCabinetPage();
+    cabinetTrigger.style.display = isLoggedIn && !onCabinetPage ? 'inline-flex' : 'none';
   }
 
   loginTrigger.addEventListener('click', () => openAuthModal('login'));
@@ -444,7 +532,7 @@
   });
   authClose.addEventListener('click', closeAuthModal);
 
-  authLoginForm.addEventListener('submit', (event) => {
+  authLoginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authLoginError.textContent = '';
 
@@ -458,18 +546,59 @@
       return;
     }
 
-    const staff = STAFF_DEMO_ACCOUNTS[byEmail];
+    const staffForPhone = byPhone && byPhone.length === 11 ? DEMO_STAFF_PHONES[byPhone] : null;
+    const staff = STAFF_DEMO_ACCOUNTS[byEmail] || (staffForPhone ? STAFF_DEMO_ACCOUNTS[staffForPhone] : undefined);
     if (staff) {
       if (password !== staff.password) {
         authLoginError.textContent = 'Неверный пароль сотрудника.';
         return;
       }
+      const skipServerSession = byEmail === 'manager@ekvaline.local';
+      if (skipServerSession) {
+        saveCurrentUser({
+          id: staff.role,
+          name: staff.name,
+          email: byEmail,
+          phone: '',
+          role: staff.role,
+        });
+        closeAuthModal();
+        window.location.href = staff.redirect;
+        return;
+      }
+      const api = window.EkvalineAPI;
+      if (!api || typeof api.json !== 'function') {
+        authLoginError.textContent =
+          'Вход сотрудника требует сервер: в папке проекта npm start и адрес http://localhost:3001 (не файл с диска).';
+        return;
+      }
+      const r = await api.json('/api/auth/login', {
+        method: 'POST',
+        body: { credential, password },
+      });
+      if (!r.ok) {
+        authLoginError.textContent = String(
+          r.data?.error || 'Сервер отклонил вход. Проверьте, что БД запущена и есть демо-пользователи (см. вывод npm start).'
+        );
+        return;
+      }
+      const u = r.data?.user;
+      if (!u || String(u.role || '').toLowerCase() !== staff.role) {
+        authLoginError.textContent = 'Учётная запись в базе не совпадает с ролью оператора/админа. Обратитесь к администратору БД.';
+        return;
+      }
+      api.resetCsrf?.();
+      const displayName =
+        String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email || staff.name;
       saveCurrentUser({
-        id: staff.role,
-        name: staff.name,
-        email: byEmail,
-        phone: '',
-        role: staff.role,
+        id: u.id,
+        name: displayName,
+        email: u.email,
+        phone: u.phone || '',
+        role: u.role,
+        first_name: u.first_name,
+        last_name: u.last_name,
+        bonus_balance: u.bonus_balance,
       });
       closeAuthModal();
       window.location.href = staff.redirect;
@@ -477,6 +606,60 @@
     }
 
     const user = readUsers().find((item) => item.email === byEmail || item.phone === byPhone);
+    const apiCli = window.EkvalineAPI;
+    if (apiCli?.json) {
+      let rApi;
+      try {
+        rApi = await apiCli.json('/api/auth/login', {
+          method: 'POST',
+          body: { credential, password },
+        });
+      } catch {
+        authLoginError.textContent =
+          'Не удалось связаться с сервером. Запустите в папке проекта команду запуска и откройте сайт по адресу с номером порта (не файл с диска и не режим предпросмотра без сервера).';
+        return;
+      }
+      if (rApi.ok && rApi.data?.user) {
+        const u = rApi.data.user;
+        apiCli.resetCsrf?.();
+        const displayName =
+          String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email;
+        saveCurrentUser({
+          id: u.id,
+          name: displayName,
+          email: u.email,
+          phone: u.phone || '',
+          role: u.role,
+          first_name: u.first_name,
+          last_name: u.last_name,
+          bonus_balance: u.bonus_balance,
+        });
+        updateHeaderAuth();
+        closeAuthModal();
+        window.setTimeout(() => openCabinet(), 50);
+        return;
+      }
+      if (rApi.status === 401) {
+        authLoginError.textContent = String(rApi.data?.error || 'Неверный логин или пароль.');
+        return;
+      }
+      if (rApi.status === 423) {
+        authLoginError.textContent = String(rApi.data?.error || 'Вход временно заблокирован.');
+        return;
+      }
+      if (rApi.status === 403) {
+        const raw = String(rApi.data?.error || '');
+        authLoginError.textContent = /csrf|токен/i.test(raw)
+          ? 'Сессия устарела. Обновите страницу и войдите снова.'
+          : raw || 'Вход сейчас недоступен. Попробуйте позже.';
+        return;
+      }
+      if (Number(rApi.status) > 0 && rApi.status !== 401) {
+        authLoginError.textContent = 'Не удалось войти. Проверьте подключение к интернету или попробуйте позже.';
+        return;
+      }
+    }
+
     if (!user || user.password !== password) {
       authLoginError.textContent = 'Неверные данные для входа.';
       return;
@@ -488,7 +671,7 @@
     openCabinet();
   });
 
-  authRegisterForm.addEventListener('submit', (event) => {
+  authRegisterForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authRegisterError.textContent = '';
 
@@ -515,12 +698,54 @@
       return;
     }
     if (!isStrongPassword(password)) {
-      authRegisterError.textContent = 'Пароль: 8-32 символа, минимум 1 буква и 1 цифра.';
+      authRegisterError.textContent =
+        'Пароль: 8–128 символов, нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).';
       return;
     }
     if (password !== passwordConfirm) {
       authRegisterError.textContent = 'Пароли не совпадают.';
       return;
+    }
+
+    const nameParts = name.split(/\s+/).filter(Boolean);
+    const first_name = nameParts[0] || name;
+    const last_name = nameParts.slice(1).join(' ');
+    const apiReg = window.EkvalineAPI;
+    if (apiReg?.json) {
+      const rReg = await apiReg.json('/api/auth/register', {
+        method: 'POST',
+        body: { first_name, last_name: last_name || '', email, phone, password },
+      });
+      if (rReg.ok && rReg.data?.user) {
+        const u = rReg.data.user;
+        apiReg.resetCsrf?.();
+        const displayName =
+          String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email;
+        saveCurrentUser({
+          id: u.id,
+          name: displayName,
+          email: u.email,
+          phone: u.phone || '',
+          role: u.role || 'client',
+          first_name: u.first_name,
+          last_name: u.last_name,
+          bonus_balance: u.bonus_balance,
+        });
+        updateHeaderAuth();
+        closeAuthModal();
+        openCabinet();
+        return;
+      }
+      if (rReg.status === 409) {
+        authRegisterError.textContent = String(rReg.data?.error || 'Этот email или телефон уже зарегистрированы.');
+        return;
+      }
+      if (Number(rReg.status) > 0) {
+        authRegisterError.textContent = String(
+          rReg.data?.error || 'Не удалось зарегистрироваться. Проверьте данные или подключение к серверу.'
+        );
+        return;
+      }
     }
 
     const users = readUsers();
@@ -565,7 +790,15 @@
     });
   });
 
-  cabinetLogout.addEventListener('click', () => {
+  cabinetLogout.addEventListener('click', async () => {
+    try {
+      if (window.EkvalineAPI?.json) {
+        await window.EkvalineAPI.json('/api/auth/logout', { method: 'POST', body: {} });
+        window.EkvalineAPI.resetCsrf?.();
+      }
+    } catch {
+      /* ignore */
+    }
     clearCurrentUser();
     closeCabinet();
     updateHeaderAuth();
@@ -578,6 +811,18 @@
   });
 
   updateHeaderAuth();
+
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('need-login') === '1') {
+      openAuthModal('login');
+      if (typeof history.replaceState === 'function') {
+        history.replaceState({}, '', window.location.pathname || '/');
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 })();
 
 /* ── Cart + checkout (frontend only, no DB) ── */
@@ -927,10 +1172,7 @@
   const appToastText = document.getElementById('appToastText');
   const appToastClose = document.getElementById('appToastClose');
 
-  let leafletReadyPromise = null;
-  let mapInstance = null;
-  let mapMarker = null;
-  let pickedAddress = '';
+  let checkoutMapCtl = null;
   let mapSearchTimer = null;
   let citySuggestTimer = null;
   let streetSuggestTimer = null;
@@ -971,37 +1213,6 @@
     if (!(cartErrorText instanceof HTMLElement)) return;
     cartErrorText.textContent = message || '';
     cartErrorText.style.display = message ? 'block' : 'none';
-  }
-
-  function loadLeaflet() {
-    if (window.L) return Promise.resolve(window.L);
-    if (leafletReadyPromise) return leafletReadyPromise;
-    leafletReadyPromise = new Promise((resolve, reject) => {
-      const cssExists = document.querySelector('link[data-leaflet-css="true"]');
-      if (!cssExists) {
-        const css = document.createElement('link');
-        css.rel = 'stylesheet';
-        css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        css.setAttribute('data-leaflet-css', 'true');
-        document.head.appendChild(css);
-      }
-
-      const existingScript = document.querySelector('script[data-leaflet-js="true"]');
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve(window.L));
-        existingScript.addEventListener('error', () => reject(new Error('leaflet_load_error')));
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.async = true;
-      script.setAttribute('data-leaflet-js', 'true');
-      script.onload = () => resolve(window.L);
-      script.onerror = () => reject(new Error('leaflet_load_error'));
-      document.head.appendChild(script);
-    });
-    return leafletReadyPromise;
   }
 
   function readAddressParts() {
@@ -1050,10 +1261,7 @@
       .replace(/^\s*(ул\.?|улица)\s+/i, '')
       .trim();
     const params = new URLSearchParams({
-      format: 'jsonv2',
       limit: '6',
-      'accept-language': 'ru',
-      addressdetails: '1',
       countrycodes: 'ru',
       city: parts.city,
       street: `${parts.house} ${normalizedStreet}`.trim(),
@@ -1062,8 +1270,8 @@
       params.set('bounded', '1');
       params.set('viewbox', ORENBURG_VIEWBOX);
     }
-    const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
-    return fetch(url, { headers: { Accept: 'application/json' } })
+    const url = `/api/public/geocode-search?${params.toString()}`;
+    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then((response) => {
         if (!response.ok) throw new Error('geocode_failed');
         return response.json();
@@ -1072,9 +1280,9 @@
   }
 
   function searchSuggestions(query, limit = 5) {
-    const q = encodeURIComponent(query);
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&accept-language=ru&q=${q}`;
-    return fetch(url, { headers: { Accept: 'application/json' } })
+    const params = new URLSearchParams({ limit: String(limit), q: query });
+    const url = `/api/public/geocode-search?${params.toString()}`;
+    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then((response) => {
         if (!response.ok) throw new Error('suggest_failed');
         return response.json();
@@ -1285,12 +1493,19 @@
     const normalizedStreet = String(parts.street || '')
       .replace(/^\s*(ул\.?|улица)\s+/i, '')
       .trim();
-    const q = encodeURIComponent(`${parts.city}, ${normalizedStreet}, ${parts.house}, Россия`);
-    let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&accept-language=ru&addressdetails=1&countrycodes=ru&q=${q}`;
+    const params = new URLSearchParams({
+      limit: '8',
+      countrycodes: 'ru',
+      q: `${parts.city}, ${normalizedStreet}, ${parts.house}, Россия`,
+    });
     if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
-      url += `&bounded=1&viewbox=${encodeURIComponent(ORENBURG_VIEWBOX)}`;
+      params.set('bounded', '1');
+      params.set('viewbox', ORENBURG_VIEWBOX);
     }
-    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    const response = await fetch(`/api/public/geocode-search?${params.toString()}`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
     if (!response.ok) return [];
     const rows = await response.json();
     return Array.isArray(rows) ? rows : [];
@@ -1325,8 +1540,8 @@
   }
 
   function reverseGeocode(lat, lon) {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ru&addressdetails=1`;
-    return fetch(url, { headers: { Accept: 'application/json' } })
+    const url = `/api/public/geocode-reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then((response) => {
         if (!response.ok) throw new Error('geocode_failed');
         return response.json();
@@ -1384,7 +1599,7 @@
   async function syncMapByInputs() {
     const parts = readAddressParts();
     updatePickedAddressLabel();
-    if (!parts.city || !parts.street || !parts.house || !mapInstance) return;
+    if (!parts.city || !parts.street || !parts.house || !checkoutMapCtl) return;
     const requestId = ++latestGeocodeRequestId;
     try {
       let candidates = await geocodeAddress(parts);
@@ -1397,10 +1612,8 @@
       const lat = Number(match.lat);
       const lon = Number(match.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-      if (!window.L) return;
-      if (!mapMarker) mapMarker = window.L.marker([lat, lon]).addTo(mapInstance);
-      else mapMarker.setLatLng([lat, lon]);
-      mapInstance.setView([lat, lon], 16);
+      checkoutMapCtl.setMarker(lat, lon);
+      checkoutMapCtl.flyToMarker(lat, lon, 16);
       const accurate = isGeocodeMatchAccurate(parts, match);
       if (!accurate && checkoutMapAddress instanceof HTMLElement) {
         checkoutMapAddress.textContent =
@@ -1413,31 +1626,32 @@
 
   async function initMapPicker() {
     if (!(checkoutMapRoot instanceof HTMLElement)) return;
-    const L = await loadLeaflet();
-    if (!mapInstance) {
-      mapInstance = L.map(checkoutMapRoot).setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap',
-      }).addTo(mapInstance);
-
-      mapInstance.on('click', async (e) => {
-        const { lat, lng } = e.latlng;
-        if (!mapMarker) mapMarker = L.marker([lat, lng]).addTo(mapInstance);
-        else mapMarker.setLatLng([lat, lng]);
-        if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Определяем адрес...';
-
-        try {
-          const data = await reverseGeocode(lat, lng);
-          applyReverseAddress(data);
-          updatePickedAddressLabel();
-        } catch {
-          updatePickedAddressLabel();
-          if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Не удалось определить адрес. Уточните поля вручную.';
-        }
-      });
+    const EM = window.EkvalineMaps;
+    if (!EM || typeof EM.attachInteractiveMap !== 'function') {
+      throw new Error('maps_runtime_missing');
     }
-    setTimeout(() => mapInstance?.invalidateSize(), 30);
+    if (!checkoutMapCtl) {
+      checkoutMapCtl = await EM.attachInteractiveMap(
+        checkoutMapRoot,
+        MAP_DEFAULT_CENTER,
+        MAP_DEFAULT_ZOOM,
+        {
+          onMapClick: async (lat, lng) => {
+            if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Определяем адрес...';
+
+            try {
+              const data = await reverseGeocode(lat, lng);
+              applyReverseAddress(data);
+              updatePickedAddressLabel();
+            } catch {
+              updatePickedAddressLabel();
+              if (checkoutMapAddress instanceof HTMLElement) checkoutMapAddress.textContent = 'Не удалось определить адрес. Уточните поля вручную.';
+            }
+          },
+        }
+      );
+    }
+    setTimeout(() => checkoutMapCtl?.invalidateSize(), 30);
   }
 
   async function openMapPicker() {
@@ -1457,7 +1671,7 @@
     mapPickerModal?.setAttribute('aria-hidden', 'false');
     try {
       await initMapPicker();
-      mapInstance?.setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
+      checkoutMapCtl?.flyToMarker(MAP_DEFAULT_CENTER[0], MAP_DEFAULT_CENTER[1], MAP_DEFAULT_ZOOM);
       void syncMapByInputs();
     } catch {
       closeMapPicker();
@@ -1884,6 +2098,7 @@ const planLineOne = document.getElementById('planLineOne');
 const planLineTwo = document.getElementById('planLineTwo');
 const planLineFive = document.getElementById('planLineFive');
 const planTierValue = document.getElementById('planTierValue');
+const calcPriceTotal = document.getElementById('calcPriceTotal');
 
 if (
   peopleRange &&
@@ -1900,7 +2115,8 @@ if (
   planLineOne &&
   planLineTwo &&
   planLineFive &&
-  planTierValue
+  planTierValue &&
+  calcPriceTotal
 ) {
   const activityMultiplier = {
     low: 0.88,
@@ -2054,6 +2270,9 @@ if (
     planLineTwo.textContent = `${twoQty} бут./заказ • ${twoOrders} ${pluralOrders(twoOrders)}/мес • ${formatMoney(twoTotal)}/мес`;
     planLineFive.textContent = `${fiveQty} бут./заказ • ${fiveOrders} ${pluralOrders(fiveOrders)}/мес • ${formatMoney(fiveTotal)}/мес`;
     planTierValue.textContent = tierLabel;
+
+    const cheapestMonthly = Math.min(oneTotal, twoTotal, fiveTotal);
+    calcPriceTotal.textContent = formatMoney(cheapestMonthly);
 
     if (state.usage === 'both') {
       calcNote.textContent = `Расчет для ${state.people} чел.: ${activityHint[state.activity]}, ${seasonHint[state.season]}, с запасом 10% на непредвиденное потребление.`;
@@ -2416,16 +2635,8 @@ if (deliveryPlanner) {
 
 const deliveryLeafletMap = document.getElementById('deliveryLeafletMap');
 
-if (deliveryLeafletMap && window.L) {
-  const map = L.map(deliveryLeafletMap, {
-    zoomControl: true,
-    scrollWheelZoom: true,
-  }).setView([51.768, 55.102], 12);
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap',
-  }).addTo(map);
+if (deliveryLeafletMap && window.EkvalineMaps && typeof window.EkvalineMaps.initStaticMap === 'function') {
+  void window.EkvalineMaps.initStaticMap(deliveryLeafletMap, [51.768, 55.102], 12).catch(() => {});
 }
 
 const aboutSteps = document.getElementById('aboutSteps');

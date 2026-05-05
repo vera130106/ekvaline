@@ -1,4 +1,4 @@
-при(function () {
+(function () {
   const FEED_KEY = 'ekvaline_blog_v2_posts';
   const WATER_KEY = 'ekvaline_blog_v2_water_liters';
   const WATER_DATE_KEY = 'ekvaline_blog_v2_water_date';

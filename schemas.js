@@ -114,7 +114,8 @@ const feedbackSchema = Joi.object({
 
 const adminUserPatchSchema = Joi.object({
   blocked: Joi.number().valid(0, 1).optional(),
-  role: Joi.string().valid('client', 'operator', 'manager', 'admin').optional(),
+  role: Joi.string().valid('client', 'operator', 'manager', 'admin', 'driver').optional(),
+  driver_route_label: Joi.string().trim().max(120).allow('', null).optional(),
 }).min(1);
 
 const adminUserCreateSchema = Joi.object({
@@ -123,7 +124,8 @@ const adminUserCreateSchema = Joi.object({
   email: Joi.string().trim().lowercase().max(EMAIL_MAX).email({ tlds: { allow: false } }).required(),
   phone: Joi.string().pattern(/^7\d{10}$/).required(),
   password: passwordSchema.required(),
-  role: Joi.string().valid('operator', 'manager', 'admin').required(),
+  role: Joi.string().valid('client', 'operator', 'manager', 'admin', 'driver').required(),
+  driver_route_label: Joi.string().trim().max(120).allow('', null).optional(),
 });
 
 const adminProductCreateSchema = Joi.object({
@@ -205,6 +207,7 @@ const orderPatchSchema = Joi.object({
   total_sum: Joi.number().min(0).max(1_000_000_000).optional(),
   items_json: Joi.string().trim().min(2).max(20000).optional(),
   courier_note: Joi.string().trim().max(NOTE_MAX).allow('').optional(),
+  change_reason: Joi.string().trim().max(2000).allow('').optional(),
 }).min(1);
 
 /** Клиент меняет адрес/дату/слот до передачи в доставку */
@@ -215,7 +218,12 @@ const orderClientPatchSchema = Joi.object({
     .optional()
     .messages({ 'string.pattern.base': 'Дата: формат ГГГГ-ММ-ДД.' }),
   delivery_slot: Joi.string().trim().min(3).max(SLOT_MAX).optional(),
+  change_reason: Joi.string().trim().max(2000).allow('').optional(),
 }).min(1);
+
+const orderCancelReasonSchema = Joi.object({
+  reason: Joi.string().trim().min(3).max(2000).required(),
+});
 
 const managerSettingsSchema = Joi.object({
   workLine: Joi.string().trim().min(3).max(200).required(),
@@ -272,6 +280,7 @@ module.exports = {
   operatorOrderCreateSchema,
   orderPatchSchema,
   orderClientPatchSchema,
+  orderCancelReasonSchema,
   managerSettingsSchema,
   deliveryAddressCreateSchema,
   deliveryAddressPatchSchema,
