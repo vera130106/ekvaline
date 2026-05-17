@@ -514,9 +514,9 @@ callbackForm.addEventListener('submit', (e) => {
 
 | Роль | Email | Пароль |
 |------|--------|--------|
-| Администратор | `admin@ekvaline.demo` | `AdminEkva2026!` |
-| Менеджер | `manager@ekvaline.demo` | `ManagerEkva2026!` |
-| Оператор | `operator@ekvaline.demo` | `OperatorEkva2026!` |
+| Администратор | `adminekva@mail.ru` | `AdminEkva2026!` |
+| Менеджер | `managerekva@mail.ru` | `ManagerEkva2026!` |
+| Оператор | `operatorekva@mail.ru` | `OperatorEkva2026!` |
 
 ### Важно про URL
 

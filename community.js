@@ -1,11 +1,17 @@
 (function () {
   const FEED_KEY = 'ekvaline_blog_v2_posts';
+  const POST_READS_MAP_KEY = 'ekvaline_blog_post_reads_v1';
+  /** Один браузер — одно добавление просмотра на пост («Читать» в первый раз). */
+  const FULLREAD_ONCE_PREFIX = 'ekvaline_blog_fullread_once_v1__';
   const WATER_KEY = 'ekvaline_blog_v2_water_liters';
   const WATER_DATE_KEY = 'ekvaline_blog_v2_water_date';
   const SORT_KEY = 'ekvaline_blog_v2_sort';
   const BLOG_ADMIN_KEY = 'ekvaline_blog_manager_data';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
   const POLL_VOTES_KEY = 'ekvaline_blog_poll_votes';
+  /** Голоса в опросах из настроек сайта (только локально в браузере). */
+  const SITE_POLL_USER_VOTES_KEY = 'ekvaline_site_poll_user_vote_v1';
+  const SITE_POLL_AGG_KEY = 'ekvaline_site_poll_agg_v1';
   const STORY_MS = 7000;
   const MAX_POSTS = 5;
   const DAILY_TARGET = 2.0;
@@ -167,6 +173,8 @@
       blockTitles: {},
       hydrationPoll: null,
     },
+    /** Активные опросы из GET /api/public/settings (sitePolls). */
+    sitePolls: [],
   };
   let revealObserver = null;
 
@@ -181,6 +189,58 @@
 
   function savePosts() {
     localStorage.setItem(FEED_KEY, JSON.stringify(state.posts));
+  }
+
+  function readReadsMapRaw() {
+    const m = safeJsonParse(localStorage.getItem(POST_READS_MAP_KEY), null);
+    return m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+  }
+
+  function saveReadsMap(map) {
+    try {
+      localStorage.setItem(POST_READS_MAP_KEY, JSON.stringify(map));
+    } catch {
+      /* private mode или переполнение */
+    }
+  }
+
+  /** Подтягивает устаревшее поле post.views в общую карту (для статистики в менеджере). */
+  function migrateReadsFromPostObjects(posts) {
+    const map = readReadsMapRaw();
+    let changed = false;
+    (Array.isArray(posts) ? posts : []).forEach((p) => {
+      if (!p || !p.id) return;
+      const v = Math.max(0, Number(p.views) || 0);
+      const cur = Math.max(0, Number(map[p.id]) || 0);
+      if (v > cur) {
+        map[p.id] = v;
+        changed = true;
+      }
+    });
+    if (changed) saveReadsMap(map);
+  }
+
+  function getPostReadsForDisplay(post) {
+    if (!post?.id) return 0;
+    const mapVal = Math.max(0, Number(readReadsMapRaw()[post.id]) || 0);
+    const postVal = Math.max(0, Number(post.views) || 0);
+    return Math.max(mapVal, postVal);
+  }
+
+  function incrementPostFullRead(postId) {
+    const id = String(postId || '');
+    if (!id) return 0;
+    const map = readReadsMapRaw();
+    const next = Math.max(0, Number(map[id]) || 0) + 1;
+    map[id] = next;
+    saveReadsMap(map);
+    return next;
+  }
+
+  function cssEscapeSel(value) {
+    const v = String(value || '');
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(v);
+    return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   function saveSort() {
@@ -241,6 +301,22 @@
 
   function savePollVotes(votes) {
     localStorage.setItem(POLL_VOTES_KEY, JSON.stringify(votes));
+  }
+
+  function readSitePollUserVotes() {
+    return safeJsonParse(localStorage.getItem(SITE_POLL_USER_VOTES_KEY), {});
+  }
+
+  function saveSitePollUserVotes(map) {
+    localStorage.setItem(SITE_POLL_USER_VOTES_KEY, JSON.stringify(map));
+  }
+
+  function readSitePollAgg() {
+    return safeJsonParse(localStorage.getItem(SITE_POLL_AGG_KEY), {});
+  }
+
+  function saveSitePollAgg(map) {
+    localStorage.setItem(SITE_POLL_AGG_KEY, JSON.stringify(map));
   }
 
   function readCurrentUser() {
@@ -461,6 +537,65 @@
     card.hidden = false;
   }
 
+  function renderSitePollsFromSettings() {
+    const mount = document.getElementById('communitySitePollsMount');
+    if (!mount) return;
+    const polls = Array.isArray(state.sitePolls) ? state.sitePolls : [];
+    if (!polls.length) {
+      mount.innerHTML = '';
+      return;
+    }
+    const voteMap = readSitePollUserVotes();
+    const aggRoot = readSitePollAgg();
+    mount.innerHTML = polls
+      .map((poll) => {
+        const voted = Boolean(voteMap[poll.id]);
+        const buckets =
+          aggRoot[poll.id] && typeof aggRoot[poll.id] === 'object' ? aggRoot[poll.id] : {};
+        let total = 0;
+        for (const o of poll.options) {
+          total += Number(buckets[o.id]) || 0;
+        }
+        const heading = String(poll.title || '').trim() || 'Опрос';
+        const optionsHtml = poll.options
+          .map((item) => {
+            const votes = Number(buckets[item.id]) || 0;
+            const percent = total > 0 ? Math.round((votes / total) * 100) : 0;
+            return `
+          <button type="button" class="blogv2-action blogv2-poll-option" data-site-poll-option="1" data-site-poll-id="${escapeHtml(
+            poll.id
+          )}" data-site-option-id="${escapeHtml(item.id)}" ${voted ? 'disabled' : ''} style="--poll-percent:${percent}%">
+            <span class="blogv2-poll-option-fill" aria-hidden="true"></span>
+            <span class="blogv2-poll-option-label">${escapeHtml(item.text || '')}</span>
+            <strong class="blogv2-poll-option-value">${votes} (${percent}%)</strong>
+          </button>`;
+          })
+          .join('');
+        return `
+        <section class="blogv2-card blogv2-site-poll-card">
+          <h3>${escapeHtml(heading)}</h3>
+          <p>${escapeHtml(poll.question || '')}</p>
+          <div class="blogv2-poll-options">${optionsHtml}</div>
+        </section>`;
+      })
+      .join('');
+    initScrollReveal();
+  }
+
+  async function hydrateSitePollsFromApi() {
+    const mount = document.getElementById('communitySitePollsMount');
+    if (!mount) return;
+    try {
+      const res = await fetch('/api/public/settings', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      state.sitePolls = Array.isArray(data.sitePolls) ? data.sitePolls : [];
+      renderSitePollsFromSettings();
+    } catch {
+      /* ignore */
+    }
+  }
+
   function renderSidebarBlockTitles() {
     const titles = state.admin.blockTitles || {};
     const factTitle = document.getElementById('factBlockTitle');
@@ -511,7 +646,12 @@
             <div class="blogv2-post-body">
               <div class="blogv2-post-head">
                 <h3>${escapeHtml(post.title)}</h3>
-                <span class="blogv2-post-date">${formatDate(post.createdAt)}</span>
+                <div class="blogv2-post-meta">
+                  <span class="blogv2-post-date">${formatDate(post.createdAt)}</span>
+                  <span class="blogv2-post-reads" title="Сколько раз открыли полный текст («Читать»)">
+                    👁 ${getPostReadsForDisplay(post)}
+                  </span>
+                </div>
               </div>
               <p class="blogv2-post-excerpt">${escapeHtml(post.excerpt)}</p>
               <p class="blogv2-post-details" hidden>${escapeHtml(post.details || post.excerpt)}</p>
@@ -905,6 +1045,29 @@
         return;
       }
 
+      const sitePollBtn = target.closest('[data-site-poll-option]');
+      if (sitePollBtn) {
+        const pollId = sitePollBtn.getAttribute('data-site-poll-id');
+        const optionId = sitePollBtn.getAttribute('data-site-option-id');
+        if (!pollId || !optionId) return;
+        const polls = Array.isArray(state.sitePolls) ? state.sitePolls : [];
+        const poll = polls.find((p) => String(p.id) === String(pollId));
+        if (!poll || !Array.isArray(poll.options)) return;
+        const vm = readSitePollUserVotes();
+        if (vm[pollId]) return;
+        vm[pollId] = optionId;
+        saveSitePollUserVotes(vm);
+        const agg = readSitePollAgg();
+        const prevBucket =
+          agg[pollId] && typeof agg[pollId] === 'object' ? agg[pollId] : {};
+        const bucket = { ...prevBucket };
+        bucket[optionId] = (Number(bucket[optionId]) || 0) + 1;
+        agg[pollId] = bucket;
+        saveSitePollAgg(agg);
+        renderSitePollsFromSettings();
+        return;
+      }
+
       const pollBtn = target.closest('[data-poll-option]');
       if (pollBtn) {
         if (!requireAuthorizedAction()) return;
@@ -926,14 +1089,30 @@
 
       const readBtn = target.closest('[data-read-post]');
       if (readBtn) {
-        const postId = readBtn.getAttribute('data-read-post');
-        const article = document.querySelector(`[data-post-id="${postId}"] .blogv2-post-excerpt`);
-        const details = document.querySelector(`[data-post-id="${postId}"] .blogv2-post-details`);
-        if (article && details instanceof HTMLElement) {
-          article.hidden = true;
+        const postId = String(readBtn.getAttribute('data-read-post') || '');
+        const root = document.querySelector(`article.blogv2-post[data-post-id="${cssEscapeSel(postId)}"]`);
+        const excerptEl = root?.querySelector(':scope > .blogv2-post-body .blogv2-post-excerpt');
+        const details = root?.querySelector(':scope > .blogv2-post-body .blogv2-post-details');
+        if (excerptEl instanceof HTMLElement && details instanceof HTMLElement) {
+          excerptEl.hidden = true;
           details.hidden = false;
           readBtn.textContent = 'Открыто';
           readBtn.setAttribute('disabled', 'true');
+          try {
+            if (postId && localStorage.getItem(FULLREAD_ONCE_PREFIX + postId) !== '1') {
+              localStorage.setItem(FULLREAD_ONCE_PREFIX + postId, '1');
+              const total = incrementPostFullRead(postId);
+              const i = state.posts.findIndex((p) => p.id === postId);
+              if (i >= 0) {
+                state.posts[i] = { ...state.posts[i], views: total };
+                savePosts();
+              }
+              const readsBadge = root?.querySelector('.blogv2-post-reads');
+              if (readsBadge) readsBadge.textContent = `👁 ${total}`;
+            }
+          } catch {
+            /* private mode и т.п. */
+          }
         }
         return;
       }
@@ -1037,6 +1216,7 @@
     const saved = safeJsonParse(localStorage.getItem(FEED_KEY), null);
     state.posts = Array.isArray(saved) && saved.length ? saved : DEFAULT_POSTS;
     state.posts = enforcePostsLimit(state.posts);
+    migrateReadsFromPostObjects(state.posts);
     if (!saved || !saved.length) {
       savePosts();
     } else {
@@ -1147,6 +1327,7 @@
           likes: 58,
           comments: [{ id: `c51_${Date.now()}`, name: 'Алёна', text: 'Очень понравился формат с маленькими шагами.', likes: 1 }],
           reactions: { useful: 17, new: 10, tryIt: 11 },
+          views: 0,
           saved: false,
         });
         savePosts();
@@ -1238,6 +1419,7 @@
     lockBlogForManager();
     bindEvents();
     initHeroParallax();
+    void hydrateSitePollsFromApi();
     const storyCtaBtn = document.getElementById('storyCtaBtn');
     const storyPrevZone = document.getElementById('storyPrevZone');
     const storyNextZone = document.getElementById('storyNextZone');

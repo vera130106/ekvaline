@@ -248,7 +248,11 @@
   let newOrdersInboxOpen = false;
   let filtersModalStaticReady = false;
 
-  const couriers = ['Казаченко Сергей', 'Комаров Сергей', 'Лукашин Евгений', 'Макаров Александр', 'Кравцов Илья'];
+  /** Имена по умолчанию для локальной демо-выгрузки; к ним добавляются водители из БД. */
+  const DEMO_DRIVER_POOL = ['Казаченко Сергей', 'Комаров Сергей', 'Лукашин Евгений', 'Макаров Александр', 'Кравцов Илья'];
+
+  /** Слияние: имена из API (роль водитель), уже назначенные в заказах, демо-пул для обратной совместимости. */
+  let mergedDriverChoices = [...DEMO_DRIVER_POOL].sort((a, b) => a.localeCompare(b, 'ru'));
   const OPERATOR_NOTE_TYPES = [
     { value: 'simple', label: 'Простая заметка' },
     { value: 'order_info', label: 'Информация для заказа' },
@@ -768,7 +772,20 @@
     if (!api) return;
     try {
       const r = await api.json('/api/auth/me');
-      if (!r.ok) return;
+      if (!r.ok) {
+        if (Number(r.status) === 401 || Number(r.status) === 403) {
+          const cur = readUser();
+          const curRole = String(cur?.role || '').toLowerCase();
+          if (cur && ['operator', 'manager', 'admin'].includes(curRole)) {
+            try {
+              localStorage.removeItem(CURRENT_USER_KEY);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        return;
+      }
 
       const u = r.data?.user;
       if (u && typeof u === 'object') {
@@ -793,7 +810,7 @@
       return false;
     }
     /** Старый «фейковый» вход сохранял id как строку роли — API давал 401 и сразу выкидывал на главную. */
-    if (role === 'operator' || role === 'admin') {
+    if (role === 'operator' || role === 'admin' || role === 'manager') {
       const id = Number(user.id);
       if (!Number.isFinite(id) || id <= 0) {
         localStorage.removeItem(CURRENT_USER_KEY);
@@ -1313,7 +1330,7 @@
     TAB_MAP?.classList.add('is-active');
     TAB_ORDERS?.classList.remove('is-active');
     TAB_REPORTS?.classList.remove('is-active');
-    window.setTimeout(() => {
+    const showMap = () => {
       void (async () => {
         const ok = await ensureZoneMap();
         if (ok) {
@@ -1323,7 +1340,8 @@
           renderZoneFallback();
         }
       })();
-    }, 60);
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(showMap));
   }
 
   function closeZoneMapOverlay() {
@@ -3086,7 +3104,7 @@
         courier_note: i % 3 ? '' : 'ДОКУМЕНТЫ, звонить за 20 минут',
         created_at: created.toISOString(),
         items_json: JSON.stringify([{ title: lineTitle, qty, unit_price: unitPrice }]),
-        driver: couriers[i % couriers.length],
+        driver: DEMO_DRIVER_POOL[i % DEMO_DRIVER_POOL.length],
       });
     }
     return base.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -3111,53 +3129,63 @@
     }
   }
 
+  function emptyOrdersFallback() {
+    state.orders = isOperatorUiDevHost() ? augmentDemoOrders(mapLocalOrders()) : [];
+  }
+
   async function loadOrders() {
     const seq = (loadOrdersSeq += 1);
-    const api = window.EkvalineAPI;
-    if (!api) {
-      state.orders = augmentDemoOrders(mapLocalOrders());
-      return;
-    }
-
-    let r;
     try {
-      r = await Promise.race([
-        api.json('/api/orders'),
-        new Promise((resolve) =>
-          window.setTimeout(() => resolve({ __opxTimedOut: true }), LOAD_ORDERS_TIMEOUT_MS)
-        ),
-      ]);
-    } catch {
-      if (seq !== loadOrdersSeq) return;
-      state.orders = augmentDemoOrders(mapLocalOrders());
-      showToast('Ошибка сети при загрузке заказов.');
-      return;
-    }
+      const api = window.EkvalineAPI;
+      if (!api) {
+        emptyOrdersFallback();
+        return;
+      }
 
-    if (r && r.__opxTimedOut) {
-      if (seq !== loadOrdersSeq) return;
-      state.orders = augmentDemoOrders(mapLocalOrders());
-      showToast(
-        'Сервер не ответил вовремя. Запустите проект через node и откройте тот же хост/port (или нажмите ⟳ позже).'
-      );
-      return;
-    }
+      let r;
+      try {
+        r = await Promise.race([
+          api.json('/api/orders'),
+          new Promise((resolve) =>
+            window.setTimeout(() => resolve({ __opxTimedOut: true }), LOAD_ORDERS_TIMEOUT_MS)
+          ),
+        ]);
+      } catch {
+        if (seq !== loadOrdersSeq) return;
+        emptyOrdersFallback();
+        showToast('Ошибка сети при загрузке заказов.');
+        return;
+      }
 
-    if (seq !== loadOrdersSeq) return;
-    if (!r.ok) {
-      state.orders = augmentDemoOrders(mapLocalOrders());
-      if (redirectOnUnauthorized(r.status)) return;
-      if (String(r.data?.error || '').trim()) showToast(String(r.data.error).trim());
-      else if (!state.orders.length) showToast('Не удалось получить заказы. Проверьте сервер или ответ не JSON.');
-      return;
-    }
-    const rows = Array.isArray(r.data?.orders) ? r.data.orders : [];
-    state.orders = rows.map((o) => ({
-      ...o,
-      client: resolveClientName(o, null),
-    }));
-    if (isOperatorUiDevHost() && state.orders.length === 0) {
-      state.orders = augmentDemoOrders(mapLocalOrders());
+      if (r && r.__opxTimedOut) {
+        if (seq !== loadOrdersSeq) return;
+        emptyOrdersFallback();
+        showToast(
+          'Сервер не ответил вовремя. Запустите проект через node и откройте тот же хост/port (или нажмите ⟳ позже).'
+        );
+        return;
+      }
+
+      if (seq !== loadOrdersSeq) return;
+      if (!r.ok) {
+        emptyOrdersFallback();
+        if (redirectOnUnauthorized(r.status)) return;
+        if (String(r.data?.error || '').trim()) showToast(String(r.data.error).trim());
+        else if (!state.orders.length) showToast('Не удалось получить заказы. Проверьте сервер или ответ не JSON.');
+        return;
+      }
+      const rows = Array.isArray(r.data?.orders) ? r.data.orders : [];
+      state.orders = rows.map((o) => ({
+        ...o,
+        client: resolveClientName(o, null),
+      }));
+      if (isOperatorUiDevHost() && state.orders.length === 0) {
+        state.orders = augmentDemoOrders(mapLocalOrders());
+      }
+    } finally {
+      if (seq === loadOrdersSeq) {
+        await refreshOperatorDriverChoices();
+      }
     }
   }
 
@@ -3330,6 +3358,72 @@
     return false;
   }
 
+  function rebuildDriverFilterSelect() {
+    if (!(FILTERS_ADV_DRIVER instanceof HTMLSelectElement)) return;
+    const opts = mergedDriverChoices
+      .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+      .join('');
+    FILTERS_ADV_DRIVER.innerHTML = `<option value="all">Все</option><option value="__none">Не назначен</option>${opts}`;
+  }
+
+  function rebuildModalDriverSelect() {
+    if (!(MODAL_DRIVER instanceof HTMLSelectElement)) return;
+    const prev = MODAL_DRIVER.value;
+    const opts = mergedDriverChoices
+      .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+      .join('');
+    MODAL_DRIVER.innerHTML = `<option value="">Не выбран</option>${opts}`;
+    if (prev && selectHasValue(MODAL_DRIVER, prev)) MODAL_DRIVER.value = prev;
+  }
+
+  function rebuildUiDriverSelectsFromMerged() {
+    rebuildDriverFilterSelect();
+    rebuildModalDriverSelect();
+  }
+
+  function driversDistinctFromOrders() {
+    const s = new Set();
+    state.orders.forEach((o) => {
+      const d = String(o.driver || '').trim();
+      if (d) s.add(d);
+    });
+    return [...s];
+  }
+
+  function buildMergedDriverChoices(apiDrivers) {
+    const s = new Set();
+    DEMO_DRIVER_POOL.forEach((x) => s.add(x));
+    (apiDrivers || []).forEach((d) => {
+      const t = String(d || '').trim();
+      if (t) s.add(t);
+    });
+    driversDistinctFromOrders().forEach((d) => s.add(d));
+    return [...s].sort((a, b) => a.localeCompare(b, 'ru'));
+  }
+
+  const DRIVER_LIST_TIMEOUT_MS = 12000;
+
+  async function refreshOperatorDriverChoices() {
+    let apiDrivers = [];
+    const api = window.EkvalineAPI;
+    if (api && typeof api.json === 'function') {
+      try {
+        const r = await Promise.race([
+          api.json('/api/orders/operator/drivers'),
+          new Promise((resolve) =>
+            window.setTimeout(() => resolve({ __opxTimedOut: true }), DRIVER_LIST_TIMEOUT_MS)
+          ),
+        ]);
+        if (r && !r.__opxTimedOut && r.ok && Array.isArray(r.data?.drivers)) apiDrivers = r.data.drivers;
+      } catch {
+        apiDrivers = [];
+      }
+    }
+    mergedDriverChoices = buildMergedDriverChoices(apiDrivers);
+    rebuildUiDriverSelectsFromMerged();
+    syncAdvDriverSelectFromState();
+  }
+
   /** Текст в пустой таблице: объясняет, где адреса и почему нет строк. */
   function operatorEmptyGridHintHtml() {
     if (!state.orders.length) {
@@ -3387,11 +3481,6 @@
     if (FILTERS_ADV_PRODUCT instanceof HTMLSelectElement) {
       FILTERS_ADV_PRODUCT.innerHTML = `<option value="all">Все</option>${products
         .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-        .join('')}`;
-    }
-    if (FILTERS_ADV_DRIVER instanceof HTMLSelectElement) {
-      FILTERS_ADV_DRIVER.innerHTML = `<option value="all">Все</option><option value="__none">Не назначен</option>${couriers
-        .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
         .join('')}`;
     }
     filtersModalStaticReady = true;
@@ -4822,7 +4911,7 @@
         showToast('Карта недоступна');
         return;
       }
-      window.setTimeout(() => clientMapCtl?.invalidateSize(), 60);
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => clientMapCtl?.invalidateSize()));
     })();
     refreshBodyBackdropClass();
   }
@@ -5756,6 +5845,7 @@
       }
       if (ORDER_MODAL instanceof HTMLElement && !ORDER_MODAL.hidden) closeOrderModal();
     });
+    rebuildUiDriverSelectsFromMerged();
     syncAdvSlotButtonsFromState();
     syncAdvDriverSelectFromState();
   }
@@ -5763,6 +5853,11 @@
   async function init() {
     resetOperatorChromeOnBoot();
     if (window.EkvalineMaps && typeof window.EkvalineMaps.prefetch === 'function') window.EkvalineMaps.prefetch();
+    try {
+      await window.EkvalineAPI?.awaitBootReconciliation?.();
+    } catch {
+      /* ignore */
+    }
     await hydrateStaffFromServerSession();
     if (!ensureAccess()) return;
     bind();
@@ -5782,7 +5877,7 @@
     try {
       await loadOrders();
     } catch {
-      state.orders = augmentDemoOrders(mapLocalOrders());
+      emptyOrdersFallback();
       showToast('Сбой при загрузке — проверьте консоль или сеть.');
     }
     applyFilters();

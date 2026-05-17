@@ -2,14 +2,71 @@
 
 const YKEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
 
+/** Подложка Leaflet (XYZ), если ключ Яндекса не задан: свои тайлы вместо openstreetmap.org */
+const LEAFLET_TILE_URL = String(
+  process.env.LEAFLET_TILE_URL || process.env.EKVALINE_LEAFLET_TILE_URL || ''
+).trim();
+const LEAFLET_TILE_ATTRIBUTION = String(
+  process.env.LEAFLET_TILE_ATTRIBUTION || process.env.EKVALINE_LEAFLET_ATTRIBUTION || ''
+).trim();
+
+function parseLeafletSubdomains(raw) {
+  const t = String(raw == null ? 'abc' : raw).trim();
+  if (!t) return ['a', 'b', 'c'];
+  if (t.includes(',')) return t.split(',').map((x) => x.trim()).filter(Boolean);
+  return t.split('').filter(Boolean);
+}
+
+const LEAFLET_TILE_SUBDOMAINS = parseLeafletSubdomains(
+  process.env.LEAFLET_TILE_SUBDOMAINS || process.env.EKVALINE_LEAFLET_TILE_SUBDOMAINS
+);
+
 /** Очередь для лимита Nominatim (общий интервал между запросами). */
 let nominatimQueueTail = Promise.resolve();
 let nominatimLastAt = 0;
 
+/** Кэш ответов поиска: повтор того же адреса без очереди в Nominatim (ускорение карты и подсказок). */
+const GEOCODE_SEARCH_CACHE_MAX = 220;
+const GEOCODE_SEARCH_CACHE_TTL_MS = 120000;
+/** @type {Map<string, { t: number, rows: any[] }>} */
+const geocodeSearchCache = new Map();
+
+function geocodeSearchCacheKey(req) {
+  const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 10));
+  return JSON.stringify({
+    l: limit,
+    q: String(req.query.q || '').trim().toLowerCase(),
+    city: String(req.query.city || '').trim().toLowerCase(),
+    street: String(req.query.street || '').trim().toLowerCase(),
+    house: String(req.query.house || '').trim().toLowerCase(),
+    b: String(req.query.bounded || '') === '1' ? '1' : '0',
+    vb: String(req.query.viewbox || '').trim(),
+    cc: String(req.query.countrycodes || '').trim(),
+  });
+}
+
+function geocodeSearchCacheGet(key) {
+  const entry = geocodeSearchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.t > GEOCODE_SEARCH_CACHE_TTL_MS) {
+    geocodeSearchCache.delete(key);
+    return null;
+  }
+  return entry.rows;
+}
+
+function geocodeSearchCacheSet(key, rows) {
+  if (geocodeSearchCache.size >= GEOCODE_SEARCH_CACHE_MAX) {
+    const oldest = geocodeSearchCache.keys().next().value;
+    if (oldest != null) geocodeSearchCache.delete(oldest);
+  }
+  geocodeSearchCache.set(key, { t: Date.now(), rows: Array.isArray(rows) ? rows : [] });
+}
+
 function nominatimThrottleMs() {
   const run = nominatimQueueTail.then(async () => {
     const now = Date.now();
-    const wait = Math.max(0, 1120 - (now - nominatimLastAt));
+    const wait = Math.max(0, 1050 - (now - nominatimLastAt));
     if (wait) await new Promise((r) => setTimeout(r, wait));
     nominatimLastAt = Date.now();
   });
@@ -139,8 +196,11 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
   app.get('/api/public/maps-config', (req, res) => {
     res.set('Cache-Control', 'private, max-age=120');
     res.json({
-      provider: YKEY ? 'yandex' : 'osm',
+      provider: YKEY ? 'yandex' : LEAFLET_TILE_URL ? 'leaflet' : 'osm',
       yandexMapsKey: YKEY || null,
+      leafletTileUrl: LEAFLET_TILE_URL || null,
+      leafletAttribution: LEAFLET_TILE_ATTRIBUTION,
+      leafletSubdomains: LEAFLET_TILE_SUBDOMAINS,
     });
   });
 
@@ -161,6 +221,14 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         return;
       }
 
+      const cacheKey = geocodeSearchCacheKey(req);
+      const cached = geocodeSearchCacheGet(cacheKey);
+      if (cached) {
+        res.set('Cache-Control', 'private, max-age=30');
+        res.json(cached.slice(0, limit));
+        return;
+      }
+
       let rows = [];
       if (YKEY) {
         try {
@@ -172,6 +240,8 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
       }
 
       if (!rows.length) {
+        const streetForNom =
+          street && house ? `${house} ${street}`.trim() : street || house || '';
         const params = new URLSearchParams({
           format: 'jsonv2',
           limit: String(limit),
@@ -183,10 +253,12 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         if (bounded) params.set('bounded', '1');
         if (q) params.set('q', q);
         if (city) params.set('city', city);
-        if (street) params.set('street', street);
+        if (streetForNom) params.set('street', streetForNom);
         rows = await nominatimSearch(params);
       }
 
+      geocodeSearchCacheSet(cacheKey, rows);
+      res.set('Cache-Control', 'private, max-age=15');
       res.json(rows.slice(0, limit));
     })
   );

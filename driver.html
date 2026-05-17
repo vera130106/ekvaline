@@ -15,7 +15,7 @@
   <body class="driver-page">
     <header class="drv-topbar">
       <div class="drv-topbar-inner">
-        <a class="drv-brand" href="index.html">ЭкваЛайн — водитель</a>
+        <strong class="drv-brand" aria-current="page">ЭкваЛайн — водитель</strong>
         <div class="drv-topbar-actions">
           <span class="drv-meta" id="drvUserMeta" hidden></span>
           <button type="button" class="drv-btn drv-btn-ghost" id="drvRefreshBtn" hidden title="Обновить список">
@@ -27,11 +27,11 @@
     </header>
 
     <main class="drv-shell">
-      <section class="drv-card" id="drvLoginCard">
+      <section class="drv-card drv-card-login" id="drvLoginCard">
         <h1 class="drv-h1">Вход для водителя</h1>
         <p class="drv-muted">
-          Учётную запись создаёт администратор. Поле «метка экспедитора» в вашем профиле должно совпадать с вашим ФИО в
-          назначении оператора (колонка «Экспедитор» в заказе).
+          Учётную запись создаёт администратор. Войдите по email или телефону (+7…) и паролю. ФИО в профиле должно совпадать
+          с тем, что оператор указал в заказе в поле «Водитель».
         </p>
         <form id="drvLoginForm" class="drv-form" novalidate>
           <label class="drv-label">
@@ -45,7 +45,10 @@
           <p class="drv-error" id="drvLoginError" aria-live="polite"></p>
           <button type="submit" class="drv-btn drv-btn-primary">Войти</button>
         </form>
-        <p class="drv-muted drv-footnote"><a href="index.html">На главную</a></p>
+        <div class="drv-login-extra">
+          <a class="drv-btn drv-btn-outline-admin" href="admin.html">← Админ-панель</a>
+          <p class="drv-login-link-soft"><a href="index.html">На главную сайта</a></p>
+        </div>
       </section>
 
       <section class="drv-card" id="drvMainCard" hidden>

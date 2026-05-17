@@ -43,6 +43,7 @@ const ROOT_JS = [
   'admin.js',
   'driver.js',
   'cabinet-pg.js',
+  'waterCalcEngine.js',
 ];
 
 function read(rel) {
@@ -104,8 +105,15 @@ function checkIndexCalc() {
     if (!html.includes(s)) fail(`index.html: ожидалось "${s}"`);
   }
   const js = read('script.js');
-  if (!js.includes('function updateCalc')) fail('script.js: нет updateCalc');
-  if (!js.includes('initTopbarNotifications')) fail('script.js: нет initTopbarNotifications');
+  if (!js.includes('fetchWaterCalcFromServer') || !js.includes('/api/public/water-calc')) {
+    fail('script.js: калькулятор воды должен запрашивать /api/public/water-calc');
+  }
+  const srv = read('server.js');
+  if (!srv.includes("'/api/public/water-calc'")) fail('server.js: нет GET /api/public/water-calc');
+  if (!read('waterCalcEngine.js').includes('estimateWaterConsumption')) {
+    fail('waterCalcEngine.js: ожидалась серверная логика калькулятора');
+  }
+  if (!js.includes('syncTopbarNotifications')) fail('script.js: нет syncTopbarNotifications для колокольчика');
   if (!js.includes('initNotificationsUI')) fail('script.js: нет вызова initNotificationsUI');
   if (!js.includes('calcPriceTotal')) fail('script.js: нет обновления ориентировочной суммы');
   ok('Главная + script.js: калькулятор и уведомления');

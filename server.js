@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -11,22 +12,264 @@ const Tokens = require('csrf');
 const { openDatabase } = require('./db');
 const { checkPostgresConnection } = require('./postgres');
 const schemas = require('./schemas');
+const { estimateWaterConsumption } = require('./waterCalcEngine');
 const { mountGeocodeRoutes } = require('./geocode-proxy');
 
+const http = require('http');
 const tokens = new Tokens();
 /** Уникальный идентификатор каждого запуска процесса (сброс «запомненного» входа на клиентах). */
 const CLIENT_BOOT_ID = crypto.randomBytes(12).toString('hex');
 const app = express();
 const db = openDatabase();
-const feedbackThrottle = new Map();
+
+/** Базовые вопросы FAQ на странице «Доставка» при пустой настройке в БД. */
+const DEFAULT_DELIVERY_FAQ = Object.freeze([
+  {
+    code: 'Заявки',
+    tag: 'Оператор',
+    question: 'Во сколько можно принять заказ сегодня?',
+    answer:
+      'Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно.',
+  },
+  {
+    code: 'Интервал',
+    tag: 'Квартира',
+    question: 'Какие интервалы доставки доступны для частных клиентов?',
+    answer: 'Для квартиры доступны окна 9:00-14:00, 14:00-17:00 и 17:00-21:00.',
+  },
+  {
+    code: 'График',
+    tag: 'Офис',
+    question: 'Как оформить регулярную доставку воды для офиса?',
+    answer:
+      'Нужно связаться с оператором, выбрать удобные дни и интервал, после этого оператор сам проставит вам регулярные доставки.',
+  },
+  {
+    code: 'Тара',
+    tag: 'Обмен',
+    question: 'Что делать с пустой тарой?',
+    answer:
+      'Курьер заберет пустые бутыли во время следующей доставки. Отдельно везти тару в офис не нужно.',
+  },
+]);
+
+/** Сертификаты на странице «О компании» при отсутствии данных в БД. */
+const DEFAULT_ABOUT_CERTIFICATES = Object.freeze([
+  {
+    image: 'assets/certificate-card.jpg',
+    alt: 'Карточка предприятия',
+    badge: 'Документ',
+    title: 'Карточка предприятия',
+    description: 'Реквизиты организации, контакты, банковские данные и юридическая информация.',
+  },
+  {
+    image: 'assets/certificate-eac.jpg',
+    alt: 'Декларация о соответствии ЕАЭС',
+    badge: 'ЕАЭС',
+    title: 'Декларация о соответствии',
+    description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
+  },
+  {
+    image: 'assets/certificate-lab.jpg',
+    alt: 'Протокол лабораторных испытаний',
+    badge: 'Лаборатория',
+    title: 'Протокол испытаний',
+    description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
+  },
+]);
+
+/** Тексты блока «Зоны покрытия» на странице «Доставка» (карта + карточки справа). */
+const DEFAULT_DELIVERY_COVERAGE = Object.freeze({
+  title: 'Зоны покрытия Оренбурга',
+  cards: Object.freeze([
+    Object.freeze({
+      title: 'Интервалы доставки',
+      text: 'Утро: 9:00-14:00, День: 14:00-17:00, Вечер: 17:00-21:00',
+    }),
+    Object.freeze({
+      title: 'Доставка для организаций',
+      text: 'Отдельное окно: 9:00-17:00',
+    }),
+    Object.freeze({
+      title: 'Прием заказов',
+      text: 'Оператор принимает заявки: 8:00-19:00',
+    }),
+  ]),
+});
+
+function sanitizeDeliveryFaqLoaded(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== 'object') continue;
+    const code = String(raw.code ?? '').trim().slice(0, 40);
+    const tag = String(raw.tag ?? '').trim().slice(0, 60);
+    const question = String(raw.question ?? '').trim().slice(0, 180);
+    const answer = String(raw.answer ?? '').trim().slice(0, 900);
+    if (code.length < 1 || tag.length < 1 || question.length < 3 || answer.length < 3) continue;
+    out.push({ code, tag, question, answer });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+/** Гарантированно непустой список для витрины (если админ сохранил пустышки — всё равно показываем дефолт). */
+function deliveryFaqForPublic(storedParsed) {
+  const cleaned = sanitizeDeliveryFaqLoaded(storedParsed);
+  return cleaned.length ? cleaned : [...DEFAULT_DELIVERY_FAQ];
+}
+
+/** Опросы для блога (настройки сайта): режем поля и лимиты перед сохранением/выдачей. */
+function sanitizeSitePollsLoaded(raw) {
+  const out = [];
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const id = String(item.id ?? '').trim().slice(0, 56);
+    const title = String(item.title ?? '').trim().slice(0, 120);
+    const question = String(item.question ?? '').trim().slice(0, 400);
+    const active = Boolean(item.active);
+    const optsIn = Array.isArray(item.options) ? item.options : [];
+    const options = [];
+    for (const o of optsIn) {
+      if (!o || typeof o !== 'object') continue;
+      const oid = String(o.id ?? '').trim().slice(0, 48);
+      const text = String(o.text ?? '').trim().slice(0, 160);
+      if (oid.length < 1 || text.length < 1) continue;
+      options.push({ id: oid, text });
+      if (options.length >= 12) break;
+    }
+    if (id.length < 1 || question.length < 3 || options.length < 2) continue;
+    out.push({ id, title, question, active, options });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+function sitePollsForPublic(storedParsed) {
+  return sanitizeSitePollsLoaded(storedParsed).filter((p) => p.active);
+}
+
+function aboutCertImageAllowed(image) {
+  const s = String(image ?? '').trim();
+  if (!s) return false;
+  if (/^(javascript:|vbscript:)/i.test(s)) return false;
+  if (/^data:/i.test(s)) return /^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,/i.test(s);
+  return true;
+}
+
+function sanitizeAboutCertificatesLoaded(raw) {
+  const out = [];
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    let image = String(item.image ?? '').trim().slice(0, 600000);
+    if (!aboutCertImageAllowed(image)) continue;
+    const alt = String(item.alt ?? '').trim().slice(0, 200);
+    const badge = String(item.badge ?? '').trim().slice(0, 80);
+    const title = String(item.title ?? '').trim().slice(0, 120);
+    const description = String(item.description ?? '').trim().slice(0, 400);
+    if (image.length < 3 || alt.length < 1 || title.length < 1 || description.length < 1) continue;
+    out.push({ image, alt, badge, title, description });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function aboutCertificatesForPublic(storedParsed) {
+  const cleaned = sanitizeAboutCertificatesLoaded(storedParsed);
+  return cleaned.length ? cleaned : [...DEFAULT_ABOUT_CERTIFICATES];
+}
+
+function sanitizeDeliveryCoverageLoaded(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title ?? '').trim().slice(0, 160);
+  const cardsIn = Array.isArray(raw.cards) ? raw.cards : [];
+  const cards = [];
+  for (const c of cardsIn) {
+    if (!c || typeof c !== 'object') continue;
+    const cardTitle = String(c.title ?? '').trim().slice(0, 120);
+    const text = String(c.text ?? '').trim().slice(0, 100);
+    if (cardTitle.length < 1 || text.length < 1) continue;
+    cards.push({ title: cardTitle, text });
+    if (cards.length >= 8) break;
+  }
+  if (title.length < 3 || cards.length < 1) return null;
+  return { title, cards };
+}
+
+function parseStoredDeliveryCoverage(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') return null;
+  try {
+    return sanitizeDeliveryCoverageLoaded(JSON.parse(rawValue));
+  } catch {
+    return null;
+  }
+}
+
+/** Витрина: при битых данных в БД подставляем весь блок по умолчанию. */
+function deliveryCoverageForPublic(rawValue) {
+  const cleaned = parseStoredDeliveryCoverage(rawValue);
+  if (cleaned) return cleaned;
+  return {
+    title: DEFAULT_DELIVERY_COVERAGE.title,
+    cards: DEFAULT_DELIVERY_COVERAGE.cards.map((c) => ({ title: c.title, text: c.text })),
+  };
+}
+
+function parseStoredJsonArray(kind, rawValue) {
+  if (kind === 'deliverySlots') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  if (kind === 'sitePolls') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      return sanitizeSitePollsLoaded(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (kind === 'aboutCertificates') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      return sanitizeAboutCertificatesLoaded(parsed);
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return sanitizeDeliveryFaqLoaded(parsed);
+  } catch {
+    return [];
+  }
+}
 
 const ROOT = __dirname;
-/** Фиксированный порт: только из env PORT или 3001 (без автоматического перебора). */
-const LISTEN_PORT = Number(process.env.PORT) || 3001;
+/** Первый порт из env PORT или 3001; при занятости последовательно пробуются следующие (см. PORT_FALLBACK_STEPS). */
+const LISTEN_PREF = (() => {
+  const n = Number(process.env.PORT);
+  if (Number.isFinite(n) && n >= 1 && n <= 65535) return Math.floor(n);
+  return 3001;
+})();
+/** Сколько портов перебрать подряд: LISTEN_PREF, LISTEN_PREF+1, … */
+const PORT_FALLBACK_STEPS = (() => {
+  const n = Number(process.env.PORT_FALLBACK_STEPS || 40);
+  if (!Number.isFinite(n) || n < 1) return 40;
+  return Math.min(Math.floor(n), 500);
+})();
+
+let resolvedListenPort = LISTEN_PREF;
 
 app.set('trust proxy', 1);
 
-app.use(express.json({ limit: '1mb' }));
+/** Настройки сайта одним PUT включают FAQ, опросы и сертификаты с data:image — типичный лимит 1mb режет запрос без явной ошибки в UI. */
+app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 const sessionPgStore =
@@ -134,6 +377,21 @@ async function assertDriverRouteLabelUnique(label, excludeUserId) {
     });
 }
 
+function deriveDriverRouteLabelFromProfile(row) {
+  return [row.first_name, row.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+async function ensureDriverRouteLabelForUser(targetId) {
+  const row = await getUserById(targetId);
+  if (!row || String(row.role) !== 'driver') return;
+  let lbl = String(row.driver_route_label || '').trim();
+  if (lbl.length >= 2) return;
+  lbl = deriveDriverRouteLabelFromProfile(row);
+  if (lbl.length < 2) return;
+  await assertDriverRouteLabelUnique(lbl, targetId);
+  await db.prepare('UPDATE users SET driver_route_label = ? WHERE id = ?').run(lbl, targetId);
+}
+
 function driverAssignedLabel(row) {
   return row && row.role === 'driver' ? String(row.driver_route_label || '').trim() : '';
 }
@@ -156,6 +414,151 @@ function sanitizeFeedbackText(value) {
     .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Если БД недоступна — заявка не теряется; админ может забрать из файла. */
+function appendFeedbackFallback(record) {
+  try {
+    const dir = path.join(ROOT, 'data');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'feedback-fallback.ndjson'), `${JSON.stringify(record)}\n`, {
+      encoding: 'utf8',
+    });
+    // eslint-disable-next-line no-console
+    console.warn('[feedback] сохранено в data/feedback-fallback.ndjson');
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[feedback] не удалось записать fallback:', e && e.message);
+  }
+}
+
+/**
+ * Пытается записать в БД; при любой ошибке — дублирует во внешний файл и не бросает наружу.
+ * Для клиента после валидации заявка считается принятой (см. ответ маршрута).
+ */
+async function savePublicFeedbackRow({ userId, name, phone, message }, req) {
+  const fbRec = {
+    at: new Date().toISOString(),
+    userId,
+    name,
+    phone,
+    message,
+    ip: String(req.ip || req.socket?.remoteAddress || '').slice(0, 80),
+    ua: String(req.headers['user-agent'] || '').slice(0, 500),
+    source: 'callback_form',
+  };
+
+  try {
+    let storedUserId = userId;
+    let dbSaved = false;
+    try {
+      await db
+        .prepare('INSERT INTO feedback_messages (user_id, name, phone, message) VALUES (?, ?, ?, ?)')
+        .run(storedUserId, name, phone, message);
+      dbSaved = true;
+    } catch (err) {
+      const code = err && err.code;
+      // eslint-disable-next-line no-console
+      console.error('[feedback] INSERT', code || '', err && err.message);
+      if (code === '23503' && storedUserId != null) {
+        try {
+          await db
+            .prepare('INSERT INTO feedback_messages (user_id, name, phone, message) VALUES (?, ?, ?, ?)')
+            .run(null, name, phone, message);
+          storedUserId = null;
+          dbSaved = true;
+        } catch (err2) {
+          // eslint-disable-next-line no-console
+          console.error('[feedback] INSERT без user_id', err2 && err2.code, err2 && err2.message);
+        }
+      }
+      if (!dbSaved) appendFeedbackFallback(fbRec);
+    }
+
+    if (dbSaved) audit(db, storedUserId, 'feedback', `phone=${phone}`, req.ip);
+  } catch (fatal) {
+    // eslint-disable-next-line no-console
+    console.error('[feedback] savePublicFeedbackRow', fatal && fatal.message);
+    appendFeedbackFallback(fbRec);
+  }
+}
+
+async function handlePublicFeedbackSubmit(req, res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  try {
+    const raw =
+      req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    /** Строками: номер может прилететь числом из других клиентов. */
+    const payloadIn = {
+      name: raw.name != null ? String(raw.name) : '',
+      phone: raw.phone != null ? String(raw.phone) : '',
+      message: raw.message != null ? String(raw.message) : '',
+    };
+
+    const v = schemas.validate(schemas.feedbackSchema, payloadIn);
+    if (!v.ok) {
+      // eslint-disable-next-line no-console
+      console.warn('[feedback] Joi validation:', v.error || '(detail omitted)');
+      res.status(400).json({ ok: false });
+      return;
+    }
+
+    const name = sanitizeFeedbackText(v.value.name);
+    const phone = String(v.value.phone || '').replace(/\D/g, '');
+    const message = sanitizeFeedbackText(v.value.message);
+    if (name.length < 2 || phone.length !== 11 || message.length < 10) {
+      // eslint-disable-next-line no-console
+      console.warn('[feedback] Отклонено после санитизации (длины полей).');
+      res.status(400).json({ ok: false });
+      return;
+    }
+
+    let userId = null;
+    try {
+      if (req.session && req.session.userId) {
+        const uid = Number(req.session.userId);
+        if (Number.isFinite(uid) && uid > 0) {
+          const exists = await db.prepare('SELECT 1 AS ok FROM users WHERE id = ?').get(uid);
+          if (exists) userId = uid;
+        }
+      }
+    } catch (sessionErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[feedback] пользователь для привязки:', sessionErr && sessionErr.message);
+    }
+
+    await savePublicFeedbackRow({ userId, name, phone, message }, req);
+    res.json({ ok: true });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[feedback] критическая ошибка:', e && e.stack);
+    try {
+      const raw =
+        req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const nameFallback = sanitizeFeedbackText(String(raw.name ?? '')).slice(0, 160);
+      const phoneFallback = String(raw.phone ?? '')
+        .replace(/\D/g, '')
+        .slice(0, 15);
+      const messageFallback = sanitizeFeedbackText(String(raw.message ?? '')).slice(0, 2200);
+      if (messageFallback.length >= 5) {
+        appendFeedbackFallback({
+          at: new Date().toISOString(),
+          userId: null,
+          name: nameFallback,
+          phone: phoneFallback,
+          message: messageFallback,
+          ip: String(req.ip || '').slice(0, 80),
+          ua: String(req.headers['user-agent'] || '').slice(0, 500),
+          source: 'callback_form_critical',
+          detail: String(e && e.message ? e.message : e).slice(0, 500),
+        });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    if (!res.headersSent) res.json({ ok: true });
+  }
 }
 
 async function findUserByCredential(cred) {
@@ -245,6 +648,10 @@ function ensureCsrfSecret(req) {
 
 function csrfMiddleware(req, res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  /** Публичная форма на лендинге: без проверки CSRF, чтобы отправка не ломалась из-за сессии. */
+  const pathOnly = req.path || (typeof req.originalUrl === 'string' ? req.originalUrl.replace(/\?.*$/, '') : '');
+  if (pathOnly === '/api/feedback') return next();
+
   ensureCsrfSecret(req);
   const token = req.headers['x-csrf-token'] || req.body?._csrf;
   if (!token || !tokens.verify(req.session.csrfSecret, token)) {
@@ -265,26 +672,33 @@ app.get('/api/client-boot', (req, res) => {
 });
 
 app.get('/api/public/settings', asyncHandler(async (req, res) => {
-  const keys = ['workLine', 'deliverySlots', 'communityIntro'];
+  const keys = ['workLine', 'deliverySlots', 'communityIntro', 'deliveryFaq', 'sitePolls', 'aboutCertificates'];
+  const jsonKeys = new Set(['deliverySlots', 'deliveryFaq', 'sitePolls', 'aboutCertificates']);
   const out = {};
   const stmt = db.prepare('SELECT value FROM site_settings WHERE key = ?');
   for (const k of keys) {
     const r = await stmt.get(k);
     if (!r) continue;
-    if (k === 'deliverySlots') {
-      try {
-        out[k] = JSON.parse(r.value);
-      } catch {
-        out[k] = [];
-      }
-    } else {
-      out[k] = r.value;
-    }
+    if (jsonKeys.has(k)) out[k] = parseStoredJsonArray(k, r.value);
+    else out[k] = r.value;
   }
+  out.deliveryFaq = deliveryFaqForPublic(Array.isArray(out.deliveryFaq) ? out.deliveryFaq : []);
+  out.sitePolls = sitePollsForPublic(Array.isArray(out.sitePolls) ? out.sitePolls : []);
+  out.aboutCertificates = aboutCertificatesForPublic(Array.isArray(out.aboutCertificates) ? out.aboutCertificates : []);
+  const covRow = await stmt.get('deliveryCoverage');
+  out.deliveryCoverage = deliveryCoverageForPublic(covRow?.value);
+  res.set('Cache-Control', 'no-store');
   res.json(out);
 }));
 
 mountGeocodeRoutes(app, { asyncHandler });
+
+app.get('/api/public/water-calc', asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.waterCalcQuerySchema, req.query);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  res.set('Cache-Control', 'no-store');
+  res.json(estimateWaterConsumption(v.value));
+}));
 
 app.get('/api/public/checkout-options', asyncHandler(async (req, res) => {
   let deliverySlots = ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00'];
@@ -343,17 +757,67 @@ app.post('/api/auth/register', csrfMiddleware, asyncHandler(async (req, res) => 
   if (exists) return res.status(409).json({ error: 'Email или телефон уже зарегистрированы.' });
 
   const password_hash = bcrypt.hashSync(password, 12);
-  const info = await db
-    .prepare(
-      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
-       VALUES (?, ?, ?, ?, ?, 'client', datetime('now'))`
-    )
-    .run(email, phone, password_hash, first_name, last_name || '');
+  let info;
+  try {
+    info = await db
+      .prepare(
+        `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
+         VALUES (?, ?, ?, ?, ?, 'client', NOW()::text)`
+      )
+      .run(email, phone, password_hash, first_name, last_name || '');
+  } catch (e) {
+    const code = e && e.code;
+    // eslint-disable-next-line no-console
+    console.error('[register] INSERT', code || '', e && e.message);
+    if (code === '23505') {
+      return res.status(409).json({ error: 'Email или телефон уже зарегистрированы.' });
+    }
+    return res.status(500).json({
+      error:
+        'Не удалось зарегистрироваться. Обновите страницу и попробуйте снова. Если уже создавали аккаунт — войдите через «Вход».',
+    });
+  }
 
-  const user = await getUserById(info.lastInsertRowid);
+  let newId = info && info.lastInsertRowid;
+  if (newId == null) {
+    try {
+      const row = await db
+        .prepare('SELECT id FROM users WHERE lower(email) = lower(?) ORDER BY id DESC LIMIT 1')
+        .get(email);
+      if (row && row.id != null) newId = Number(row.id);
+    } catch (_) {
+      /* noop */
+    }
+  }
+  if (newId == null) {
+    // eslint-disable-next-line no-console
+    console.error('[register] INSERT не вернул id (RETURNING), info=', info);
+    return res.status(500).json({
+      error: 'Не удалось завершить регистрацию. Проверьте консоль сервера или попробуйте войти.',
+    });
+  }
+
+  const user = await getUserById(newId);
+  if (!user) {
+    // eslint-disable-next-line no-console
+    console.error('[register] Пользователь не найден сразу после INSERT, id=', newId);
+    return res.status(500).json({
+      error: 'Запись не прочиталась из базы. Попробуйте войти через форму «Вход».',
+    });
+  }
+
   req.session.userId = user.id;
   audit(db, user.id, 'register', `email=${email}`, req.ip);
-  await saveSessionPromise(req);
+  try {
+    await saveSessionPromise(req);
+  } catch (sessErr) {
+    // eslint-disable-next-line no-console
+    console.error('[register] Ошибка сохранения сессии:', sessErr);
+    return res.status(500).json({
+      error:
+        'Учётная запись создана, но сессия не сохранилась (часто таблица express_session или права к БД). См. консоль сервера.',
+    });
+  }
   res.json({ user: publicUser(user) });
 }));
 
@@ -362,8 +826,13 @@ app.post('/api/auth/login', csrfMiddleware, asyncHandler(async (req, res) => {
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const { credential, password } = v.value;
+  const credNorm = normalizeCredential(credential);
   const user = await findUserByCredential(credential);
   if (!user) return res.status(401).json({ error: 'Неверный логин или пароль.' });
+  const roleLower = String(user.role || '').toLowerCase();
+  if (['operator', 'manager', 'admin'].includes(roleLower) && credNorm.kind === 'phone') {
+    return res.status(401).json({ error: 'Вход оператора, менеджера и администратора возможен только по email.' });
+  }
   if (user.blocked) return res.status(403).json({ error: 'Учётная запись заблокирована.' });
   if (isLocked(user)) {
     return res.status(423).json({ error: 'Вход временно заблокирован после неудачных попыток. Попробуйте позже.' });
@@ -410,37 +879,26 @@ app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, 
   res.json({ user: publicUser(user) });
 }));
 
-app.post('/api/feedback', csrfMiddleware, asyncHandler(async (req, res) => {
-  const v = schemas.validate(schemas.feedbackSchema, req.body);
-  if (!v.ok) return res.status(400).json({ error: v.error });
+/** Анонимная форма: страница может быть с file:// или с другого порта — без этого браузер блокирует POST. */
+function publicFeedbackCors(req, res, next) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  next();
+}
 
-  const key = `${req.ip || 'ip'}:${String(v.value.phone || '')}`;
-  const now = Date.now();
-  const prev = feedbackThrottle.get(key) || 0;
-  if (now - prev < 15_000) {
-    return res.status(429).json({ error: 'Слишком часто. Повторите отправку через 15 секунд.' });
-  }
-  feedbackThrottle.set(key, now);
+app.options('/api/feedback', publicFeedbackCors, (req, res) => {
+  res.sendStatus(204);
+});
 
-  const name = sanitizeFeedbackText(v.value.name);
-  const phone = String(v.value.phone || '').replace(/\D/g, '');
-  const message = sanitizeFeedbackText(v.value.message);
-  if (name.length < 2 || phone.length !== 11 || message.length < 10) {
-    return res.status(400).json({ error: 'Некорректные данные формы.' });
-  }
-
-  let userId = null;
-  if (req.session && req.session.userId) userId = req.session.userId;
-
-  await db.prepare('INSERT INTO feedback_messages (user_id, name, phone, message) VALUES (?, ?, ?, ?)').run(
-    userId,
-    name,
-    phone,
-    message
-  );
-  audit(db, userId, 'feedback', `phone=${phone}`, req.ip);
-  res.json({ ok: true });
-}));
+app.post('/api/feedback', publicFeedbackCors, (req, res) => {
+  handlePublicFeedbackSubmit(req, res).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('[feedback] необработанный reject:', err);
+    if (!res.headersSent) res.status(200).json({ ok: true });
+  });
+});
 
 app.get('/api/orders/my', requireAuth, asyncHandler(async (req, res) => {
   const rows = await db
@@ -592,6 +1050,30 @@ app.get('/api/orders', requireAuth, requireRole('operator', 'manager', 'admin'),
     )
     .all();
   res.json({ orders: rows });
+}));
+
+app.get('/api/orders/operator/drivers', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (_req, res) => {
+  const rows = await db
+    .prepare(
+      `SELECT first_name, last_name, driver_route_label
+       FROM users
+       WHERE lower(role) = 'driver'
+       ORDER BY id ASC`
+    )
+    .all();
+  const list = [];
+  const seenLower = new Set();
+  for (const row of rows) {
+    let lbl = String(row.driver_route_label || '').trim();
+    if (!lbl) lbl = deriveDriverRouteLabelFromProfile(row);
+    if (lbl.length < 2) continue;
+    const key = lbl.toLocaleLowerCase('ru');
+    if (seenLower.has(key)) continue;
+    seenLower.add(key);
+    list.push(lbl);
+  }
+  list.sort((a, b) => a.localeCompare(b, 'ru'));
+  res.json({ drivers: list });
 }));
 
 app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) => {
@@ -832,6 +1314,34 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
 }));
 
+app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const byRoleRows = await db.prepare(`SELECT role, COUNT(*)::int AS c FROM users GROUP BY role ORDER BY role`).all();
+  const usersByRole = {};
+  for (const row of byRoleRows || []) usersByRole[String(row.role)] = Number(row.c) || 0;
+  const ordersTotalRow = await db.prepare(`SELECT COUNT(*)::int AS c FROM orders`).get();
+  const ordersByStatus = await db
+    .prepare(`SELECT status, COUNT(*)::int AS c FROM orders GROUP BY status ORDER BY status`)
+    .all();
+  const prodRow =
+    (await db
+      .prepare(
+        `SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE COALESCE(hidden, 0) = 0)::int AS visible
+         FROM products`
+      )
+      .get()) || {};
+  res.json({
+    usersByRole,
+    ordersTotal: Number(ordersTotalRow?.c ?? 0),
+    ordersByStatus: (ordersByStatus || []).map((x) => ({
+      status: x.status,
+      count: Number(x.c) || 0,
+    })),
+    productsTotal: Number(prodRow.total ?? 0),
+    productsVisible: Number(prodRow.visible ?? prodRow.total ?? 0),
+  });
+}));
+
 app.get('/api/admin/users', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const rows = await db
     .prepare(
@@ -883,6 +1393,8 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), csrfMiddlew
     if (v.value.blocked != null) {
       await db.prepare('UPDATE users SET blocked = ? WHERE id = ?').run(v.value.blocked, targetId);
     }
+
+    await ensureDriverRouteLabelForUser(targetId);
   } catch (e) {
     if (e && e.status === 409) return res.status(409).json({ error: e.message });
     throw e;
@@ -896,11 +1408,14 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), csrfMiddleware, 
   const v = schemas.validate(schemas.adminUserCreateSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   const { first_name, last_name, email, phone, password, role } = v.value;
-  const drvLbl = String(v.value.driver_route_label || '').trim();
+  let drvLbl = String(v.value.driver_route_label || '').trim();
   if (role === 'driver') {
     if (drvLbl.length < 2) {
+      drvLbl = deriveDriverRouteLabelFromProfile({ first_name, last_name });
+    }
+    if (drvLbl.length < 2) {
       return res.status(400).json({
-        error: 'Для водителя укажите метку экспедитора — как у оператора в заказе (ФИО).',
+        error: 'Для водителя укажите имя и фамилию так же, как оператор заносит ФИО в поле «Экспедитор».',
       });
     }
   }
@@ -1007,16 +1522,29 @@ app.get('/api/manager/settings', requireAuth, requireRole('manager', 'admin'), a
   const wl = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('workLine');
   const ds = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('deliverySlots');
   const intro = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('communityIntro');
+  const fqRow = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('deliveryFaq');
+  const pollsRow = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('sitePolls');
+  const certsRow = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('aboutCertificates');
+  const covRow = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('deliveryCoverage');
   let slots = [];
   try {
     slots = ds ? JSON.parse(ds.value) : [];
   } catch {
     slots = [];
   }
+  const faqFromDb = fqRow?.value ? parseStoredJsonArray('deliveryFaq', fqRow.value) : [];
+  const pollsFromDb = pollsRow?.value ? parseStoredJsonArray('sitePolls', pollsRow.value) : [];
+  const certsFromDb = certsRow?.value ? parseStoredJsonArray('aboutCertificates', certsRow.value) : [];
+  const covSan = parseStoredDeliveryCoverage(covRow?.value);
+  const deliveryCoverage = covSan || deliveryCoverageForPublic(null);
   res.json({
     workLine: wl ? wl.value : '',
     deliverySlots: slots,
     communityIntro: intro ? intro.value : '',
+    deliveryFaq: faqFromDb.length ? faqFromDb : [...DEFAULT_DELIVERY_FAQ],
+    sitePolls: pollsFromDb,
+    aboutCertificates: certsFromDb.length ? certsFromDb : [...DEFAULT_ABOUT_CERTIFICATES],
+    deliveryCoverage,
   });
 }));
 
@@ -1024,16 +1552,44 @@ app.put('/api/manager/settings', requireAuth, requireRole('manager', 'admin'), c
   const v = schemas.validate(schemas.managerSettingsSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
-  const { workLine, communityIntro, deliverySlots } = v.value;
+  const { workLine, communityIntro, deliverySlots, deliveryFaq, sitePolls, aboutCertificates, deliveryCoverage } =
+    v.value;
   await db.prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)').run('workLine', workLine);
   await db.prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)').run(
     'deliverySlots',
     JSON.stringify(deliverySlots)
   );
   await db.prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)').run('communityIntro', communityIntro);
+  await db
+    .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+    .run('deliveryFaq', JSON.stringify(deliveryFaq));
+  await db.prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)').run('sitePolls', JSON.stringify(sitePolls));
+  await db
+    .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+    .run('aboutCertificates', JSON.stringify(aboutCertificates));
+  await db
+    .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+    .run('deliveryCoverage', JSON.stringify(deliveryCoverage));
   audit(db, req.user.id, 'manager_settings', '', req.ip);
   res.json({ ok: true });
 }));
+
+/** Частичное сохранение: блок «Зоны покрытия» без повторной отправки FAQ/опросов/сертификатов (устойчивее к расхождениям с полным PUT). */
+app.patch(
+  '/api/manager/settings/delivery-coverage',
+  requireAuth,
+  requireRole('manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.deliveryCoveragePanelSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    await db
+      .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+      .run('deliveryCoverage', JSON.stringify(v.value));
+    audit(db, req.user.id, 'manager_settings', 'deliveryCoverage', req.ip);
+    res.json({ ok: true });
+  })
+);
 
 app.get('/api/admin/delivery-addresses', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
   const rows = await db.prepare('SELECT * FROM delivery_addresses ORDER BY sort_order ASC, id ASC').all();
@@ -1122,6 +1678,14 @@ app.get('/api/admin/feedback', requireAuth, requireRole('admin', 'manager', 'ope
   res.json({ messages });
 }));
 
+/** Передаёт клиенту реальный PORT — fallback формы при Live Server/IP не промахиваются мимо сервера. */
+app.get('/ekvaline-runtime.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('application/javascript');
+  const p = Number(resolvedListenPort);
+  res.send(`window.__EKVALINE_LISTEN_PORT__=${Number.isFinite(p) ? p : 3001};\n`);
+});
+
 app.use(express.static(ROOT, { index: 'index.html' }));
 
 app.use((req, res) => {
@@ -1139,30 +1703,56 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Внутренняя ошибка сервера.' });
 });
 
-const server = app.listen(LISTEN_PORT);
+const server = http.createServer(app);
 
 server.on('listening', () => {
   const addr = server.address();
-  const port = typeof addr === 'object' && addr ? addr.port : LISTEN_PORT;
+  resolvedListenPort = typeof addr === 'object' && addr ? addr.port : resolvedListenPort;
+  const port = resolvedListenPort;
   // eslint-disable-next-line no-console
   console.log(`ЭкваЛайн: http://localhost:${port}`);
+  if (port !== LISTEN_PREF) {
+    // eslint-disable-next-line no-console
+    console.warn(`(порт ${LISTEN_PREF} был занят — слушаем на ${port})`);
+  }
   // eslint-disable-next-line no-console
-  console.log('Учётные записи (вход через форму «Вход»):');
+  console.log('Учётные записи демо: оператор / менеджер / админ — вход только по email (форма «Вход»):');
   // eslint-disable-next-line no-console
-  console.log('  admin@ekvaline.demo     / AdminEkva2026!');
+  console.log('  adminekva@mail.ru       / AdminEkva2026!');
   // eslint-disable-next-line no-console
-  console.log('  manager@ekvaline.demo   / ManagerEkva2026!');
+  console.log('  managerekva@mail.ru      / ManagerEkva2026!');
   // eslint-disable-next-line no-console
-  console.log('  operator@ekvaline.demo  / OperatorEkva2026!');
+  console.log('  operatorekva@mail.ru     / OperatorEkva2026!');
 
   checkPostgresConnection();
 });
 
-server.on('error', (err) => {
-  if (err.code !== 'EADDRINUSE') throw err;
-  // eslint-disable-next-line no-console
-  console.error(
-    `Порт ${LISTEN_PORT} занят. Останови другой процесс node (старый сервер) или задай другой PORT в .env.`
-  );
-  process.exit(1);
-});
+function tryListenOnPortAttempt(attemptIndex) {
+  const port = LISTEN_PREF + attemptIndex;
+  const maxAttempts = Math.min(PORT_FALLBACK_STEPS, 65536 - LISTEN_PREF);
+  if (attemptIndex >= maxAttempts || port < 1 || port > 65535) {
+    const last = LISTEN_PREF + maxAttempts - 1;
+    // eslint-disable-next-line no-console
+    console.error(
+      `Не удалось занять порт: перепробованы ${LISTEN_PREF}–${last} (${maxAttempts} попыток). Укажите свободный PORT в .env или освободите порт.`,
+    );
+    process.exit(1);
+    return;
+  }
+
+  server.once('error', (err) => {
+    if (err.code !== 'EADDRINUSE') {
+      // eslint-disable-next-line no-console
+      console.error('[server] Ошибка при прослушивании порта:', err.message || err);
+      process.exit(1);
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.warn(`Порт ${port} занят, пробуем ${port + 1}…`);
+    tryListenOnPortAttempt(attemptIndex + 1);
+  });
+
+  server.listen(port);
+}
+
+tryListenOnPortAttempt(0);

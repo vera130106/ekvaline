@@ -41,24 +41,30 @@
     return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function seedIfNeeded() {
+  function seedIfNeeded(options) {
     if (localStorage.getItem(KEYS.seeded)) return;
-
     const now = new Date().toISOString();
+    const notifTime =
+      options && typeof options.notificationCreatedAt === 'string' && options.notificationCreatedAt
+        ? options.notificationCreatedAt
+        : now;
+
     writeJson(KEYS.notifs, [
       {
         id: uid(),
+        preset: 'welcome',
         title: 'Добро пожаловать в ЭкваЛайн',
         body: 'Следите за акциями и статусом заказов в этом центре уведомлений.',
-        createdAt: now,
+        createdAt: notifTime,
         read: false,
         type: 'info',
       },
       {
         id: uid(),
+        preset: 'delivery_intro',
         title: 'Доставка в удобном окне',
         body: 'Выберите интервал 09:00 – 14:00, 14:00 – 17:00 или 17:00 – 21:00 при оформлении заказа.',
-        createdAt: now,
+        createdAt: notifTime,
         read: false,
         type: 'delivery',
       },
@@ -103,6 +109,45 @@
     ]);
 
     localStorage.setItem(KEYS.seeded, '1');
+  }
+
+  /** Совпадает с приветственной парой из seed / старыми записями без preset. */
+  function isRegistrationWelcomeNotification(n) {
+    if (!n || typeof n !== 'object') return false;
+    if (n.preset === 'welcome' || n.preset === 'delivery_intro') return true;
+    if (n.title === 'Добро пожаловать в ЭкваЛайн') return true;
+    if (n.title === 'Доставка в удобном окне') return true;
+    return false;
+  }
+
+  function ensurePresetFlags(n) {
+    if (!n || typeof n !== 'object') return;
+    if (n.preset) return;
+    if (n.title === 'Добро пожаловать в ЭкваЛайн') n.preset = 'welcome';
+    else if (n.title === 'Доставка в удобном окне') n.preset = 'delivery_intro';
+  }
+
+  /** Вызывается после успешной регистрации: время двух приветственных уведомлений = момент регистрации. */
+  function stampRegistrationWelcomeNotifications(isoTime) {
+    const at = typeof isoTime === 'string' && isoTime ? isoTime : new Date().toISOString();
+
+    if (!localStorage.getItem(KEYS.seeded)) {
+      seedIfNeeded({ notificationCreatedAt: at });
+      return;
+    }
+
+    const list = Api.getNotifications();
+    let changed = false;
+    for (const n of list) {
+      if (!isRegistrationWelcomeNotification(n)) continue;
+      n.createdAt = at;
+      ensurePresetFlags(n);
+      changed = true;
+    }
+    if (changed) {
+      writeJson(KEYS.notifs, list);
+      window.dispatchEvent(new CustomEvent('ekvaline-storage'));
+    }
   }
 
   /** Одноразово обновляет текст старых уведомлений про интервалы доставки. */
@@ -256,6 +301,20 @@
     }
   }
 
+  function teardownNotificationsUI(mountEl) {
+    if (!mountEl || mountEl.nodeType !== 1) return;
+    if (mountEl._ekvalineNotifAbort instanceof AbortController) {
+      try {
+        mountEl._ekvalineNotifAbort.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    mountEl._ekvalineNotifAbort = null;
+    mountEl.innerHTML = '';
+    delete mountEl.dataset.notifInited;
+  }
+
   function renderNotificationsPanel(wrap, dropdown) {
     const list = Api.getNotifications();
     const unread = Api.unreadCount();
@@ -319,6 +378,9 @@
     const listEl = mountEl.querySelector('#notifList');
     const readAll = mountEl.querySelector('#notifReadAll');
 
+    const ac = new AbortController();
+    mountEl._ekvalineNotifAbort = ac;
+
     function toggle(open) {
       const isOpen = open != null ? open : dropdown.hasAttribute('hidden');
       if (isOpen) {
@@ -330,25 +392,37 @@
       }
     }
 
-    bell.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggle();
-      if (!dropdown.hasAttribute('hidden')) renderNotificationsPanel(wrap, listEl);
-    });
+    bell.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        toggle();
+        if (!dropdown.hasAttribute('hidden')) renderNotificationsPanel(wrap, listEl);
+      },
+      { signal: ac.signal },
+    );
 
-    readAll.addEventListener('click', (e) => {
-      e.stopPropagation();
-      Api.markAllNotificationsRead();
-      renderNotificationsPanel(wrap, listEl);
-    });
+    readAll.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        Api.markAllNotificationsRead();
+        renderNotificationsPanel(wrap, listEl);
+      },
+      { signal: ac.signal },
+    );
 
-    document.addEventListener('click', () => {
-      if (!dropdown.hasAttribute('hidden')) toggle(false);
-    });
+    document.addEventListener(
+      'click',
+      () => {
+        if (!dropdown.hasAttribute('hidden')) toggle(false);
+      },
+      { signal: ac.signal },
+    );
 
-    dropdown.addEventListener('click', (e) => e.stopPropagation());
+    dropdown.addEventListener('click', (e) => e.stopPropagation(), { signal: ac.signal });
 
-    window.addEventListener('ekvaline-storage', () => renderNotificationsPanel(wrap, listEl));
+    window.addEventListener('ekvaline-storage', () => renderNotificationsPanel(wrap, listEl), { signal: ac.signal });
 
     renderNotificationsPanel(wrap, listEl);
   }
@@ -361,6 +435,8 @@
     escapeHtml,
     uid,
     initNotificationsUI,
+    teardownNotificationsUI,
     formatTime,
+    stampRegistrationWelcomeNotifications,
   };
 })();

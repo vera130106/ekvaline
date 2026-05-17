@@ -1,29 +1,27 @@
-/* ── Колокольчик уведомлений (до auth; вызывает app-core после загрузки) ── */
-(function initTopbarNotifications() {
-  const mount = document.getElementById('topbarNotifications');
-  if (!(mount instanceof HTMLElement) || mount.dataset.notifBootstrapped === '1') return;
-  mount.dataset.notifBootstrapped = '1';
-  const app = window.EkvalineApp;
-  if (app && typeof app.initNotificationsUI === 'function') {
-    app.initNotificationsUI(mount);
+/* ── Auth + cabinet (frontend only, no DB) ── */
+(function redirectDriverAwayFromMarketingSite() {
+  try {
+    const path = (window.location.pathname || '').replace(/\\/g, '/');
+    const leaf = path.split(/[/?]/).pop() || '';
+    if (/^driver\.html$/i.test(leaf)) return;
+    const raw = window.localStorage.getItem('ekvaline_current_user');
+    if (!raw) return;
+    const u = JSON.parse(raw);
+    if (String(u?.role || '').toLowerCase() !== 'driver') return;
+    window.location.replace(new URL('driver.html', window.location.href).href);
+  } catch {
+    /* ignore */
   }
 })();
 
-/* ── Auth + cabinet (frontend only, no DB) ── */
 (function initAuthAndCabinet() {
   const USERS_KEY = 'ekvaline_users';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
   const STAFF_DEMO_ACCOUNTS = {
     'manager@ekvaline.local': { password: 'AquaManager2026', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
-    'manager@ekvaline.demo': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
-    'operator@ekvaline.demo': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
-    'admin@ekvaline.demo': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'admin.html' },
-  };
-  /** Телефоны из сида БД (db.js), чтобы войти по номеру */
-  const DEMO_STAFF_PHONES = {
-    '70000000001': 'admin@ekvaline.demo',
-    '70000000002': 'manager@ekvaline.demo',
-    '70000000003': 'operator@ekvaline.demo',
+    'managerekva@mail.ru': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
+    'operatorekva@mail.ru': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
+    'adminekva@mail.ru': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'admin.html' },
   };
 
   const loginTrigger = document.querySelector('[data-auth-login]');
@@ -51,8 +49,8 @@
         </div>
 
         <form id="authLoginForm" class="auth-form" novalidate>
-          <label>Телефон или email
-            <input type="text" id="authLoginValue" placeholder="+7 (999) 123-45-67 или email" autocomplete="username" />
+          <label>Email или телефон
+            <input type="text" id="authLoginValue" placeholder="Сотрудники: xxxekva@mail.ru (см. консоль npm start); клиент — телефон или email" autocomplete="username" />
           </label>
           <label>Пароль
             <span class="auth-password-wrap">
@@ -98,6 +96,10 @@
               </button>
             </span>
           </label>
+          <div class="auth-password-strength" id="authPasswordStrength" aria-live="polite">
+            <p class="auth-password-strength-line" id="authPasswordStrengthLine"></p>
+            <ul class="auth-password-strength-missing" id="authPasswordStrengthMissing" hidden></ul>
+          </div>
           <label>Повторите пароль
             <span class="auth-password-wrap">
               <input type="password" id="authRegPasswordConfirm" minlength="8" maxlength="128" placeholder="Повторите пароль" autocomplete="new-password" />
@@ -163,6 +165,10 @@
   const authRegPassword = document.getElementById('authRegPassword');
   const authRegPasswordConfirm = document.getElementById('authRegPasswordConfirm');
   const authRegisterError = document.getElementById('authRegisterError');
+  const authPasswordStrength = document.getElementById('authPasswordStrength');
+  const authPasswordStrengthLine = document.getElementById('authPasswordStrengthLine');
+  const authPasswordStrengthMissing = document.getElementById('authPasswordStrengthMissing');
+  const authRegSubmit = authRegisterForm.querySelector('.auth-submit');
 
   function wireAuthPasswordToggle(toggleBtn, input) {
     if (!(toggleBtn instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)) return;
@@ -251,15 +257,88 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(value.trim());
   }
 
-  function isStrongPassword(value) {
+  const PASSWORD_MIN = 8;
+  const PASSWORD_MAX = 128;
+  const PASSWORD_SPECIAL_RE = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
+
+  function getRegisterPasswordStrength(value) {
     const s = String(value || '');
-    if (s.length < 8 || s.length > 128) return false;
-    return (
-      /[A-ZА-ЯЁ]/.test(s) &&
-      /[a-zа-яё]/.test(s) &&
-      /\d/.test(s) &&
-      /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(s)
+    const len = s.length;
+    if (len > PASSWORD_MAX) {
+      return {
+        level: 'weak',
+        line: `Слишком длинный пароль: максимум ${PASSWORD_MAX} символов (сейчас ${len}).`,
+        missing: [],
+      };
+    }
+    if (len < PASSWORD_MIN) {
+      const need = PASSWORD_MIN - len;
+      const line =
+        len === 0
+          ? `Минимум ${PASSWORD_MIN} символов.`
+          : `Не хватает символов: ещё ${need} до ${PASSWORD_MIN} (сейчас ${len}).`;
+      return { level: 'weak', line, missing: [] };
+    }
+    const missing = [];
+    if (!/[A-ZА-ЯЁ]/.test(s)) {
+      missing.push('заглавную букву (русскую или латинскую)');
+    }
+    if (!/[a-zа-яё]/.test(s)) {
+      missing.push('строчную букву (русскую или латинскую)');
+    }
+    if (!/\d/.test(s)) {
+      missing.push('цифру');
+    }
+    if (!PASSWORD_SPECIAL_RE.test(s)) {
+      missing.push('спецсимвол из набора !@#$%^&*…');
+    }
+    if (missing.length > 0) {
+      return {
+        level: 'medium',
+        line: 'Условия почти выполнены — добавьте:',
+        missing,
+      };
+    }
+    return {
+      level: 'strong',
+      line: 'Пароль подходит — можно создавать учётную запись.',
+      missing: [],
+    };
+  }
+
+  function isStrongPassword(value) {
+    return getRegisterPasswordStrength(value).level === 'strong';
+  }
+
+  function syncRegisterPasswordStrength() {
+    if (
+      !(authPasswordStrength instanceof HTMLElement) ||
+      !(authPasswordStrengthLine instanceof HTMLElement) ||
+      !(authPasswordStrengthMissing instanceof HTMLElement) ||
+      !(authRegSubmit instanceof HTMLButtonElement) ||
+      !(authRegPassword instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+    const strength = getRegisterPasswordStrength(authRegPassword.value);
+    authPasswordStrength.classList.remove('is-weak', 'is-medium', 'is-strong');
+    authPasswordStrength.classList.add(
+      strength.level === 'strong' ? 'is-strong' : strength.level === 'medium' ? 'is-medium' : 'is-weak',
     );
+    authPasswordStrengthLine.textContent = strength.line;
+    if (strength.missing.length > 0) {
+      authPasswordStrengthMissing.hidden = false;
+      authPasswordStrengthMissing.innerHTML = '';
+      for (const m of strength.missing) {
+        const li = document.createElement('li');
+        li.textContent = m;
+        authPasswordStrengthMissing.appendChild(li);
+      }
+    } else {
+      authPasswordStrengthMissing.hidden = true;
+      authPasswordStrengthMissing.innerHTML = '';
+    }
+    authRegSubmit.disabled = strength.level !== 'strong';
   }
 
   function escapeHtml(value) {
@@ -275,7 +354,11 @@
     if (!data.name || data.name.length < 2 || !/^[A-Za-zА-Яа-яЁё\s\-']{2,40}$/.test(data.name)) {
       return 'Имя должно содержать 2-40 символов и только буквы.';
     }
-    if (!isValidEmail(data.email)) {
+    const mail = String(data.email ?? '').trim();
+    if (!mail) {
+      return 'Поле email пустое — заполните его.';
+    }
+    if (!isValidEmail(mail)) {
       return 'Введите корректный email.';
     }
     if (data.phone.length !== 11 || data.phone[0] !== '7') {
@@ -491,7 +574,13 @@
     document.getElementById('authModalTitle').textContent = isLogin ? 'Вход в аккаунт' : 'Регистрация аккаунта';
     authLoginError.textContent = '';
     authRegisterError.textContent = '';
+    if (!isLogin) {
+      syncRegisterPasswordStrength();
+    }
   }
+
+  authRegPassword.addEventListener('input', () => syncRegisterPasswordStrength());
+  syncRegisterPasswordStrength();
 
   function isStandaloneCabinetPage() {
     try {
@@ -502,6 +591,32 @@
     }
   }
 
+  /** Колокольчик уведомлений в шапке — только при сохранённом аккаунте (вход или регистрация). */
+  function syncTopbarNotifications() {
+    const mount = document.getElementById('topbarNotifications');
+    if (!(mount instanceof HTMLElement)) return;
+
+    const app = window.EkvalineApp;
+
+    const user = readCurrentUser();
+    if (!user) {
+      if (app && typeof app.teardownNotificationsUI === 'function') {
+        app.teardownNotificationsUI(mount);
+      } else {
+        mount.innerHTML = '';
+        delete mount.dataset.notifInited;
+      }
+      delete mount.dataset.notifBootstrapped;
+      mount.setAttribute('aria-hidden', 'true');
+      return;
+    }
+
+    mount.removeAttribute('aria-hidden');
+    if (!(app && typeof app.initNotificationsUI === 'function')) return;
+    mount.dataset.notifBootstrapped = '1';
+    app.initNotificationsUI(mount);
+  }
+
   function updateHeaderAuth() {
     const user = readCurrentUser();
     const roleLc = String(user?.role || '').toLowerCase();
@@ -510,7 +625,10 @@
     registerTrigger.style.display = isLoggedIn ? 'none' : 'inline-flex';
     const onCabinetPage = isStandaloneCabinetPage();
     cabinetTrigger.style.display = isLoggedIn && !onCabinetPage ? 'inline-flex' : 'none';
+    syncTopbarNotifications();
   }
+
+  window.__ekvalineUpdateHeaderAuth = updateHeaderAuth;
 
   loginTrigger.addEventListener('click', () => openAuthModal('login'));
   registerTrigger.addEventListener('click', () => openAuthModal('register'));
@@ -532,6 +650,19 @@
   });
   authClose.addEventListener('click', closeAuthModal);
 
+  /**
+   * После POST /api/auth/register клиент видит только: валидация полей (400), занят email/телефон (409),
+   * просьба обновить страницу при проблеме сессии (403); прочие сбои — одна нейтральная фраза без технических деталей.
+   */
+  function registerSubmitErrorFromApi(status, data) {
+    const st = Number(status) || 0;
+    const raw = data && typeof data.error === 'string' ? data.error.trim() : '';
+    if (st === 400 && raw) return raw;
+    if (st === 409) return 'Этот email или телефон уже зарегистрированы.';
+    if (st === 403) return 'Сессия устарела. Обновите страницу и попробуйте снова.';
+    return 'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
+  }
+
   authLoginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authLoginError.textContent = '';
@@ -542,12 +673,12 @@
     const byPhone = normalizePhoneDigits(credential);
 
     if (!credential || !password) {
-      authLoginError.textContent = 'Заполните телефон/email и пароль.';
+      authLoginError.textContent = 'Укажите логин (email организации или телефон/email для клиента) и пароль.';
       return;
     }
 
-    const staffForPhone = byPhone && byPhone.length === 11 ? DEMO_STAFF_PHONES[byPhone] : null;
-    const staff = STAFF_DEMO_ACCOUNTS[byEmail] || (staffForPhone ? STAFF_DEMO_ACCOUNTS[staffForPhone] : undefined);
+    const looksLikeEmail = /\S@\S/.test(credential);
+    const staff = looksLikeEmail ? STAFF_DEMO_ACCOUNTS[byEmail] : undefined;
     if (staff) {
       if (password !== staff.password) {
         authLoginError.textContent = 'Неверный пароль сотрудника.';
@@ -636,6 +767,11 @@
         });
         updateHeaderAuth();
         closeAuthModal();
+        const roleAfterLogin = String(u.role || '').toLowerCase();
+        if (roleAfterLogin === 'driver') {
+          window.location.href = 'driver.html';
+          return;
+        }
         window.setTimeout(() => openCabinet(), 50);
         return;
       }
@@ -681,8 +817,16 @@
     const password = authRegPassword.value;
     const passwordConfirm = authRegPasswordConfirm.value;
 
-    if (!name || name.length < 2 || !/^[A-Za-zА-Яа-яЁё\s\-']{2,40}$/.test(name)) {
-      authRegisterError.textContent = 'Имя должно содержать 2-40 символов и только буквы.';
+    if (!name) {
+      authRegisterError.textContent = 'Поле «Имя» пустое — заполните его.';
+      return;
+    }
+    if (name.length < 2 || name.length > 40 || !/^[A-Za-zА-Яа-яЁё\s\-']{2,40}$/.test(name)) {
+      authRegisterError.textContent = 'Имя должно содержать 2–40 символов и только буквы, пробел, дефис или апостроф.';
+      return;
+    }
+    if (!email) {
+      authRegisterError.textContent = 'Поле email пустое — заполните его.';
       return;
     }
     if (!isValidEmail(email)) {
@@ -693,13 +837,25 @@
       authRegisterError.textContent = 'Этот логин зарезервирован для служебного аккаунта.';
       return;
     }
+    if (!phone.length) {
+      authRegisterError.textContent = 'Поле телефона пустое — заполните его.';
+      return;
+    }
     if (phone.length !== 11 || phone[0] !== '7') {
       authRegisterError.textContent = 'Введите телефон в формате +7 (999) 123-45-67.';
+      return;
+    }
+    if (!String(password || '').trim()) {
+      authRegisterError.textContent = 'Поле «Пароль» пустое — заполните его.';
       return;
     }
     if (!isStrongPassword(password)) {
       authRegisterError.textContent =
         'Пароль: 8–128 символов, нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).';
+      return;
+    }
+    if (!String(passwordConfirm || '').trim()) {
+      authRegisterError.textContent = 'Поле «Повторите пароль» пустое — его нужно заполнить.';
       return;
     }
     if (password !== passwordConfirm) {
@@ -712,15 +868,28 @@
     const last_name = nameParts.slice(1).join(' ');
     const apiReg = window.EkvalineAPI;
     if (apiReg?.json) {
-      const rReg = await apiReg.json('/api/auth/register', {
-        method: 'POST',
-        body: { first_name, last_name: last_name || '', email, phone, password },
-      });
+      let rReg;
+      try {
+        rReg = await apiReg.json('/api/auth/register', {
+          method: 'POST',
+          body: { first_name, last_name: last_name || '', email, phone, password },
+        });
+      } catch {
+        authRegisterError.textContent =
+          'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
+        return;
+      }
+      if (!rReg || typeof rReg !== 'object') {
+        authRegisterError.textContent =
+          'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
+        return;
+      }
       if (rReg.ok && rReg.data?.user) {
         const u = rReg.data.user;
         apiReg.resetCsrf?.();
         const displayName =
           String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email;
+        const registeredAt = new Date().toISOString();
         saveCurrentUser({
           id: u.id,
           name: displayName,
@@ -731,27 +900,20 @@
           last_name: u.last_name,
           bonus_balance: u.bonus_balance,
         });
+        window.EkvalineApp?.stampRegistrationWelcomeNotifications?.(registeredAt);
         updateHeaderAuth();
         closeAuthModal();
         openCabinet();
         return;
       }
-      if (rReg.status === 409) {
-        authRegisterError.textContent = String(rReg.data?.error || 'Этот email или телефон уже зарегистрированы.');
-        return;
-      }
-      if (Number(rReg.status) > 0) {
-        authRegisterError.textContent = String(
-          rReg.data?.error || 'Не удалось зарегистрироваться. Проверьте данные или подключение к серверу.'
-        );
-        return;
-      }
+      authRegisterError.textContent = registerSubmitErrorFromApi(rReg.status, rReg.data);
+      return;
     }
 
     const users = readUsers();
     const exists = users.some((item) => item.email === email || item.phone === phone);
     if (exists) {
-      authRegisterError.textContent = 'Пользователь с таким email или телефоном уже существует.';
+      authRegisterError.textContent = 'Этот email или телефон уже зарегистрированы.';
       return;
     }
 
@@ -766,7 +928,9 @@
 
     users.push(newUser);
     saveUsers(users);
+    const registeredAt = new Date().toISOString();
     saveCurrentUser({ id: newUser.id, name, email, phone });
+    window.EkvalineApp?.stampRegistrationWelcomeNotifications?.(registeredAt);
     updateHeaderAuth();
     closeAuthModal();
     openCabinet();
@@ -1125,6 +1289,7 @@
         <datalist id="mapCitySuggestions"></datalist>
         <div id="checkoutMapRoot" class="checkout-map-root"></div>
         <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
+        <p class="checkout-map-picker-hint">Если адрес не находится, выберите точку на карте сами.</p>
         <div class="checkout-map-actions">
           <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
           <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
@@ -1176,7 +1341,11 @@
   let mapSearchTimer = null;
   let citySuggestTimer = null;
   let streetSuggestTimer = null;
+  let streetSuggestGen = 0;
+  /** Отмена запроса подсказок при новом вводе (не подмешивать старый ответ). */
+  let streetSuggestAbort = null;
   let latestGeocodeRequestId = 0;
+  let latestStreetPreviewId = 0;
   let remoteOrenburgStreetsCache = null;
   let remoteOrenburgStreetsPromise = null;
   let appToastTimer = null;
@@ -1261,11 +1430,13 @@
       .replace(/^\s*(ул\.?|улица)\s+/i, '')
       .trim();
     const params = new URLSearchParams({
-      limit: '6',
+      limit: '10',
       countrycodes: 'ru',
       city: parts.city,
-      street: `${parts.house} ${normalizedStreet}`.trim(),
+      street: normalizedStreet,
     });
+    const house = String(parts.house || '').trim();
+    if (house) params.set('house', house);
     if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
       params.set('bounded', '1');
       params.set('viewbox', ORENBURG_VIEWBOX);
@@ -1279,10 +1450,44 @@
       .then((rows) => (Array.isArray(rows) ? rows : []));
   }
 
-  function searchSuggestions(query, limit = 5) {
+  function searchSuggestions(query, limit = 5, opts = {}) {
+    const signal = opts && opts.signal;
     const params = new URLSearchParams({ limit: String(limit), q: query });
     const url = `/api/public/geocode-search?${params.toString()}`;
-    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    return fetch(url, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+      signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('suggest_failed');
+        return response.json();
+      })
+      .then((rows) => (Array.isArray(rows) ? rows : []));
+  }
+
+  /** Тот же режим запроса, что у геокода карты: структурно город + улица (точнее и лучше кэшируется). */
+  function searchStreetStructured(city, streetQuery, limit = 24, opts = {}) {
+    const signal = opts && opts.signal;
+    const normalizedStreet = String(streetQuery || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const params = new URLSearchParams({
+      limit: String(limit),
+      countrycodes: 'ru',
+      city: String(city || '').trim(),
+      street: normalizedStreet,
+    });
+    if (normalizeAddressToken(city) === normalizeAddressToken(DEFAULT_CITY)) {
+      params.set('bounded', '1');
+      params.set('viewbox', ORENBURG_VIEWBOX);
+    }
+    const url = `/api/public/geocode-search?${params.toString()}`;
+    return fetch(url, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+      signal,
+    })
       .then((response) => {
         if (!response.ok) throw new Error('suggest_failed');
         return response.json();
@@ -1330,6 +1535,16 @@
     const state = normalizeAddressToken(address.state || '');
     if (city === normalizeAddressToken(DEFAULT_CITY)) return true;
     return stateDistrict.includes('оренбург') || state.includes('оренбург');
+  }
+
+  function rowMatchesCityLabel(row, cityLabel) {
+    const want = normalizeAddressToken(cityLabel);
+    if (!want) return true;
+    const addr = row?.address || {};
+    const city = normalizeAddressToken(addr.city || addr.town || addr.village || '');
+    if (city && (city === want || city.includes(want) || want.includes(city))) return true;
+    const d = normalizeAddressToken(row.display_name || '');
+    return d.includes(want);
   }
 
   function isValidStreetName(name) {
@@ -1421,6 +1636,7 @@
     updateStreetClearButton();
     showStreetDropdown([]);
     updatePickedAddressLabel();
+    void syncMapStreetPreview();
     void syncMapByInputs();
   }
 
@@ -1439,53 +1655,184 @@
     }
   }
 
+  function stripLeadingStreetWords(value) {
+    return String(value || '')
+      .replace(/^\s*(ул\.?|улица|проспект|просп\.?|пр-кт|шоссе|бульвар|б-р|переулок|пер\.?)\s+/gi, '')
+      .trim();
+  }
+
+  function significantStreetTokens(raw) {
+    const cleaned = stripLeadingStreetWords(raw)
+      .toLowerCase()
+      .replace(/ё/g, 'е');
+    const words = cleaned.split(/[\s,.]+/).map((w) => w.replace(/[^a-zа-я0-9]/gi, '')).filter((t) => t.length >= 4);
+    return [...new Set(words)];
+  }
+
+  function tokenMatchesLabelRough(t, suggestionLabel) {
+    const label = normalizeAddressToken(suggestionLabel);
+    const tn = normalizeAddressToken(t);
+    if (!tn) return true;
+    if (label.includes(tn)) return true;
+    if (tn.length >= 10) return label.includes(tn.slice(0, tn.length - 3));
+    if (tn.length >= 8) return label.includes(tn.slice(0, tn.length - 2));
+    if (tn.length >= 6) return label.includes(tn.slice(0, Math.max(5, tn.length - 2)));
+    return label.includes(tn.slice(0, Math.max(4, tn.length - 1)));
+  }
+
+  function streetSuggestionRelevantForNeedle(needleRaw, suggestionLabel) {
+    const tokens = significantStreetTokens(needleRaw);
+    if (!tokens.length) return true;
+    return tokens.every((t) => tokenMatchesLabelRough(t, suggestionLabel));
+  }
+
+  function rankStreetSuggestion(needleRaw, label) {
+    const needleWhole = normalizeAddressToken(stripLeadingStreetWords(needleRaw));
+    const lab = normalizeAddressToken(label);
+    let score = lab ? 2 : 0;
+    if (needleWhole) {
+      if (lab.startsWith(needleWhole)) score += 100;
+      else if (lab.includes(needleWhole)) score += 50;
+      for (const t of significantStreetTokens(needleRaw)) {
+        const tn = normalizeAddressToken(t);
+        if (tn && lab.includes(tn)) score += Math.min(40, tn.length * 6);
+        else if (tn.length >= 5 && tokenMatchesLabelRough(t, label)) score += Math.min(18, tn.length * 2);
+      }
+    }
+    return score;
+  }
+
+  function sortStreetSuggestions(needleRaw, names) {
+    const uniq = [...new Set(names.filter(Boolean))];
+    return uniq.sort((a, b) => rankStreetSuggestion(needleRaw, b) - rankStreetSuggestion(needleRaw, a));
+  }
+
   async function updateStreetSuggestions() {
+    const gen = ++streetSuggestGen;
+    if (streetSuggestAbort) {
+      try {
+        streetSuggestAbort.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    streetSuggestAbort = new AbortController();
+    const suggestSignal = streetSuggestAbort.signal;
+
     const streetQ = String(mapStreetInput instanceof HTMLInputElement ? mapStreetInput.value : '').trim();
     const cityQRaw = String(mapCityInput instanceof HTMLInputElement ? mapCityInput.value : '').trim();
     const cityQ = cityQRaw || DEFAULT_CITY;
+    const isOrenburgContext = normalizeAddressToken(cityQ) === normalizeAddressToken(DEFAULT_CITY);
     const normalizedNeedle = normalizeAddressToken(streetQ);
-    const localMatches = ORENBURG_STREETS.filter((item) => {
-      const nName = normalizeAddressToken(item.name);
-      const nType = normalizeAddressToken(item.type);
-      if (!normalizedNeedle) return true;
-      return nName.startsWith(normalizedNeedle) || nName.includes(normalizedNeedle) || nType.startsWith(normalizedNeedle);
-    })
-      .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-      .map((item) => formatStreetLabel(item));
-    const remoteBase = await fetchRemoteOrenburgStreets();
-    const remoteFiltered = normalizedNeedle
-      ? remoteBase.filter((name) => {
-          const n = normalizeAddressToken(name);
-          return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+
+    const localMatches = isOrenburgContext
+      ? ORENBURG_STREETS.filter((item) => {
+          const nName = normalizeAddressToken(item.name);
+          const nType = normalizeAddressToken(item.type);
+          if (!normalizedNeedle) return true;
+          return nName.startsWith(normalizedNeedle) || nName.includes(normalizedNeedle) || nType.startsWith(normalizedNeedle);
         })
-      : remoteBase;
-    const initialCombined = [...new Set([...localMatches, ...remoteFiltered])];
-    if (initialCombined.length) showStreetDropdown(initialCombined);
-    if (!normalizedNeedle) return;
-    try {
-      const rows = await searchSuggestions(`${cityQ}, ${streetQ}`.trim(), 20);
-      const values = rows
-        .filter((row) => isOrenburgCityAddress(row))
-        .map((row) => extractStreetFromRow(row))
-        .filter((name) => isValidStreetName(name))
-        .map((name) => {
-          const prepared = toTitleCase(name);
-          if (/переулок|пер\.?/i.test(prepared)) return prepared;
-          const matchedLane = ORENBURG_STREETS.find(
-            (item) => item.type === 'переулок' && normalizeAddressToken(item.name) === normalizeAddressToken(prepared)
+          .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+          .map((item) => formatStreetLabel(item))
+      : [];
+
+    const remotePromise = isOrenburgContext ? fetchRemoteOrenburgStreets() : Promise.resolve([]);
+
+    const filterBySubstringNeedle = (names) => {
+      if (!normalizedNeedle) return names;
+      return names.filter((name) => {
+        const n = normalizeAddressToken(name);
+        return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+      });
+    };
+
+    const applyDistinctTokens = (names) => {
+      if (!normalizedNeedle) return names;
+      return names.filter((name) => streetSuggestionRelevantForNeedle(streetQ, name));
+    };
+
+    const renderList = (names) => {
+      if (gen !== streetSuggestGen) return;
+      showStreetDropdown(sortStreetSuggestions(streetQ, names));
+    };
+
+    const mergeLists = (apiNames) => {
+      remotePromise
+        .then((remoteBase) => {
+          if (gen !== streetSuggestGen) return;
+          const remoteFiltered =
+            normalizedNeedle && remoteBase.length
+              ? remoteBase.filter((name) => {
+                  const n = normalizeAddressToken(name);
+                  return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+                })
+              : remoteBase;
+          const fuzzyLocal = applyDistinctTokens(
+            filterBySubstringNeedle([...new Set([...localMatches, ...(normalizedNeedle ? remoteFiltered : remoteFiltered.slice(0, 60))])])
           );
-          return matchedLane ? formatStreetLabel(matchedLane) : prepared;
+          const apiClean = normalizedNeedle ? filterBySubstringNeedle(apiNames) : apiNames;
+          const combined = [...new Set([...apiClean, ...fuzzyLocal])];
+          renderList(combined.length ? combined : apiClean.length ? apiClean : fuzzyLocal);
         })
-        .filter((name) => {
-          const n = normalizeAddressToken(name);
-          return n.startsWith(normalizedNeedle) || n.includes(normalizedNeedle);
+        .catch(() => {
+          if (gen !== streetSuggestGen) return;
+          const fuzzyLocal = applyDistinctTokens(
+            normalizedNeedle ? filterBySubstringNeedle([...localMatches]) : localMatches
+          );
+          const apiClean = normalizedNeedle ? filterBySubstringNeedle(apiNames) : apiNames;
+          const combined = [...new Set([...apiClean, ...fuzzyLocal])];
+          renderList(combined.length ? combined : apiClean.length ? apiClean : fuzzyLocal);
         });
-      const unique = [...new Set([...localMatches, ...remoteFiltered, ...values])];
-      showStreetDropdown(unique);
-    } catch {
-      if (!initialCombined.length) {
-        showStreetDropdown([]);
+    };
+
+    if (!normalizedNeedle) {
+      if (localMatches.length) renderList(localMatches.slice(0, 50));
+      mergeLists([]);
+      return;
+    }
+
+    const quickPick = filterBySubstringNeedle(applyDistinctTokens(localMatches));
+    if (quickPick.length) renderList(quickPick);
+    else showStreetDropdown([]);
+
+    try {
+      let rows = await searchStreetStructured(cityQ, streetQ, 24, { signal: suggestSignal });
+      if (gen !== streetSuggestGen) return;
+
+      if (rows.length < 5) {
+        try {
+          const extra = await searchSuggestions(`${cityQ}, ${streetQ}`.trim(), 18, { signal: suggestSignal });
+          rows = [...rows, ...extra];
+        } catch (_) {
+          /* ignore */
+        }
       }
+      if (gen !== streetSuggestGen) return;
+
+      const seen = new Set();
+      const values = [];
+      rows.forEach((row) => {
+        const nameRaw = extractStreetFromRow(row);
+        if (!nameRaw || !isValidStreetName(nameRaw)) return;
+        const prepared = (() => {
+          const nm = toTitleCase(nameRaw);
+          if (/переулок|пер\.?/i.test(nm)) return nm;
+          const matchedLane = ORENBURG_STREETS.find(
+            (item) => item.type === 'переулок' && normalizeAddressToken(item.name) === normalizeAddressToken(nm)
+          );
+          return matchedLane ? formatStreetLabel(matchedLane) : nm;
+        })();
+        if (!prepared || !filterBySubstringNeedle([prepared]).length) return;
+        if (!rowMatchesCityLabel(row, cityQRaw || cityQ)) return;
+        const key = normalizeAddressToken(prepared);
+        if (seen.has(key)) return;
+        seen.add(key);
+        values.push(prepared);
+      });
+      mergeLists(values);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      mergeLists([]);
     }
   }
 
@@ -1493,10 +1840,12 @@
     const normalizedStreet = String(parts.street || '')
       .replace(/^\s*(ул\.?|улица)\s+/i, '')
       .trim();
+    const house = String(parts.house || '').trim();
+    const qParts = [parts.city, normalizedStreet, house].filter(Boolean);
     const params = new URLSearchParams({
       limit: '8',
       countrycodes: 'ru',
-      q: `${parts.city}, ${normalizedStreet}, ${parts.house}, Россия`,
+      q: `${qParts.join(', ')}, Россия`,
     });
     if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
       params.set('bounded', '1');
@@ -1539,6 +1888,78 @@
     return best;
   }
 
+  async function fallbackGeocodeStreetOnly(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const params = new URLSearchParams({
+      limit: '8',
+      countrycodes: 'ru',
+      q: `${parts.city}, ${normalizedStreet}, Россия`,
+    });
+    if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
+      params.set('bounded', '1');
+      params.set('viewbox', ORENBURG_VIEWBOX);
+    }
+    const response = await fetch(`/api/public/geocode-search?${params.toString()}`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  function pickBestStreetGeocodeMatch(parts, rows) {
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const srcCity = normalizeAddressToken(parts.city);
+    const normalizedStreetLabel = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const srcStreet = normalizeAddressToken(normalizedStreetLabel);
+    let best = null;
+    let bestScore = -1;
+    rows.forEach((row) => {
+      const addr = row.address || {};
+      const city = normalizeAddressToken(addr.city || addr.town || addr.village || '');
+      const street = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
+      const display = normalizeAddressToken(row.display_name || '');
+      let score = 0;
+      if (srcCity && city && (city === srcCity || city.includes(srcCity) || srcCity.includes(city))) score += 5;
+      if (srcStreet && street && (street === srcStreet || street.includes(srcStreet) || srcStreet.includes(street))) score += 10;
+      if (srcStreet && display.includes(srcStreet)) score += 3;
+      if (score > bestScore) {
+        best = row;
+        bestScore = score;
+      }
+    });
+    return bestScore >= 10 ? best : null;
+  }
+
+  async function syncMapStreetPreview() {
+    const parts = readAddressParts();
+    if (!parts.city || !parts.street || !checkoutMapCtl) return;
+    if (parts.house) return;
+    const requestId = ++latestStreetPreviewId;
+    try {
+      const streetParts = { ...parts, house: '' };
+      let candidates = await geocodeAddress(streetParts);
+      if (!candidates.length) {
+        candidates = await fallbackGeocodeStreetOnly(streetParts);
+      }
+      const match = pickBestStreetGeocodeMatch(parts, candidates);
+      if (!match) return;
+      if (requestId !== latestStreetPreviewId) return;
+      const lat = Number(match.lat);
+      const lon = Number(match.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      checkoutMapCtl.setMarker(lat, lon);
+      checkoutMapCtl.flyToMarker(lat, lon, 15);
+    } catch {
+      /* silent */
+    }
+  }
+
   function reverseGeocode(lat, lon) {
     const url = `/api/public/geocode-reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
     return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
@@ -1564,19 +1985,6 @@
       .toLowerCase()
       .replace(/ё/g, 'е')
       .replace(/[^a-zа-я0-9]/gi, '');
-  }
-
-  function isGeocodeMatchAccurate(parts, match) {
-    if (!match) return false;
-    const addr = match.address || {};
-    const matchStreet = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
-    const matchHouse = normalizeAddressToken(addr.house_number || '');
-    const srcStreet = normalizeAddressToken(parts.street);
-    const srcHouse = normalizeAddressToken(parts.house);
-    const display = normalizeAddressToken(match.display_name || '');
-    const streetOk = srcStreet && (matchStreet.includes(srcStreet) || srcStreet.includes(matchStreet) || display.includes(srcStreet));
-    const houseOk = srcHouse && (matchHouse === srcHouse || display.includes(srcHouse));
-    return Boolean(streetOk && houseOk);
   }
 
   function updatePickedAddressLabel() {
@@ -1614,11 +2022,6 @@
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
       checkoutMapCtl.setMarker(lat, lon);
       checkoutMapCtl.flyToMarker(lat, lon, 16);
-      const accurate = isGeocodeMatchAccurate(parts, match);
-      if (!accurate && checkoutMapAddress instanceof HTMLElement) {
-        checkoutMapAddress.textContent =
-          `Внимание: карта нашла похожий адрес. Проверьте улицу и дом. Сейчас: ${pickedAddress || 'адрес не собран'}`;
-      }
     } catch {
       /* silent */
     }
@@ -1651,7 +2054,7 @@
         }
       );
     }
-    setTimeout(() => checkoutMapCtl?.invalidateSize(), 30);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize()));
   }
 
   async function openMapPicker() {
@@ -1671,8 +2074,13 @@
     mapPickerModal?.setAttribute('aria-hidden', 'false');
     try {
       await initMapPicker();
-      checkoutMapCtl?.flyToMarker(MAP_DEFAULT_CENTER[0], MAP_DEFAULT_CENTER[1], MAP_DEFAULT_ZOOM);
-      void syncMapByInputs();
+      const p = readAddressParts();
+      if (p.city && p.street) {
+        if (p.house) void syncMapByInputs();
+        else void syncMapStreetPreview();
+      } else {
+        checkoutMapCtl?.flyToMarker(MAP_DEFAULT_CENTER[0], MAP_DEFAULT_CENTER[1], MAP_DEFAULT_ZOOM);
+      }
     } catch {
       closeMapPicker();
       showAppToast('Не удалось загрузить карту. Проверьте подключение к интернету.', 'error');
@@ -1943,8 +2351,7 @@
         !apartmentAddressValid
       ) {
         showAppToast(
-          `Проверьте поля: выберите адрес на карте, дату и интервал доставки, адрес до ${CHECKOUT_ADDRESS_MAX} символов, комментарий до ${CHECKOUT_COMMENT_MAX} символов. Если указана квартира — обязательно заполните этаж и подъезд.`
-          ,
+          'Проверьте поля: выберите адрес на карте, дату и интервал доставки. Если указана квартира — обязательно заполните этаж и подъезд.',
           'error'
         );
         return;
@@ -2020,8 +2427,10 @@
       updatePickedAddressLabel();
       if (mapSearchTimer) window.clearTimeout(mapSearchTimer);
       mapSearchTimer = window.setTimeout(() => {
-        void syncMapByInputs();
-      }, 450);
+        const p = readAddressParts();
+        if (p.house) void syncMapByInputs();
+        else void syncMapStreetPreview();
+      }, 200);
     });
   });
 
@@ -2037,7 +2446,7 @@
     if (streetSuggestTimer) window.clearTimeout(streetSuggestTimer);
     streetSuggestTimer = window.setTimeout(() => {
       void updateStreetSuggestions();
-    }, 220);
+    }, 120);
   });
 
   mapStreetInput?.addEventListener('focus', () => {
@@ -2107,6 +2516,8 @@ if (
   bottlesValue &&
   bottleWater &&
   usageText &&
+  activityText &&
+  seasonText &&
   drinkNormValue &&
   householdReserveValue &&
   monthlyLitersValue &&
@@ -2118,29 +2529,8 @@ if (
   planTierValue &&
   calcPriceTotal
 ) {
-  const activityMultiplier = {
-    low: 0.88,
-    medium: 1,
-    high: 1.16,
-  };
-
-  const seasonMultiplier = {
-    winter: 0.93,
-    'spring-autumn': 1,
-    summer: 1.12,
-  };
-
-  const activityLabels = {
-    low: 'Низкий',
-    medium: 'Средний',
-    high: 'Высокий',
-  };
-
-  const seasonLabels = {
-    winter: 'Зима',
-    'spring-autumn': 'Весна/Осень',
-    summer: 'Лето',
-  };
+  const calcSection = document.getElementById('water-calc');
+  const calcResultCard = calcSection && calcSection.querySelector('.calc-result-card');
 
   const usageLabels = {
     drink: 'Только питье',
@@ -2155,134 +2545,13 @@ if (
     season: 'spring-autumn',
   };
 
-  function toOneDecimal(value) {
-    return Math.round(value * 10) / 10;
-  }
-
-  function formatDecimal(value) {
-    return toOneDecimal(value).toFixed(1).replace('.', ',');
-  }
-
-  function formatMoney(value) {
-    return `${Math.round(value).toLocaleString('ru-RU')} ₽`;
-  }
-
-  function pluralOrders(value) {
-    const mod10 = value % 10;
-    const mod100 = value % 100;
-    if (mod10 === 1 && mod100 !== 11) return 'заказ';
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'заказа';
-    return 'заказов';
-  }
-
-  function pluralDays(days) {
-    const mod10 = days % 10;
-    const mod100 = days % 100;
-    if (mod10 === 1 && mod100 !== 11) return 'день';
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-    return 'дней';
-  }
+  let debounceTimer = null;
+  let abortController = null;
 
   function setDependentControlsDisabled(disabled) {
     document.querySelectorAll('.option-btn[data-group="activity"], .option-btn[data-group="season"]').forEach((button) => {
       button.disabled = disabled;
     });
-  }
-
-  function updateCalc() {
-    const isDrinking = state.usage === 'drink' || state.usage === 'both';
-    const isCooking = state.usage === 'cook' || state.usage === 'both';
-
-    // Базовая питьевая норма на человека: 2 л/сутки + поправки на активность/сезон.
-    const baseDrinkPerPerson = 2;
-    const activityFactor = isDrinking ? activityMultiplier[state.activity] : 1;
-    const seasonFactor = isDrinking ? seasonMultiplier[state.season] : 1;
-    const dailyDrinkLiters =
-      isDrinking ? state.people * baseDrinkPerPerson * activityFactor * seasonFactor : 0;
-
-    // Расход на готовку/напитки для кухни из той же воды.
-    const cookPerPerson = 0.8;
-    const householdReserveLiters = isCooking ? state.people * cookPerPerson : 0;
-    const dailyLiters = dailyDrinkLiters + householdReserveLiters;
-    const monthlyLiters = dailyLiters * 30;
-    const reserveCoefficient = 1.1;
-    const monthlyWithReserve = monthlyLiters * reserveCoefficient;
-
-    const dailyForDisplay = Math.max(1, toOneDecimal(dailyLiters));
-    const monthlyForDisplay = Math.round(monthlyWithReserve);
-    const monthlyBottles = Math.max(1, Math.ceil(monthlyWithReserve / 19));
-    const daysPerBottle = Math.max(1, Math.round(19 / dailyForDisplay));
-    const waterPercent = Math.min(80, Math.max(24, dailyForDisplay * 6.5));
-
-    // Тарифы: 1 шт = 220, 2-4 шт = 190, 5+ шт = 175.
-    // Учитываем минимальные количества, чтобы расчёт оставался реалистичным.
-    const onePurchased = monthlyBottles;
-    const oneQty = 1;
-    const oneOrders = onePurchased;
-    const oneTotal = onePurchased * 220;
-
-    const twoPurchased = monthlyBottles === 1 ? 2 : monthlyBottles;
-    const twoOrders = Math.max(1, Math.ceil(twoPurchased / 4));
-    const twoQty = Math.min(4, Math.max(2, Math.ceil(twoPurchased / twoOrders)));
-    const twoTotal = twoPurchased * 190;
-
-    const fivePurchased = Math.max(5, monthlyBottles);
-    const fiveOrders = Math.max(1, Math.ceil(fivePurchased / 8));
-    const fiveQty = Math.max(5, Math.ceil(fivePurchased / fiveOrders));
-    const fiveTotal = fivePurchased * 175;
-
-    const tierLabel = fiveTotal <= twoTotal && fiveTotal <= oneTotal
-      ? 'от 5 бутылей по 175 ₽'
-      : twoTotal <= oneTotal
-        ? '2-4 бутыли по 190 ₽'
-        : '1 бутыль по 220 ₽';
-
-    const activityHint = {
-      low: 'низкая активность',
-      medium: 'средняя активность',
-      high: 'высокая активность',
-    };
-    const seasonHint = {
-      winter: 'зимний период',
-      'spring-autumn': 'весна/осень',
-      summer: 'летний период',
-    };
-
-    peopleValue.textContent = String(state.people);
-    litersValue.textContent = formatDecimal(dailyForDisplay);
-    bottlesValue.textContent = `${monthlyBottles} шт`;
-    bottleWater.style.height = `${waterPercent}%`;
-    bottleWater.classList.remove('season-winter', 'season-spring-autumn', 'season-summer');
-    if (isDrinking) {
-      bottleWater.classList.add(`season-${state.season}`);
-    } else {
-      // Для режима "только готовка" оставляем базовый зимний (синий) цвет.
-      bottleWater.classList.add('season-winter');
-    }
-    usageText.textContent = usageLabels[state.usage];
-    activityText.textContent = isDrinking ? activityLabels[state.activity] : 'Не учитывается';
-    seasonText.textContent = isDrinking ? seasonLabels[state.season] : 'Не учитывается';
-    drinkNormValue.textContent = `${formatDecimal(dailyDrinkLiters)} л/день`;
-    householdReserveValue.textContent = `${formatDecimal(householdReserveLiters)} л/день`;
-    monthlyLitersValue.textContent = `${monthlyForDisplay} л`;
-    orderIntervalValue.textContent = `каждые ${daysPerBottle} ${pluralDays(daysPerBottle)}`;
-    planLineOne.textContent = `${oneQty} бут./заказ • ${oneOrders} ${pluralOrders(oneOrders)}/мес • ${formatMoney(oneTotal)}/мес`;
-    planLineTwo.textContent = `${twoQty} бут./заказ • ${twoOrders} ${pluralOrders(twoOrders)}/мес • ${formatMoney(twoTotal)}/мес`;
-    planLineFive.textContent = `${fiveQty} бут./заказ • ${fiveOrders} ${pluralOrders(fiveOrders)}/мес • ${formatMoney(fiveTotal)}/мес`;
-    planTierValue.textContent = tierLabel;
-
-    const cheapestMonthly = Math.min(oneTotal, twoTotal, fiveTotal);
-    calcPriceTotal.textContent = formatMoney(cheapestMonthly);
-
-    if (state.usage === 'both') {
-      calcNote.textContent = `Расчет для ${state.people} чел.: ${activityHint[state.activity]}, ${seasonHint[state.season]}, с запасом 10% на непредвиденное потребление.`;
-    } else if (state.usage === 'drink') {
-      calcNote.textContent = `Расчет для ${state.people} чел. только на питьевую воду: ${activityHint[state.activity]}, ${seasonHint[state.season]}, с запасом 10%.`;
-    } else {
-      calcNote.textContent = `Расчет для ${state.people} чел. только на готовку и кухонные напитки с запасом 10%. Питьевая норма не учитывается.`;
-    }
-
-    setDependentControlsDisabled(!isDrinking);
   }
 
   function setGroupActive(group, value) {
@@ -2292,21 +2561,273 @@ if (
     });
   }
 
+  /** Применить ответ сервера — подмена в DevTools без нового запроса не является «доверенными» данными надолго. */
+  function applyWaterCalcPayload(payload) {
+    peopleValue.textContent = String(payload.people);
+    litersValue.textContent = payload.litersPerDay;
+    bottlesValue.textContent = payload.bottlesLabel;
+    bottleWater.style.height = `${payload.bottleWaterPercent}%`;
+    bottleWater.classList.remove('season-winter', 'season-spring-autumn', 'season-summer');
+    const seasonClass =
+      typeof payload.bottleWaterSeasonClass === 'string'
+        ? payload.bottleWaterSeasonClass.replace(/[^a-z-]/gi, '')
+        : 'winter';
+    bottleWater.classList.add(`season-${seasonClass}`);
+
+    usageText.textContent = payload.usageLabel;
+    activityText.textContent = payload.activityLabel;
+    seasonText.textContent = payload.seasonLabel;
+
+    drinkNormValue.textContent = payload.drinkNormPerDay;
+    householdReserveValue.textContent = payload.householdPerDay;
+    monthlyLitersValue.textContent = payload.monthlyLiters;
+    orderIntervalValue.textContent = payload.orderInterval;
+    planLineOne.textContent = payload.planLineOne;
+    planLineTwo.textContent = payload.planLineTwo;
+    planLineFive.textContent = payload.planLineFive;
+    planTierValue.textContent = payload.planTier;
+    calcPriceTotal.textContent = payload.priceTotalApprox;
+    calcNote.textContent = payload.note;
+    setDependentControlsDisabled(Boolean(payload.restrictActivitySeason));
+  }
+
+  async function fetchWaterCalcFromServer() {
+    abortController?.abort();
+    abortController = new AbortController();
+
+    calcResultCard?.classList.add('is-calc-loading');
+    calcResultCard?.setAttribute('aria-busy', 'true');
+
+    const params = new URLSearchParams({
+      people: String(state.people),
+      usage: state.usage,
+      activity: state.activity,
+      season: state.season,
+    });
+
+    try {
+      const res = await fetch(`/api/public/water-calc?${params}`, {
+        credentials: 'same-origin',
+        signal: abortController.signal,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof body.error === 'string' ? body.error : 'Ошибка расчёта');
+      }
+      applyWaterCalcPayload(body);
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      // eslint-disable-next-line no-console
+      console.warn('[water-calc]', e);
+      calcNote.textContent =
+        'Не удалось получить расчёт с сервера. Проверьте подключение и обновите страницу.';
+    } finally {
+      calcResultCard?.classList.remove('is-calc-loading');
+      calcResultCard?.setAttribute('aria-busy', 'false');
+    }
+  }
+
+  function scheduleWaterCalc(immediate) {
+    if (debounceTimer) window.clearTimeout(debounceTimer);
+    if (immediate) {
+      debounceTimer = null;
+      void fetchWaterCalcFromServer();
+      return;
+    }
+    debounceTimer = window.setTimeout(() => {
+      debounceTimer = null;
+      void fetchWaterCalcFromServer();
+    }, 140);
+  }
+
   peopleRange.addEventListener('input', (event) => {
     state.people = Number(event.target.value);
-    updateCalc();
+    scheduleWaterCalc(false);
   });
 
-  document.querySelectorAll('.option-btn').forEach((button) => {
+  document.querySelectorAll('#water-calc .option-btn').forEach((button) => {
     button.addEventListener('click', () => {
       const { group, value } = button.dataset;
       state[group] = value;
       setGroupActive(group, value);
-      updateCalc();
+
+      /** Пока ждём ответ, синхронно обновляем подпись сценария (видна до ответа). */
+      if (group === 'usage' && value && usageLabels[value]) {
+        usageText.textContent = usageLabels[value];
+      }
+      scheduleWaterCalc(false);
     });
   });
 
-  updateCalc();
+  scheduleWaterCalc(true);
+}
+
+/** Второй запрос на 127.0.0.1 / localhost — если страница с Live Server/Vite на том же ПК по LAN-IP или нестандартному порту. */
+function shouldOfferFeedbackApiFallback(pageOrigin) {
+  try {
+    const u = new URL(pageOrigin);
+    const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+    const ipv4 =
+      /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h) ||
+      /^(?:ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/i.exec(h);
+    if (ipv4) {
+      const a = Number(ipv4[1]);
+      const b = Number(ipv4[2]);
+      if (a === 10) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 127) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function resolveFeedbackApiPort() {
+  const w = typeof window !== 'undefined' ? window : {};
+  const fromWin = w.__EKVALINE_LISTEN_PORT__;
+  if (typeof fromWin === 'number' && Number.isFinite(fromWin) && fromWin > 0 && fromWin < 65536) return fromWin;
+  const portMeta = document.querySelector('meta[name="ekvaline-api-port"]');
+  const n = Number(portMeta && typeof portMeta.content === 'string' ? portMeta.content.trim() : '');
+  if (Number.isFinite(n) && n > 0 && n < 65536) return n;
+  return 3001;
+}
+
+function feedbackFallbackApiOrigins(apiPort) {
+  const port = typeof apiPort === 'number' && apiPort > 0 ? apiPort : 3001;
+  const o1 = `http://127.0.0.1:${port}`;
+  const o2 = `http://localhost:${port}`;
+  return o1 === o2 ? [o1] : [o1, o2];
+}
+
+/** URL POST /api/feedback (порт через /ekvaline-runtime.js или meta ekvaline-api-port). */
+function getCallbackFeedbackPostUrls() {
+  const apiPort = resolveFeedbackApiPort();
+  const meta = document.querySelector('meta[name="ekvaline-api-origin"]');
+  const rawMeta = meta && typeof meta.content === 'string' ? meta.content.trim() : '';
+  if (rawMeta) {
+    try {
+      const o = new URL(rawMeta).origin;
+      return [`${o}/api/feedback`];
+    } catch {
+      /* ниже общий режим */
+    }
+  }
+
+  const proto = window.location.protocol;
+  const origin = window.location.origin;
+  const urls = [];
+  const add = (u) => {
+    if (typeof u === 'string' && !urls.includes(u)) urls.push(u);
+  };
+
+  if (proto === 'file:' || origin === 'null') {
+    feedbackFallbackApiOrigins(apiPort).forEach((b) => add(`${b}/api/feedback`));
+    return urls;
+  }
+
+  add(`${origin}/api/feedback`);
+  if (shouldOfferFeedbackApiFallback(origin)) {
+    for (const b of feedbackFallbackApiOrigins(apiPort)) {
+      add(`${b}/api/feedback`);
+    }
+  }
+  return urls;
+}
+
+function fetchOptionsForFeedbackUrl(url, bodyJson) {
+  let crossSite = true;
+  try {
+    crossSite = new URL(url).origin !== new URL(window.location.href).origin;
+  } catch {
+    crossSite = true;
+  }
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: crossSite ? 'omit' : 'same-origin',
+    body: bodyJson,
+    cache: 'no-store',
+  };
+}
+
+/** Достаём JSON даже при мусоре до/после (прокси, лишние символы). Не цепляемся за первый «{» в HTML/CSS. */
+function parseBalancedJsonObjectFrom(s, start) {
+  if (!s || start < 0 || start >= s.length || s[start] !== '{') return null;
+  const len = s.length;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < len; i += 1) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      continue;
+    }
+    if (c === '{') depth += 1;
+    else if (c === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          const o = JSON.parse(s.slice(start, i + 1));
+          return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function tryParseFeedbackJsonEnvelope(text) {
+  const s = String(text != null ? text : '').replace(/^\uFEFF/, '').trimStart();
+  if (!s) return null;
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+  } catch {
+    const okKey = /\{\s*"ok"\s*:/g;
+    let m;
+    while ((m = okKey.exec(s)) !== null) {
+      const o = parseBalancedJsonObjectFrom(s, m.index);
+      if (o) return o;
+    }
+    const okSucc = /\{\s*"success"\s*:/g;
+    okSucc.lastIndex = 0;
+    while ((m = okSucc.exec(s)) !== null) {
+      const o = parseBalancedJsonObjectFrom(s, m.index);
+      if (o) return o;
+    }
+    return null;
+  }
+}
+
+function feedbackResponseAccepted(obj, status, rOk) {
+  if ((status === 204 || status === 205) && rOk) return true;
+  if (!obj || typeof obj !== 'object') return false;
+  if (obj.ok === false) return false;
+  if (obj.ok === true) return true;
+  if (obj.success === true) return true;
+  const v = obj.ok;
+  if (v === 1 || v === '1' || v === 'true') return true;
+  return false;
+}
+
+/** Успех по разобранному JSON или 204 (без зависимости от Content-Type). */
+function parseFeedbackFetchResult(r, text) {
+  const status = r.status;
+  const obj = tryParseFeedbackJsonEnvelope(text);
+  const accepted = feedbackResponseAccepted(obj, status, Boolean(r.ok));
+  return { accepted, rawOk: Boolean(r.ok), status };
 }
 
 /* ── Callback form ── */
@@ -2374,13 +2895,13 @@ if (callbackForm) {
   }
 
   function clearErrors() {
-    cbNameError.textContent = '';
-    cbPhoneError.textContent = '';
-    cbMessageError.textContent = '';
-    cbName.classList.remove('input-error');
-    cbPhone.classList.remove('input-error');
-    cbMessage.classList.remove('input-error');
-    cbSuccess.textContent = '';
+    if (cbNameError) cbNameError.textContent = '';
+    if (cbPhoneError) cbPhoneError.textContent = '';
+    if (cbMessageError) cbMessageError.textContent = '';
+    if (cbName) cbName.classList.remove('input-error');
+    if (cbPhone) cbPhone.classList.remove('input-error');
+    if (cbMessage) cbMessage.classList.remove('input-error');
+    if (cbSuccess) cbSuccess.textContent = '';
   }
 
   cbPhone.addEventListener('input', () => {
@@ -2425,8 +2946,12 @@ if (callbackForm) {
       cbNameError.textContent = 'Минимум 2 символа';
       cbName.classList.add('input-error');
       valid = false;
-    } else if (!/^[A-Za-zА-Яа-яЁё\s\-']+$/.test(cbName.value)) {
-      cbNameError.textContent = 'Только буквы, пробел, дефис и апостроф';
+    } else if (!/^[\p{L}]+(?: [\p{L}]+)*$/u.test(cbName.value)) {
+      cbNameError.textContent = 'Только буквы; несколько слов — через один пробел';
+      cbName.classList.add('input-error');
+      valid = false;
+    } else if (cbName.value.length > 40) {
+      cbNameError.textContent = 'Не более 40 символов';
       cbName.classList.add('input-error');
       valid = false;
     }
@@ -2459,29 +2984,58 @@ if (callbackForm) {
     if (!valid) return;
 
     const btn = callbackForm.querySelector('.cb-submit-btn');
+    if (!btn) return;
+
     btn.disabled = true;
     btn.innerHTML = 'Отправляем...';
 
     try {
-      const api = window.EkvalineAPI;
       const payload = {
         name: cbName.value,
-        phone: phoneDigits,
+        phone: String(phoneDigits),
         message: cbMessage.value,
       };
-      const result = api
-        ? await api.json('/api/feedback', { method: 'POST', body: payload })
-        : { ok: false, data: { error: 'API недоступен. Откройте сайт через npm start.' } };
 
-      if (!result.ok) {
-        cbMessageError.textContent = (result.data && result.data.error) || 'Не удалось отправить форму.';
-        cbMessage.classList.add('input-error');
+      let result = { accepted: false, rawOk: false, status: 0 };
+      const urls = getCallbackFeedbackPostUrls();
+      const bodyJson = JSON.stringify(payload);
+
+      outer: for (let i = 0; i < urls.length; i += 1) {
+        try {
+          const r = await fetch(urls[i], fetchOptionsForFeedbackUrl(urls[i], bodyJson));
+          const text = await r.text();
+          const one = parseFeedbackFetchResult(r, text);
+          result = one;
+          if (one.accepted) break outer;
+          if (one.status === 400) break outer;
+        } catch {
+          result = { accepted: false, rawOk: false, status: 0 };
+          if (i === urls.length - 1) break outer;
+        }
+      }
+
+      if (result.accepted) {
+        callbackForm.reset();
+        updateMessageCount();
+        openSuccessModal();
         return;
       }
 
-      callbackForm.reset();
-      updateMessageCount();
-      openSuccessModal();
+      if (result.status === 400) {
+        cbName.classList.add('input-error');
+        cbPhone.classList.add('input-error');
+        cbMessage.classList.add('input-error');
+        cbMessageError.textContent =
+          'Проверьте имя, телефон и текст сообщения по подсказкам под полями.';
+        return;
+      }
+
+      /** Любой иной код (редко) — без сообщений про сервер: повторная попытка через исправление полей / обновление страницы. */
+      cbName.classList.add('input-error');
+      cbPhone.classList.add('input-error');
+      cbMessage.classList.add('input-error');
+      cbMessageError.textContent =
+        'Проверьте данные в полях и попробуйте отправить форму ещё раз.';
     } finally {
       btn.disabled = false;
       btn.innerHTML = 'Отправить <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
@@ -2604,34 +3158,227 @@ document.querySelectorAll('.catalog-add-btn').forEach((button) => {
 /* ── Delivery page interactions ── */
 const deliveryPlanner = document.getElementById('deliveryPlanner');
 
-if (deliveryPlanner) {
-  const faqButtons = Array.from(deliveryPlanner.querySelectorAll('.delivery-faq-nav-btn'));
+const DEFAULT_DELIVERY_FAQ_CLIENT = Object.freeze([
+  {
+    code: 'Заявки',
+    tag: 'Оператор',
+    question: 'Во сколько можно принять заказ сегодня?',
+    answer:
+      'Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно.',
+  },
+  {
+    code: 'Интервал',
+    tag: 'Квартира',
+    question: 'Какие интервалы доставки доступны для частных клиентов?',
+    answer: 'Для квартиры доступны окна 9:00-14:00, 14:00-17:00 и 17:00-21:00.',
+  },
+  {
+    code: 'График',
+    tag: 'Офис',
+    question: 'Как оформить регулярную доставку воды для офиса?',
+    answer:
+      'Нужно связаться с оператором, выбрать удобные дни и интервал, после этого оператор сам проставит вам регулярные доставки.',
+  },
+  {
+    code: 'Тара',
+    tag: 'Обмен',
+    question: 'Что делать с пустой тарой?',
+    answer:
+      'Курьер заберет пустые бутыли во время следующей доставки. Отдельно везти тару в офис не нужно.',
+  },
+]);
+
+async function hydrateDeliveryFaqSection() {
+  const nav = document.getElementById('deliveryFaqNav');
+  if (!(deliveryPlanner instanceof HTMLElement) || !(nav instanceof HTMLElement)) return;
+
+  let items = [...DEFAULT_DELIVERY_FAQ_CLIENT];
+  try {
+    const r = await fetch(`/api/public/settings?_=${Date.now()}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data.deliveryFaq) && data.deliveryFaq.length) items = data.deliveryFaq;
+    }
+  } catch {
+    /* без сервера остаётся локальный набор */
+  }
+
+  const loadingEl = document.getElementById('deliveryFaqLoading');
+  if (loadingEl && loadingEl.parentNode === nav) loadingEl.remove();
+  nav.innerHTML = '';
+
   const faqTitle = document.getElementById('deliveryFaqTitle');
   const faqText = document.getElementById('deliveryFaqText');
   const faqBadge = document.getElementById('deliveryFaqBadge');
   const faqCode = document.getElementById('deliveryFaqCode');
 
-  function setActiveFaq(button) {
-    if (!faqTitle || !faqText) return;
-    const title = button.dataset.faqQuestion || '';
-    const text = button.dataset.faqAnswer || '';
-    const badge = button.dataset.faqTag || 'Инфо';
-    const code = button.dataset.faqCode || 'Запрос';
-    faqButtons.forEach((btn) => btn.classList.toggle('is-active', btn === button));
+  function setActiveFaq(btn) {
+    if (!(faqTitle && faqText) || !(btn instanceof HTMLButtonElement)) return;
+    const title = btn.dataset.faqQuestion || '';
+    const text = btn.dataset.faqAnswer || '';
+    const badge = btn.dataset.faqTag || 'Инфо';
+    const code = btn.dataset.faqCode || 'Запрос';
+    nav.querySelectorAll('.delivery-faq-nav-btn').forEach((b) => {
+      if (b instanceof HTMLButtonElement) b.classList.toggle('is-active', b === btn);
+    });
     faqTitle.textContent = title;
     faqText.textContent = text;
     if (faqBadge) faqBadge.textContent = badge;
     if (faqCode) faqCode.textContent = code;
   }
 
-  faqButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      setActiveFaq(button);
-    });
+  const faqButtons = [];
+  items.forEach((raw) => {
+    if (!raw || typeof raw !== 'object') return;
+    const code = String(raw.code ?? '').trim();
+    const tag = String(raw.tag ?? '').trim();
+    const question = String(raw.question ?? '').trim();
+    const answer = String(raw.answer ?? '').trim();
+    if (!code || !tag || !question || !answer) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `delivery-faq-nav-btn${faqButtons.length === 0 ? ' is-active' : ''}`;
+    btn.dataset.faqCode = code;
+    btn.dataset.faqTag = tag;
+    btn.dataset.faqQuestion = question;
+    btn.dataset.faqAnswer = answer;
+
+    const top = document.createElement('span');
+    top.className = 'delivery-faq-nav-top';
+    const codeSpan = document.createElement('span');
+    codeSpan.className = 'delivery-faq-nav-code';
+    codeSpan.textContent = code;
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'delivery-faq-nav-tag';
+    tagSpan.textContent = tag;
+    top.appendChild(codeSpan);
+    top.appendChild(tagSpan);
+
+    const questionSpan = document.createElement('span');
+    questionSpan.className = 'delivery-faq-nav-text';
+    questionSpan.textContent = question;
+
+    btn.appendChild(top);
+    btn.appendChild(questionSpan);
+    btn.addEventListener('click', () => setActiveFaq(btn));
+    nav.appendChild(btn);
+    faqButtons.push(btn);
   });
 
-  if (faqButtons[0]) setActiveFaq(faqButtons[0]);
+  if (!faqButtons.length) {
+    nav.innerHTML = '<p class="delivery-faq-loading">Не удалось показать вопросы. Проверьте соединение и обновите страницу.</p>';
+    return;
+  }
+
+  setActiveFaq(faqButtons[0]);
 }
+
+void hydrateDeliveryFaqSection();
+
+const DEFAULT_DELIVERY_COVERAGE_CLIENT = Object.freeze({
+  title: 'Зоны покрытия Оренбурга',
+  cards: Object.freeze([
+    Object.freeze({
+      title: 'Интервалы доставки',
+      text: 'Утро: 9:00-14:00, День: 14:00-17:00, Вечер: 17:00-21:00',
+    }),
+    Object.freeze({
+      title: 'Доставка для организаций',
+      text: 'Отдельное окно: 9:00-17:00',
+    }),
+    Object.freeze({
+      title: 'Прием заказов',
+      text: 'Оператор принимает заявки: 8:00-19:00',
+    }),
+  ]),
+});
+
+function coerceDeliveryCoverageCard(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title ?? '').trim().slice(0, 120);
+  const text = String(raw.text ?? '').trim().slice(0, 100);
+  if (title.length < 1 || text.length < 1) return null;
+  return { title, text };
+}
+
+async function hydrateDeliveryCoverageSection() {
+  const root = document.getElementById('deliveryCoverageCardsRoot');
+  const heading = document.getElementById('deliveryCoverageHeading');
+  if (!root || !heading) return;
+
+  let panel = {
+    title: DEFAULT_DELIVERY_COVERAGE_CLIENT.title,
+    cards: DEFAULT_DELIVERY_COVERAGE_CLIENT.cards.map((c) => ({ title: c.title, text: c.text })),
+  };
+
+  try {
+    const r = await fetch(`/api/public/settings?_=${Date.now()}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      const raw = data?.deliveryCoverage;
+      if (raw && typeof raw === 'object') {
+        const title = String(raw.title ?? '').trim();
+        const cardsIn = Array.isArray(raw.cards) ? raw.cards : [];
+        const cards = [];
+        for (const c of cardsIn) {
+          const row = coerceDeliveryCoverageCard(c);
+          if (row) cards.push(row);
+          if (cards.length >= 8) break;
+        }
+        if (title.length >= 3 && cards.length >= 1) {
+          panel = { title: title.slice(0, 160), cards };
+        }
+      }
+    }
+  } catch {
+    /* офлайн — дефолтный текст */
+  }
+
+  heading.textContent = panel.title;
+
+  root.replaceChildren();
+
+  function setActiveZone(idx) {
+    Array.from(root.querySelectorAll('.delivery-zone-item')).forEach((el, i) => {
+      el.classList.toggle('is-active', i === idx);
+    });
+  }
+
+  panel.cards.forEach((card, idx) => {
+    const art = document.createElement('article');
+    art.className = 'delivery-zone-item';
+    if (idx === 0) art.classList.add('is-active');
+
+    const dot = document.createElement('div');
+    dot.className = 'zone-dot';
+
+    const inner = document.createElement('div');
+    const h3 = document.createElement('h3');
+    h3.textContent = card.title;
+    const p = document.createElement('p');
+    p.textContent = card.text;
+
+    inner.appendChild(h3);
+    inner.appendChild(p);
+    art.appendChild(dot);
+    art.appendChild(inner);
+
+    art.addEventListener('click', () => setActiveZone(idx));
+    art.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        setActiveZone(idx);
+      }
+    });
+    art.tabIndex = 0;
+    art.setAttribute('role', 'button');
+
+    root.appendChild(art);
+  });
+}
+
+void hydrateDeliveryCoverageSection();
 
 const deliveryLeafletMap = document.getElementById('deliveryLeafletMap');
 
@@ -2685,6 +3432,94 @@ if (aboutSteps) {
   const initial = stepButtons.find((button) => button.classList.contains('is-active')) || stepButtons[0];
   if (initial) setActiveAboutStep(initial.dataset.step);
 }
+
+const DEFAULT_ABOUT_CERTIFICATES_CLIENT = Object.freeze([
+  {
+    image: 'assets/certificate-card.jpg',
+    alt: 'Карточка предприятия',
+    badge: 'Документ',
+    title: 'Карточка предприятия',
+    description: 'Реквизиты организации, контакты, банковские данные и юридическая информация.',
+  },
+  {
+    image: 'assets/certificate-eac.jpg',
+    alt: 'Декларация о соответствии ЕАЭС',
+    badge: 'ЕАЭС',
+    title: 'Декларация о соответствии',
+    description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
+  },
+  {
+    image: 'assets/certificate-lab.jpg',
+    alt: 'Протокол лабораторных испытаний',
+    badge: 'Лаборатория',
+    title: 'Протокол испытаний',
+    description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
+  },
+]);
+
+async function hydrateAboutCertificatesSection() {
+  const grid = document.getElementById('aboutCertsGrid');
+  if (!grid) return;
+
+  let items = [...DEFAULT_ABOUT_CERTIFICATES_CLIENT];
+  try {
+    const r = await fetch(`/api/public/settings?_=${Date.now()}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data.aboutCertificates) && data.aboutCertificates.length) items = data.aboutCertificates;
+    }
+  } catch {
+    /* без сервера — локальный набор */
+  }
+
+  grid.replaceChildren();
+
+  items.forEach((raw) => {
+    if (!raw || typeof raw !== 'object') return;
+    const image = String(raw.image ?? '').trim();
+    const alt = String(raw.alt ?? '').trim();
+    const badge = String(raw.badge ?? '').trim();
+    const title = String(raw.title ?? '').trim();
+    const description = String(raw.description ?? '').trim();
+    if (!image || !alt || !title || !description) return;
+
+    const art = document.createElement('article');
+    art.className = 'about-cert-card';
+
+    const img = document.createElement('img');
+    img.src = image;
+    img.alt = alt;
+    img.loading = 'lazy';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'about-cert-overlay';
+
+    const badgeEl = document.createElement('span');
+    badgeEl.textContent = badge;
+
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = title;
+
+    const descEl = document.createElement('p');
+    descEl.textContent = description;
+
+    overlay.appendChild(badgeEl);
+    overlay.appendChild(titleEl);
+    overlay.appendChild(descEl);
+    art.appendChild(img);
+    art.appendChild(overlay);
+    grid.appendChild(art);
+  });
+
+  if (!grid.children.length) {
+    const fallback = document.createElement('p');
+    fallback.className = 'about-certs-empty';
+    fallback.textContent = 'Не удалось загрузить блок сертификатов. Обновите страницу позже.';
+    grid.appendChild(fallback);
+  }
+}
+
+void hydrateAboutCertificatesSection();
 
 /* ── Back to top button (all pages) ── */
 (function initBackToTopButton() {

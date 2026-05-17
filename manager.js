@@ -1,6 +1,7 @@
 (function () {
   const CURRENT_USER_KEY = 'ekvaline_current_user';
   const FEED_KEY = 'ekvaline_blog_v2_posts';
+  const POST_READS_MAP_KEY = 'ekvaline_blog_post_reads_v1';
   const BLOG_ADMIN_KEY = 'ekvaline_blog_manager_data';
   const BLOG_ARCHIVE_KEY = 'ekvaline_blog_archive_posts';
   const MAX_PUBLIC_POSTS = 5;
@@ -101,6 +102,50 @@
     localStorage.setItem(BLOG_ARCHIVE_KEY, JSON.stringify(state.posts));
   }
 
+  function readReadsMapRaw() {
+    const m = safeJsonParse(localStorage.getItem(POST_READS_MAP_KEY), null);
+    return m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+  }
+
+  function saveReadsMap(map) {
+    try {
+      localStorage.setItem(POST_READS_MAP_KEY, JSON.stringify(map));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Одна точка синхронизации: карта просмотров (клиент) и поле views в архивных постах. */
+  function reconcileManagerPostReads() {
+    const map = readReadsMapRaw();
+    let mapDirty = false;
+    let archiveDirty = false;
+    state.posts.forEach((p) => {
+      if (!p?.id) return;
+      const fromPost = Math.max(0, Number(p.views) || 0);
+      const fromMap = Math.max(0, Number(map[p.id]) || 0);
+      if (fromPost > fromMap) {
+        map[p.id] = fromPost;
+        mapDirty = true;
+      }
+      const best = Math.max(fromPost, fromMap);
+      if (Number(p.views) !== best) {
+        p.views = best;
+        archiveDirty = true;
+      }
+    });
+    if (mapDirty) saveReadsMap(map);
+    return archiveDirty;
+  }
+
+  function effectivePostReads(post) {
+    if (!post?.id) return 0;
+    return Math.max(
+      Math.max(0, Number(readReadsMapRaw()[post.id]) || 0),
+      Math.max(0, Number(post.views) || 0)
+    );
+  }
+
   function publishToClient() {
     const hidden = new Set(state.admin.hiddenPostIds || []);
     const visible = sortByDateDesc(state.posts).filter((post) => !hidden.has(post.id)).slice(0, MAX_PUBLIC_POSTS);
@@ -113,6 +158,7 @@
     state.posts = Array.isArray(archive) && archive.length ? archive : (Array.isArray(live) ? live : []);
     state.posts = sortByDateDesc(state.posts);
     state.admin = readAdminData();
+    reconcileManagerPostReads();
     saveArchivePosts();
     publishToClient();
   }
@@ -367,6 +413,34 @@
     document.body.style.overflow = 'hidden';
   }
 
+  function renderBlogStats() {
+    const el = document.getElementById('managerBlogStats');
+    if (!(el instanceof HTMLElement)) return;
+    const posts = state.posts;
+    if (!posts.length) {
+      el.textContent = '';
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    let total = 0;
+    posts.forEach((p) => {
+      total += effectivePostReads(p);
+    });
+    const avg = posts.length ? (total / posts.length).toFixed(1) : '0';
+    const top = [...posts]
+      .map((p) => ({ title: truncate(p.title, 80), reads: effectivePostReads(p), id: p.id }))
+      .sort((a, b) => b.reads - a.reads)
+      .filter((item) => item.reads > 0)
+      .slice(0, 3);
+    const topPhrase = top.length
+      ? ` Самые читаемые: ${top.map((item) => `«${escapeHtml(item.title)}» — ${item.reads}`).join('; ')}.`
+      : '';
+    el.innerHTML = `<strong>Статистика просмотров</strong>: сколько раз в клиентском блоге нажали «Читать» и впервые в этом браузере открыли полный текст.<br>Всего срабатываний по постам — <strong>${escapeHtml(total)}</strong>, в среднем — <strong>${escapeHtml(
+      avg
+    )}</strong> на пост.${topPhrase}`;
+  }
+
   function renderPosts() {
     const root = document.getElementById('managerPostsList');
     if (!root) return;
@@ -392,6 +466,7 @@
               <h3>${escapeHtml(post.title)}</h3>
               <p>${isHidden ? 'Скрыт у клиента' : isPublished ? 'Видим клиенту' : 'В архиве (старый)'}</p>
               <div class="manager-post-tile-stats">
+                <span>👁 ${effectivePostReads(post)}</span>
                 <span>❤️ ${post.likes || 0}</span>
                 <span>💧 ${reactions.useful || 0}</span>
                 <span>💡 ${reactions.new || 0}</span>
@@ -460,6 +535,7 @@
         <div>
           <h3>${escapeHtml(post.title)}</h3>
           <p>${formatDate(post.createdAt)}</p>
+          <p class="manager-modal-reads-note">Открыли полный текст («Читать»): <strong>${effectivePostReads(post)}</strong></p>
           <div class="manager-modal-post-actions">
             <button type="button" class="manager-btn is-secondary" data-toggle-post="${escapeHtml(post.id)}">
               ${isHidden ? 'Показать клиенту' : 'Скрыть у клиента'}
@@ -675,6 +751,7 @@
     renderFactForm();
     renderBlocksForm();
     renderBlocksPreview();
+    renderBlogStats();
     updateArchiveArrowsState();
   }
 
@@ -838,6 +915,7 @@
           imageMode: 'cover',
           imageBg: '#ffffff',
           createdAt,
+          views: 0,
           likes: 0,
           comments: [],
           reactions: { useful: 0, new: 0, tryIt: 0 },

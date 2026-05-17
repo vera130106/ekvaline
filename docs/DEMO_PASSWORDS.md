@@ -8,9 +8,11 @@
 
 | Роль    | Email / логин             | Телефон (альтернатива) | Пароль              |
 |---------|---------------------------|-------------------------|---------------------|
-| Админ   | `admin@ekvaline.demo`     | `70000000001`           | `AdminEkva2026!`    |
-| Менеджер| `manager@ekvaline.demo`   | `70000000002`           | `ManagerEkva2026!`  |
-| Оператор| `operator@ekvaline.demo`  | `70000000003`           | `OperatorEkva2026!` |
+| Админ   | `adminekva@mail.ru`       | `70000000001`           | `AdminEkva2026!`    |
+| Менеджер| `managerekva@mail.ru`      | `70000000002`           | `ManagerEkva2026!`  |
+| Оператор| `operatorekva@mail.ru`     | `70000000003`           | `OperatorEkva2026!` |
+
+Дополнительно в коде задаётся **демо‑клиент** (не сотрудник): `clienteekva@mail.ru` — см. **`db.ensureDemoClientUser`**.
 
 После входа создаётся **сессия на сервере** (`POST /api/auth/login`) и данные в **`localStorage`** (`ekvaline_current_user`).
 

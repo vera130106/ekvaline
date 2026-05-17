@@ -26,19 +26,22 @@
   }
 
   async function apiFetch(path, options = {}) {
-    const headers = { ...(options.headers || {}) };
-    const method = (options.method || 'GET').toUpperCase();
+    const opts = { ...options };
+    const headers = { ...(opts.headers || {}) };
+    const method = (opts.method || 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD') {
       let t = await ensureCsrf(false);
       if (!t) t = await ensureCsrf(true);
       if (t) headers['X-CSRF-Token'] = t;
     }
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    let body = opts.body;
+    if (body && typeof body === 'object' && !(body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(options.body);
+      body = JSON.stringify(body);
     }
     const r = await fetch(path, {
-      ...options,
+      ...opts,
+      body,
       credentials: 'same-origin',
       headers,
     });
@@ -61,10 +64,8 @@
           parsed: {
             ok: false,
             status: r.status,
-            data: {
-              error:
-                'Ответ сервера не JSON (часто это HTML страницы). Запустите в папке проекта npm start и откройте http://localhost:3001 — не Live Server и не открытие HTML-файла с диска.',
-            },
+            /** Текст не показываем конечному пользователю — страницы сами подставляют нейтральное сообщение. */
+            data: { error: '' },
           },
         };
       }
@@ -112,12 +113,14 @@
     }
   }
 
+  const bootReconciliationPromise = reconcileServerBoot();
+
   window.EkvalineAPI = {
     ensureCsrf,
     resetCsrf,
     fetch: apiFetch,
     json: apiJson,
+    /** Дождаться проверки перезапуска сервера (очистка LS / reload) до инициализации панелей. */
+    awaitBootReconciliation: () => bootReconciliationPromise,
   };
-
-  void reconcileServerBoot();
 })();

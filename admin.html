@@ -24,77 +24,690 @@
           <a href="manager.html">Менеджер</a>
           <a href="admin.html" class="active">Админ</a>
         </nav>
+        <button type="button" class="ghost-btn admin-topbar-logout" id="adminLogoutBtn">Выйти</button>
       </div>
     </header>
 
-    <main class="container admin-panel">
-      <section class="admin-card">
-        <h1>Админ-панель</h1>
-        <p>Управление пользователями, товарами и настройками сайта.</p>
-      </section>
-
-      <section class="admin-grid">
+    <div id="adminRestricted" class="admin-restricted">
+      <div class="container admin-panel">
         <article class="admin-card">
-          <h2>Создать сотрудника</h2>
-          <form id="adminCreateUserForm" class="admin-form">
-            <input name="first_name" placeholder="Имя" required />
-            <input name="last_name" placeholder="Фамилия" />
-            <input name="email" type="email" placeholder="Email" required />
-            <input name="phone" placeholder="Телефон 7XXXXXXXXXX" required />
-            <input name="password" type="text" placeholder="Пароль" required />
-            <select name="role" id="adminCreateUserRole" required>
-              <option value="client">Клиент</option>
-              <option value="operator">Оператор</option>
-              <option value="driver">Водитель</option>
-              <option value="manager">Менеджер</option>
-              <option value="admin">Админ</option>
-            </select>
-            <input
-              type="text"
-              name="driver_route_label"
-              id="adminDriverRouteLabel"
-              placeholder="Для водителя: ФИО как у оператора в «Экспедитор»"
-            />
-            <button class="solid-btn" type="submit">Создать</button>
+          <div id="adminRestrictedText">Проверка доступа…</div>
+        </article>
+      </div>
+    </div>
+
+    <div id="adminAppRoot" hidden>
+      <nav class="admin-subnav" aria-label="Разделы админ-панели">
+        <div class="container admin-subnav-inner">
+          <button type="button" class="admin-subtab is-active" data-admin-pane="stats">Статистика</button>
+          <button type="button" class="admin-subtab" data-admin-pane="staff">Пользователи</button>
+          <button type="button" class="admin-subtab" data-admin-pane="products">Товары</button>
+          <button type="button" class="admin-subtab" data-admin-pane="settings">Настройки</button>
+        </div>
+      </nav>
+
+      <main class="container admin-panel">
+        <section id="adminPaneStats" class="admin-pane" data-pane="stats">
+          <section class="admin-card admin-intro-card">
+            <h1>Админ-панель</h1>
+            <p>Сводные данные по заказам, товарам и учётным записям.</p>
+          </section>
+
+          <div id="adminStatsGrid" class="admin-stats-grid" aria-live="polite"></div>
+
+          <section class="admin-card">
+            <h2>Заказы по статусам</h2>
+            <div id="adminStatsOrders"></div>
+          </section>
+
+          <section class="admin-card">
+            <h2>Учётные записи по ролям</h2>
+            <div id="adminStatsUsers"></div>
+          </section>
+        </section>
+
+        <section id="adminPaneStaff" class="admin-pane admin-pane-staff hidden" data-pane="staff">
+          <section class="admin-card admin-card-elevated">
+            <header class="admin-card-head">
+              <h2>Новый сотрудник</h2>
+              <p class="admin-muted admin-card-desc">
+                Оператор, менеджер, администратор или водитель. Логин — только email.
+                Для водителя используйте те же имя и фамилию, что оператор заносит в поле «Экспедитор» у заказа.
+              </p>
+            </header>
+            <form id="adminCreateUserForm" class="admin-form admin-form-staff">
+              <div class="admin-field-grid admin-field-grid-2">
+                <label class="admin-field">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Имя</span>
+                    <span class="admin-char-count" id="adminStaffFirstNameCount">0/60</span>
+                  </div>
+                  <input name="first_name" maxlength="60" data-char-count-for="adminStaffFirstNameCount" placeholder="Иван" required />
+                </label>
+                <label class="admin-field">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Фамилия</span>
+                    <span class="admin-char-count" id="adminStaffLastNameCount">0/60</span>
+                  </div>
+                  <input name="last_name" maxlength="60" data-char-count-for="adminStaffLastNameCount" placeholder="Иванов" />
+                </label>
+                <label class="admin-field admin-field-span-2">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Email (логин)</span>
+                    <span class="admin-char-count" id="adminStaffEmailCount">0/120</span>
+                  </div>
+                  <input name="email" type="email" maxlength="120" data-char-count-for="adminStaffEmailCount" placeholder="name@company.ru" required autocomplete="username" />
+                </label>
+                <label class="admin-field">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Телефон</span>
+                    <span class="admin-char-count" id="adminStaffPhoneCount">0/18</span>
+                  </div>
+                  <input name="phone" maxlength="18" data-char-count-for="adminStaffPhoneCount" placeholder="7XXXXXXXXXX" required autocomplete="tel" />
+                </label>
+                <label class="admin-field">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Пароль</span>
+                    <span class="admin-char-count" id="adminStaffPasswordCount">0/128</span>
+                  </div>
+                  <input name="password" type="password" maxlength="128" data-char-count-for="adminStaffPasswordCount" placeholder="По правилам: буквы, цифра, символ" required autocomplete="new-password" />
+                </label>
+                <label class="admin-field admin-field-span-2">
+                  <span class="admin-field-label">Роль</span>
+                  <select name="role" id="adminCreateUserRole" required aria-label="Роль">
+                    <option value="">Выберите роль</option>
+                    <option value="operator">Оператор</option>
+                    <option value="manager">Менеджер</option>
+                    <option value="admin">Админ</option>
+                    <option value="driver">Водитель</option>
+                  </select>
+                </label>
+              </div>
+              <div class="admin-form-submit-row">
+                <button class="solid-btn admin-btn-submit" type="submit">Создать учётную запись</button>
+              </div>
+            </form>
+            <p id="adminUserMsg" class="admin-msg"></p>
+          </section>
+
+          <section class="admin-card admin-card-elevated">
+            <header class="admin-card-head">
+              <h2>Сотрудники по ролям</h2>
+              <p class="admin-muted admin-card-desc">
+                Карточки по группам. Клиентов здесь нет — регистрация на сайте.
+              </p>
+            </header>
+            <div class="admin-staff-split">
+              <div class="admin-staff-split-col">
+                <div class="admin-role-stack">
+                  <h3 class="admin-staff-section-title">Администраторы</h3>
+                  <div id="adminListAdmin" class="admin-person-list"></div>
+                </div>
+                <div class="admin-role-stack">
+                  <h3 class="admin-staff-section-title">Операторы</h3>
+                  <div id="adminListOperator" class="admin-person-list"></div>
+                </div>
+              </div>
+              <div class="admin-staff-split-col">
+                <div class="admin-role-stack">
+                  <h3 class="admin-staff-section-title">Менеджеры</h3>
+                  <div id="adminListManager" class="admin-person-list"></div>
+                </div>
+                <div class="admin-role-stack">
+                  <h3 class="admin-staff-section-title">Водители</h3>
+                  <div id="adminListDriver" class="admin-person-list"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="adminPaneProducts" class="admin-pane hidden" data-pane="products">
+          <section class="admin-card">
+            <h2>Новый товар</h2>
+            <form id="adminCreateProductForm" class="admin-form admin-form-wide admin-form-products">
+              <select name="category_id" id="adminProductCategory" required></select>
+              <label class="admin-field admin-field-span-row">
+                <div class="admin-field-head">
+                  <span class="admin-field-label">Название</span>
+                  <span class="admin-char-count" id="adminProductCreateNameCount">0/180</span>
+                </div>
+                <input name="name" maxlength="180" data-char-count-for="adminProductCreateNameCount" placeholder="Название" required />
+              </label>
+              <label class="admin-field admin-field-span-row">
+                <div class="admin-field-head">
+                  <span class="admin-field-label">Описание</span>
+                  <span class="admin-char-count" id="adminProductCreateDescCount">0/400</span>
+                </div>
+                <textarea name="description" maxlength="400" data-char-count-for="adminProductCreateDescCount" placeholder="Описание (необязательно)" rows="2"></textarea>
+              </label>
+              <input name="price" type="number" min="0" step="1" placeholder="Цена, ₽" required />
+              <input name="stock" type="number" min="0" step="1" placeholder="Остаток" required />
+              <input
+                name="volume_liters"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Объём, л (необяз.)"
+              />
+              <input name="sort_order" type="number" min="0" step="1" placeholder="Сортировка" />
+              <select name="hidden">
+                <option value="0">В каталоге</option>
+                <option value="1">Скрыть</option>
+              </select>
+              <button class="solid-btn" type="submit">Добавить</button>
+            </form>
+            <p id="adminProductMsg" class="admin-msg"></p>
+          </section>
+
+          <section class="admin-card">
+            <h2>Каталог (редактирование)</h2>
+            <div id="adminProductsList" class="admin-product-grid"></div>
+          </section>
+        </section>
+
+        <section id="adminPaneSettings" class="admin-pane hidden" data-pane="settings">
+          <section class="admin-card">
+            <h2>Настройки сайта</h2>
+            <form id="adminSettingsForm" class="admin-form">
+              <!-- Режим работы, текст сообщества и слоты хранятся на сервере и подставляются при загрузке; на экране не показываем. -->
+              <!-- Лимиты как у Joi managerSettingsSchema -->
+              <input type="hidden" name="workLine" maxlength="200" />
+              <textarea name="communityIntro" maxlength="500" hidden aria-hidden="true"></textarea>
+              <textarea name="deliverySlotsText" maxlength="1500" hidden aria-hidden="true"></textarea>
+              <div class="admin-delivery-faq-block">
+                <h3 class="admin-delivery-faq-title">Раздел вопросов</h3>
+                <p class="admin-delivery-faq-hint">
+                  Ниже — как блок выглядит на странице «Доставка». Измените карточку («Изменить») или добавьте вопрос и подтвердите в окне («Сохранить» / «Добавить в список»), при необходимости нажмите «Сохранить настройки» внизу. Обновите страницу «Доставка», чтобы проверить текст.
+                </p>
+                <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminDeliveryFaqAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
+                    + Добавить вопрос
+                  </button>
+                </div>
+
+                <div id="adminDeliveryFaqPreviewShell">
+                  <div class="delivery-planner admin-delivery-faq-planner-shell">
+                    <div class="delivery-planner-head">
+                      <h2>Вопросы на странице «Доставка»</h2>
+                      <p>Ниже — карточки так же, как у посетителя; полный ответ можно править кнопкой «Изменить».</p>
+                    </div>
+                    <div class="delivery-faq-layout admin-delivery-faq-layout-inner admin-delivery-faq-layout-single">
+                      <div class="delivery-faq-nav" id="adminDeliveryFaqNav" aria-label="Вопросы для блока на сайте"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-delivery-coverage-block admin-delivery-faq-block">
+                <h3 class="admin-delivery-faq-title">Блок «Зоны покрытия» на странице «Доставка»</h3>
+                <p class="admin-delivery-faq-hint">
+                  Отредактируйте заголовок и карточки ниже. Сохраните в окне карточки («Сохранить») или голубой кнопкой «Сохранить настройки» в самом низу страницы настроек — без этого изменения не попадут на сайт.
+                </p>
+                <label class="admin-field admin-field-span-row">
+                  <div class="admin-field-head">
+                    <span class="admin-field-label">Заголовок секции</span>
+                    <span class="admin-char-count" id="adminDeliveryCoverageTitleCount">0/160</span>
+                  </div>
+                  <input
+                    type="text"
+                    name="deliveryCoverageTitle"
+                    id="adminDeliveryCoverageTitle"
+                    maxlength="160"
+                    data-char-count-for="adminDeliveryCoverageTitleCount"
+                    autocomplete="off"
+                    required
+                  />
+                </label>
+                <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminCoverageCardAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
+                    + Добавить карточку
+                  </button>
+                </div>
+                <div id="adminCoverageCardsNav" class="admin-site-poll-nav" aria-label="Карточки блока зоны покрытия"></div>
+              </div>
+
+              <div class="admin-about-certs-block admin-delivery-faq-block">
+                <h3 class="admin-delivery-faq-title">Сертификаты на странице «О компании»</h3>
+                <p class="admin-delivery-faq-hint">
+                  Карточки блока «Наши сертификаты» на странице «О компании». Добавляйте и правьте записи ниже: для изображения выберите файл в окне (при добавлении без файла подставится образец по умолчанию). Сохраните в окне или кнопкой «Сохранить настройки» внизу.
+                </p>
+                <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminAboutCertAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
+                    + Добавить сертификат
+                  </button>
+                </div>
+                <div id="adminAboutCertsNav" class="admin-site-poll-nav" aria-label="Сертификаты для страницы О компании"></div>
+              </div>
+
+              <button class="solid-btn" type="submit">Сохранить настройки</button>
+            </form>
+            <p id="adminSettingsMsg" class="admin-msg"></p>
+          </section>
+        </section>
+      </main>
+
+      <div id="adminFaqEditModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-faq-edit-modal="true"></div>
+        <div
+          class="admin-edit-modal-card admin-faq-modal-card admin-faq-edit-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminFaqEditTitle"
+        >
+          <h3 id="adminFaqEditTitle">Изменить вопрос</h3>
+          <p class="admin-faq-edit-modal-sub" id="adminFaqEditNum">Вопрос 1</p>
+          <div class="admin-form admin-faq-edit-modal-form">
+            <label class="admin-field">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Код темы (коротко)</span>
+                <span class="admin-char-count" id="adminFaqEditCodeCount">0/40</span>
+              </div>
+              <input
+                type="text"
+                maxlength="40"
+                id="adminFaqEditCode"
+                data-char-count-for="adminFaqEditCodeCount"
+                autocomplete="off"
+                placeholder="Заявки"
+              />
+            </label>
+            <label class="admin-field">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Тег (метка)</span>
+                <span class="admin-char-count" id="adminFaqEditTagCount">0/60</span>
+              </div>
+              <input
+                type="text"
+                maxlength="60"
+                id="adminFaqEditTag"
+                data-char-count-for="adminFaqEditTagCount"
+                autocomplete="off"
+                placeholder="Оператор"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Вопрос для списка</span>
+                <span class="admin-char-count" id="adminFaqEditQuestionCount">0/180</span>
+              </div>
+              <input
+                type="text"
+                maxlength="180"
+                id="adminFaqEditQuestion"
+                data-char-count-for="adminFaqEditQuestionCount"
+                autocomplete="off"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Развёрнутый ответ</span>
+                <span class="admin-char-count" id="adminFaqEditAnswerCount">0/900</span>
+              </div>
+              <textarea rows="6" maxlength="900" id="adminFaqEditAnswer" data-char-count-for="adminFaqEditAnswerCount"></textarea>
+            </label>
+          </div>
+          <p id="adminFaqEditModalMsg" class="admin-msg"></p>
+          <div class="admin-faq-edit-modal-footer">
+            <button type="button" class="ghost-btn admin-faq-modal-delete-btn" id="adminFaqEditDelete">Удалить</button>
+            <div class="admin-faq-edit-modal-footer-right">
+              <button type="button" class="ghost-btn" data-close-faq-edit-modal="true">Отмена</button>
+              <button type="button" class="solid-btn" id="adminFaqEditConfirm">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminFaqAddModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-faq-add-modal="true"></div>
+        <div class="admin-edit-modal-card admin-faq-modal-card" role="dialog" aria-modal="true" aria-labelledby="adminFaqAddTitle">
+          <h3 id="adminFaqAddTitle">Новый вопрос</h3>
+          <div class="admin-form admin-faq-add-modal-form">
+            <label class="admin-field">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Код темы (коротко)</span>
+                <span class="admin-char-count" id="adminFaqAddCodeCount">0/40</span>
+              </div>
+              <input
+                type="text"
+                maxlength="40"
+                id="adminFaqAddCode"
+                data-char-count-for="adminFaqAddCodeCount"
+                autocomplete="off"
+                placeholder="Тема"
+              />
+            </label>
+            <label class="admin-field">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Тег (метка)</span>
+                <span class="admin-char-count" id="adminFaqAddTagCount">0/60</span>
+              </div>
+              <input
+                type="text"
+                maxlength="60"
+                id="adminFaqAddTag"
+                data-char-count-for="adminFaqAddTagCount"
+                autocomplete="off"
+                placeholder="Метка"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Вопрос для списка</span>
+                <span class="admin-char-count" id="adminFaqAddQuestionCount">0/180</span>
+              </div>
+              <input
+                type="text"
+                maxlength="180"
+                id="adminFaqAddQuestion"
+                data-char-count-for="adminFaqAddQuestionCount"
+                autocomplete="off"
+                placeholder="Текст вопроса"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Развёрнутый ответ</span>
+                <span class="admin-char-count" id="adminFaqAddAnswerCount">0/900</span>
+              </div>
+              <textarea
+                rows="5"
+                maxlength="900"
+                id="adminFaqAddAnswer"
+                data-char-count-for="adminFaqAddAnswerCount"
+                placeholder="Ответ для посетителя"
+              ></textarea>
+            </label>
+          </div>
+          <p id="adminFaqAddModalMsg" class="admin-msg"></p>
+          <div class="admin-edit-modal-actions">
+            <button type="button" class="ghost-btn" data-close-faq-add-modal="true">Отмена</button>
+            <button type="button" class="solid-btn" id="adminFaqAddConfirm">Добавить в список</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminAboutCertEditModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-about-cert-edit-modal="true"></div>
+        <div
+          class="admin-edit-modal-card admin-faq-modal-card admin-faq-edit-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminAboutCertEditTitle"
+        >
+          <h3 id="adminAboutCertEditTitle">Изменить сертификат</h3>
+          <p class="admin-faq-edit-modal-sub" id="adminAboutCertEditNum">Сертификат 1</p>
+          <div class="admin-form admin-faq-edit-modal-form">
+            <input type="hidden" id="adminAboutCertEditImage" />
+            <label class="admin-field admin-field-span-2">
+              <span class="admin-field-label">Изображение — выберите файл, чтобы заменить текущее</span>
+              <input type="file" id="adminAboutCertEditImageFile" accept="image/*" />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Alt для изображения</span>
+                <span class="admin-char-count" id="adminAboutCertEditAltCount">0/200</span>
+              </div>
+              <input
+                type="text"
+                maxlength="200"
+                id="adminAboutCertEditAlt"
+                data-char-count-for="adminAboutCertEditAltCount"
+                autocomplete="off"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Подпись (бейдж)</span>
+                <span class="admin-char-count" id="adminAboutCertEditBadgeCount">0/80</span>
+              </div>
+              <input
+                type="text"
+                maxlength="80"
+                id="adminAboutCertEditBadge"
+                data-char-count-for="adminAboutCertEditBadgeCount"
+                autocomplete="off"
+                placeholder="Документ"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Заголовок</span>
+                <span class="admin-char-count" id="adminAboutCertEditTitleCount">0/120</span>
+              </div>
+              <input
+                type="text"
+                maxlength="120"
+                id="adminAboutCertEditTitleLine"
+                data-char-count-for="adminAboutCertEditTitleCount"
+                autocomplete="off"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Описание</span>
+                <span class="admin-char-count" id="adminAboutCertEditDescCount">0/400</span>
+              </div>
+              <textarea
+                rows="4"
+                maxlength="400"
+                id="adminAboutCertEditDesc"
+                data-char-count-for="adminAboutCertEditDescCount"
+              ></textarea>
+            </label>
+          </div>
+          <p id="adminAboutCertEditModalMsg" class="admin-msg"></p>
+          <div class="admin-faq-edit-modal-footer">
+            <button type="button" class="ghost-btn admin-faq-modal-delete-btn" id="adminAboutCertEditDelete">Удалить</button>
+            <div class="admin-faq-edit-modal-footer-right">
+              <button type="button" class="ghost-btn" data-close-about-cert-edit-modal="true">Отмена</button>
+              <button type="button" class="solid-btn" id="adminAboutCertEditConfirm">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminAboutCertAddModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-about-cert-add-modal="true"></div>
+        <div class="admin-edit-modal-card admin-faq-modal-card" role="dialog" aria-modal="true" aria-labelledby="adminAboutCertAddTitle">
+          <h3 id="adminAboutCertAddTitle">Новый сертификат</h3>
+          <div class="admin-form admin-faq-add-modal-form">
+            <input type="hidden" id="adminAboutCertAddImage" />
+            <label class="admin-field admin-field-span-2">
+              <span class="admin-field-label">Изображение — выберите файл (или оставьте подставленный образец)</span>
+              <input type="file" id="adminAboutCertAddImageFile" accept="image/*" />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Alt для изображения</span>
+                <span class="admin-char-count" id="adminAboutCertAddAltCount">0/200</span>
+              </div>
+              <input type="text" maxlength="200" id="adminAboutCertAddAlt" data-char-count-for="adminAboutCertAddAltCount" autocomplete="off" />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Подпись (бейдж)</span>
+                <span class="admin-char-count" id="adminAboutCertAddBadgeCount">0/80</span>
+              </div>
+              <input type="text" maxlength="80" id="adminAboutCertAddBadge" data-char-count-for="adminAboutCertAddBadgeCount" autocomplete="off" />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Заголовок</span>
+                <span class="admin-char-count" id="adminAboutCertAddTitleLineCount">0/120</span>
+              </div>
+              <input type="text" maxlength="120" id="adminAboutCertAddTitleLine" data-char-count-for="adminAboutCertAddTitleLineCount" autocomplete="off" />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Описание</span>
+                <span class="admin-char-count" id="adminAboutCertAddDescCount">0/400</span>
+              </div>
+              <textarea rows="4" maxlength="400" id="adminAboutCertAddDesc" data-char-count-for="adminAboutCertAddDescCount"></textarea>
+            </label>
+          </div>
+          <p id="adminAboutCertAddModalMsg" class="admin-msg"></p>
+          <div class="admin-edit-modal-actions">
+            <button type="button" class="ghost-btn" data-close-about-cert-add-modal="true">Отмена</button>
+            <button type="button" class="solid-btn" id="adminAboutCertAddConfirm">Добавить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminCoverageCardEditModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-coverage-card-edit-modal="true"></div>
+        <div
+          class="admin-edit-modal-card admin-faq-modal-card admin-faq-edit-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminCoverageCardEditModalHeading"
+        >
+          <h3 id="adminCoverageCardEditModalHeading">Изменить карточку</h3>
+          <p class="admin-faq-edit-modal-sub" id="adminCoverageCardEditNum">Карточка 1</p>
+          <div class="admin-form admin-faq-edit-modal-form">
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Заголовок карточки</span>
+                <span class="admin-char-count" id="adminCoverageCardEditItemTitleCount">0/120</span>
+              </div>
+              <input
+                type="text"
+                maxlength="120"
+                id="adminCoverageCardEditItemTitle"
+                data-char-count-for="adminCoverageCardEditItemTitleCount"
+                autocomplete="off"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Текст</span>
+                <span class="admin-char-count" id="adminCoverageCardEditItemTextCount">0/100</span>
+              </div>
+              <textarea
+                rows="5"
+                maxlength="100"
+                id="adminCoverageCardEditItemText"
+                data-char-count-for="adminCoverageCardEditItemTextCount"
+              ></textarea>
+            </label>
+          </div>
+          <p id="adminCoverageCardEditModalMsg" class="admin-msg"></p>
+          <div class="admin-faq-edit-modal-footer">
+            <button type="button" class="ghost-btn admin-faq-modal-delete-btn" id="adminCoverageCardEditDelete">Удалить</button>
+            <div class="admin-faq-edit-modal-footer-right">
+              <button type="button" class="ghost-btn" data-close-coverage-card-edit-modal="true">Отмена</button>
+              <button type="button" class="solid-btn" id="adminCoverageCardEditConfirm">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminCoverageCardAddModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-coverage-card-add-modal="true"></div>
+        <div
+          class="admin-edit-modal-card admin-faq-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminCoverageCardAddModalHeading"
+        >
+          <h3 id="adminCoverageCardAddModalHeading">Новая карточка</h3>
+          <div class="admin-form admin-faq-add-modal-form">
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Заголовок карточки</span>
+                <span class="admin-char-count" id="adminCoverageCardAddItemTitleCount">0/120</span>
+              </div>
+              <input
+                type="text"
+                maxlength="120"
+                id="adminCoverageCardAddItemTitle"
+                data-char-count-for="adminCoverageCardAddItemTitleCount"
+                autocomplete="off"
+              />
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Текст</span>
+                <span class="admin-char-count" id="adminCoverageCardAddItemTextCount">0/100</span>
+              </div>
+              <textarea
+                rows="5"
+                maxlength="100"
+                id="adminCoverageCardAddItemText"
+                data-char-count-for="adminCoverageCardAddItemTextCount"
+              ></textarea>
+            </label>
+          </div>
+          <p id="adminCoverageCardAddModalMsg" class="admin-msg"></p>
+          <div class="admin-edit-modal-actions">
+            <button type="button" class="ghost-btn" data-close-coverage-card-add-modal="true">Отмена</button>
+            <button type="button" class="solid-btn" id="adminCoverageCardAddConfirm">Добавить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="adminProductEditModal" class="admin-edit-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-product-modal="true"></div>
+        <div class="admin-edit-modal-card" role="dialog" aria-modal="true" aria-labelledby="adminProductEditTitle">
+          <h3 id="adminProductEditTitle">Редактирование товара</h3>
+          <form id="adminProductEditForm" class="admin-form">
+            <input type="hidden" name="product_id" id="adminProductEditId" />
+            <label>Категория
+              <select name="category_id" id="adminProductEditCategory" required></select>
+            </label>
+            <label class="admin-field-span-row">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Название</span>
+                <span class="admin-char-count" id="adminProductEditNameCount">0/180</span>
+              </div>
+              <input name="name" id="adminProductEditName" maxlength="180" data-char-count-for="adminProductEditNameCount" required />
+            </label>
+            <label class="admin-field-span-row">
+              <div class="admin-field-head">
+                <span class="admin-field-label">Описание</span>
+                <span class="admin-char-count" id="adminProductEditDescCount">0/400</span>
+              </div>
+              <textarea name="description" id="adminProductEditDescription" maxlength="400" data-char-count-for="adminProductEditDescCount" rows="2"></textarea>
+            </label>
+            <label>Цена, ₽<input name="price" id="adminProductEditPrice" type="number" min="0" step="1" required /></label>
+            <label>Остаток<input name="stock" id="adminProductEditStock" type="number" min="0" step="1" required /></label>
+            <label>Объём, л (необяз.)<input name="volume_liters" id="adminProductEditVolume" type="number" min="0" step="0.01" /></label>
+            <label>Сортировка<input name="sort_order" id="adminProductEditSort" type="number" min="0" step="1" /></label>
+            <label>Видимость
+              <select name="hidden" id="adminProductEditHidden">
+                <option value="0">В каталоге</option>
+                <option value="1">Скрыть</option>
+              </select>
+            </label>
+            <div class="admin-edit-modal-actions">
+              <button type="button" class="ghost-btn" data-close-product-modal="true">Отмена</button>
+              <button type="submit" class="solid-btn">Сохранить</button>
+            </div>
           </form>
-          <p id="adminUserMsg" class="admin-msg"></p>
-        </article>
+          <p id="adminProductEditMsg" class="admin-msg"></p>
+        </div>
+      </div>
 
-        <article class="admin-card">
-          <h2>Пользователи</h2>
-          <div id="adminUsersList" class="admin-list"></div>
-        </article>
-      </section>
-
-      <section class="admin-card">
-        <h2>Товары каталога</h2>
-        <form id="adminCreateProductForm" class="admin-form admin-form-wide">
-          <select name="category_id" id="adminProductCategory" required></select>
-          <input name="name" placeholder="Название товара" required />
-          <input name="price" type="number" min="0" step="1" placeholder="Цена" required />
-          <input name="stock" type="number" min="0" step="1" placeholder="Остаток" required />
-          <input name="sort_order" type="number" min="0" step="1" placeholder="Сортировка" />
-          <select name="hidden">
-            <option value="0">Показывать</option>
-            <option value="1">Скрыть</option>
-          </select>
-          <button class="solid-btn" type="submit">Добавить товар</button>
-        </form>
-        <p id="adminProductMsg" class="admin-msg"></p>
-        <div id="adminProductsList" class="admin-list"></div>
-      </section>
-
-      <section class="admin-card">
-        <h2>Настройки сайта</h2>
-        <form id="adminSettingsForm" class="admin-form">
-          <input name="workLine" placeholder="Режим работы" required />
-          <textarea name="communityIntro" rows="2" placeholder="Текст сообщества"></textarea>
-          <textarea name="deliverySlotsText" rows="3" placeholder="Слоты доставки, каждый с новой строки"></textarea>
-          <button class="solid-btn" type="submit">Сохранить настройки</button>
-        </form>
-        <p id="adminSettingsMsg" class="admin-msg"></p>
-      </section>
-    </main>
+      <div id="adminConfirmModal" class="admin-edit-modal admin-confirm-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-admin-confirm-dismiss="true"></div>
+        <div
+          class="admin-edit-modal-card admin-confirm-modal-card"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="adminConfirmTitle"
+          aria-describedby="adminConfirmMessage"
+        >
+          <h3 id="adminConfirmTitle">Подтверждение</h3>
+          <p id="adminConfirmMessage" class="admin-confirm-modal-message"></p>
+          <div class="admin-edit-modal-actions admin-confirm-modal-actions">
+            <button type="button" class="ghost-btn" id="adminConfirmCancel" data-admin-confirm-dismiss="true">
+              Отмена
+            </button>
+            <button type="button" class="solid-btn" id="adminConfirmOk">Продолжить</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script src="api-client.js"></script>
     <script src="admin.js"></script>

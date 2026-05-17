@@ -2,3 +2,4 @@ node_modules/
 data/app-data.json
 !data/.gitkeep
 .env
+data/feedback-fallback.ndjson

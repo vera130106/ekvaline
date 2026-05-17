@@ -8,6 +8,24 @@ const MSG_MAX = 2000;
 const SLOT_MAX = 64;
 const NOTE_MAX = 500;
 
+/** Только цифры → 11 символов: +7…, 7…, 8xxxxxxxxxx или 9xxxxxxxxx (10 цифр) дают сохранённый вид 7 + 10 цифр. */
+function normalizeRuPhoneForSchema(raw) {
+  let d = String(raw ?? '').replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '8') return `7${d.slice(1)}`;
+  if (d.length === 10 && d[0] === '9') return `7${d}`;
+  return d;
+}
+
+const ruPhoneSchema = Joi.string().custom((value, helpers) => {
+  const n = normalizeRuPhoneForSchema(String(value ?? '').trim());
+  if (!/^7\d{10}$/.test(n)) {
+    return helpers.message({
+      custom: 'Телефон: 11 цифр номера России (можно указать через 7 или через 8).',
+    });
+  }
+  return n;
+});
+
 const passwordSchema = Joi.string()
   .min(8)
   .max(128)
@@ -53,10 +71,7 @@ const registerSchema = Joi.object({
       'string.email': 'Укажите корректный email.',
       'string.max': `Email: не более ${EMAIL_MAX} символов.`,
     }),
-  phone: Joi.string()
-    .pattern(/^7\d{10}$/)
-    .required()
-    .messages({ 'string.pattern.base': 'Телефон: 11 цифр, формат +7…' }),
+  phone: ruPhoneSchema.required(),
   password: passwordSchema.required(),
 });
 
@@ -83,22 +98,23 @@ const profileSchema = Joi.object({
     .max(EMAIL_MAX)
     .email({ tlds: { allow: false } })
     .required(),
-  phone: Joi.string()
-    .pattern(/^7\d{10}$/)
-    .required(),
+  phone: ruPhoneSchema.required(),
 });
+
+/** Имя в форме обратной связи: только буквы (любой алфавит); слова через пробел. \p{L} включает ё, ґ и т.д. */
+const FEEDBACK_NAME_PATTERN = /^[\p{L}]+(?: [\p{L}]+)*$/u;
 
 const feedbackSchema = Joi.object({
   name: Joi.string()
     .trim()
     .min(2)
     .max(40)
-    .pattern(/^[A-Za-zА-Яа-яЁё\s\-']+$/)
-    .required(),
-  phone: Joi.string()
-    .pattern(/^7\d{10}$/)
+    .pattern(FEEDBACK_NAME_PATTERN)
     .required()
-    .messages({ 'string.pattern.base': 'Телефон: 11 цифр.' }),
+    .messages({
+      'string.pattern.base': 'Имя: только буквы, слова через пробел.',
+    }),
+  phone: ruPhoneSchema.required(),
   message: Joi.string()
     .trim()
     .min(10)
@@ -122,9 +138,10 @@ const adminUserCreateSchema = Joi.object({
   first_name: Joi.string().trim().min(2).max(NAME_MAX).required(),
   last_name: Joi.string().trim().max(NAME_MAX).allow('').optional(),
   email: Joi.string().trim().lowercase().max(EMAIL_MAX).email({ tlds: { allow: false } }).required(),
-  phone: Joi.string().pattern(/^7\d{10}$/).required(),
+  phone: ruPhoneSchema.required(),
   password: passwordSchema.required(),
-  role: Joi.string().valid('client', 'operator', 'manager', 'admin', 'driver').required(),
+  /** С админ-панели создаются только сотрудники; клиенты — через регистрацию на сайте. */
+  role: Joi.string().valid('operator', 'manager', 'admin', 'driver').required(),
   driver_route_label: Joi.string().trim().max(120).allow('', null).optional(),
 });
 
@@ -225,6 +242,47 @@ const orderCancelReasonSchema = Joi.object({
   reason: Joi.string().trim().min(3).max(2000).required(),
 });
 
+/** Вопросы в блоке FAQ на странице «Доставка» (редактирует администратор в настройках). */
+const deliveryFaqItemSchema = Joi.object({
+  code: Joi.string().trim().min(1).max(40).required(),
+  tag: Joi.string().trim().min(1).max(60).required(),
+  question: Joi.string().trim().min(3).max(180).required(),
+  answer: Joi.string().trim().min(3).max(900).required(),
+});
+
+const sitePollOptionSchema = Joi.object({
+  id: Joi.string().trim().min(1).max(48).required(),
+  text: Joi.string().trim().min(1).max(160).required(),
+});
+
+const sitePollSchema = Joi.object({
+  id: Joi.string().trim().min(1).max(56).required(),
+  title: Joi.string().trim().max(120).allow('').required(),
+  question: Joi.string().trim().min(3).max(400).required(),
+  active: Joi.boolean().required(),
+  options: Joi.array().items(sitePollOptionSchema).min(2).max(12).required(),
+});
+
+/** Сертификаты на странице «О компании». */
+const aboutCertificateItemSchema = Joi.object({
+  image: Joi.string().trim().min(3).max(600000).required(),
+  alt: Joi.string().trim().min(1).max(200).required(),
+  badge: Joi.string().trim().max(80).allow('').required(),
+  title: Joi.string().trim().min(1).max(120).required(),
+  description: Joi.string().trim().min(1).max(400).required(),
+});
+
+/** Карточки справа от карты на странице «Доставка» (блок «Зоны покрытия»). */
+const deliveryCoverageCardSchema = Joi.object({
+  title: Joi.string().trim().min(1).max(120).required(),
+  text: Joi.string().trim().min(1).max(100).required(),
+});
+
+const deliveryCoveragePanelSchema = Joi.object({
+  title: Joi.string().trim().min(3).max(160).required(),
+  cards: Joi.array().items(deliveryCoverageCardSchema).min(1).max(8).required(),
+});
+
 const managerSettingsSchema = Joi.object({
   workLine: Joi.string().trim().min(3).max(200).required(),
   communityIntro: Joi.string().trim().max(500).allow('').required(),
@@ -233,6 +291,10 @@ const managerSettingsSchema = Joi.object({
     .min(1)
     .max(12)
     .required(),
+  deliveryFaq: Joi.array().items(deliveryFaqItemSchema).min(1).max(30).required(),
+  sitePolls: Joi.array().items(sitePollSchema).max(10).required(),
+  aboutCertificates: Joi.array().items(aboutCertificateItemSchema).max(12).required(),
+  deliveryCoverage: deliveryCoveragePanelSchema.required(),
 });
 
 const deliveryAddressCreateSchema = Joi.object({
@@ -257,6 +319,14 @@ const deliveryZonePatchSchema = Joi.object({
   bounds_json: Joi.string().trim().max(20000).allow('').optional(),
 }).min(1);
 
+/** Параметры публичного калькулятора воды на лендинге (GET query). */
+const waterCalcQuerySchema = Joi.object({
+  people: Joi.number().integer().min(1).max(15).required(),
+  usage: Joi.string().valid('drink', 'cook', 'both').required(),
+  activity: Joi.string().valid('low', 'medium', 'high').required(),
+  season: Joi.string().valid('winter', 'spring-autumn', 'summer').required(),
+});
+
 function validate(schema, payload) {
   const { error, value } = schema.validate(payload, { abortEarly: false, stripUnknown: true });
   if (error) {
@@ -268,6 +338,7 @@ function validate(schema, payload) {
 
 module.exports = {
   validate,
+  waterCalcQuerySchema,
   registerSchema,
   loginSchema,
   profileSchema,
@@ -282,6 +353,12 @@ module.exports = {
   orderClientPatchSchema,
   orderCancelReasonSchema,
   managerSettingsSchema,
+  deliveryFaqItemSchema,
+  sitePollSchema,
+  sitePollOptionSchema,
+  aboutCertificateItemSchema,
+  deliveryCoverageCardSchema,
+  deliveryCoveragePanelSchema,
   deliveryAddressCreateSchema,
   deliveryAddressPatchSchema,
   deliveryZonePatchSchema,

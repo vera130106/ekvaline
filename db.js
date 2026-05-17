@@ -25,8 +25,9 @@ class PgStatement {
   async run(...args) {
     const isInsert = /^\s*insert\s/i.test(this.sql);
     let text = this.sql;
+    /** У таблиц без столбца id (например site_settings) RETURNING id ломает INSERT в PostgreSQL. */
     if (isInsert && !/\breturning\b/i.test(text)) {
-      text = `${text} RETURNING id`;
+      text = `${text} RETURNING *`;
     }
     const result = await this.db._query(text, args);
     const first = result.rows[0];
@@ -87,8 +88,10 @@ class PgDatabase {
   async _init() {
     await this.pool.query('SELECT 1');
     await migrate(this.pool);
+    await migrateDemoStaffEmails(this.pool);
     await seedIfEmpty(this.pool);
     await ensureDefaultDeliveryAddresses(this.pool);
+    await ensureDeliveryAddressesBackfillZoneId(this.pool);
     await ensureExtendedCatalog(this.pool);
     await ensureDemoClientUser(this.pool);
     await ensureDemoOperatorOrders(this.pool);
@@ -232,6 +235,7 @@ async function migrate(pool) {
   `);
 
   await ensureIdentityDefault(pool, 'users');
+  await ensureUsersRegisterColumns(pool);
   await ensureIdentityDefault(pool, 'categories');
   await ensureIdentityDefault(pool, 'products');
   await ensureIdentityDefault(pool, 'orders');
@@ -248,12 +252,124 @@ async function migrate(pool) {
   await ensureColumnDefault(pool, 'orders', 'updated_at', 'NOW()');
   await ensureOrdersCompatibility(pool);
   await ensureOrderAuditEvents(pool);
+  await ensureIdentityDefault(pool, 'order_audit_events');
   await ensureUserDriverRouteLabel(pool);
+  await ensureOrdersZoneForeignKey(pool);
+  await ensureDeliveryAddressesZoneForeignKey(pool);
+  await ensureLegacyClientsOrdersFk(pool);
+  await ensureDeclarativeForeignKeysPublic(pool);
+  await ensurePublicRussianTableComments(pool);
 }
 
 /** Метка в учётке водителя = точное совпадение с полем orders.driver из панели оператора. */
 async function ensureUserDriverRouteLabel(pool) {
   await ensureColumnExists(pool, 'users', 'driver_route_label', 'TEXT');
+}
+
+/**
+ * Связка заказа со справочником зон: orders.zone было свободным текстом без FK —
+ * диаграмма ER и целостность в СУБД требуют явной ссылки на delivery_zones(name).
+ */
+
+/** Postgres требует UNIQUE/PRIMARY именно по ссылаемым столбцам; старый delivery_zones часто без UNIQUE(name) → 42830. */
+async function ensureDeliveryZonesNameUnique(pool) {
+  if (!(await pgTableExists(pool, 'delivery_zones'))) return false;
+  const chk = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_constraint c
+      INNER JOIN pg_class t ON c.conrelid = t.oid
+      INNER JOIN pg_namespace n ON n.oid = t.relnamespace AND n.nspname = 'public'
+      INNER JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey) AND NOT a.attisdropped
+      WHERE t.relname = 'delivery_zones'
+        AND c.contype IN ('u', 'p')
+        AND cardinality(c.conkey) = 1
+        AND a.attname = 'name'
+    ) AS ex
+  `);
+  if (chk.rows[0] && chk.rows[0].ex) return true;
+
+  try {
+    await pool.query(`ALTER TABLE delivery_zones ADD CONSTRAINT delivery_zones_name_uq UNIQUE (name)`);
+    return true;
+  } catch (e) {
+    const code = e && e.code;
+    if (code === '42P07' || code === '42710' || /already exists/i.test(String(e.message || ''))) return true;
+    if (code === '23505') {
+      console.warn(
+        '[db] UNIQUE(delivery_zones.name): в таблице есть дубликаты name — удалите повторные строки вручную.'
+      );
+      return false;
+    }
+    console.warn('[db] delivery_zones UNIQUE(name):', e && e.message);
+    return false;
+  }
+}
+
+async function ensureOrdersZoneForeignKey(pool) {
+  /** Без ON CONFLICT: в старых БД у delivery_zones может не быть UNIQUE(name) — тогда 42P10 и падает вся инициализация (в т.ч. регистрация). */
+  await pool.query(`
+    INSERT INTO delivery_zones (name, tariff, bounds_json)
+    SELECT DISTINCT trim(o.zone), 0, '{}'
+    FROM orders o
+    WHERE o.zone IS NOT NULL AND trim(o.zone) <> ''
+      AND NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = trim(o.zone))
+  `);
+  await pool.query(`UPDATE orders SET zone = NULL WHERE zone IS NOT NULL AND trim(zone) = ''`);
+  await pool.query(`UPDATE orders SET zone = trim(zone) WHERE zone IS NOT NULL`);
+  await pool.query(`
+    UPDATE orders o
+    SET zone = NULL
+    WHERE o.zone IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = o.zone)
+  `);
+
+  if (!(await ensureDeliveryZonesNameUnique(pool))) {
+    console.warn('[db] Пропуск orders_zone_fkey: на delivery_zones(name) нужен UNIQUE без дубликатов.');
+    return;
+  }
+
+  const fk = await pool.query(
+    `SELECT c.conname
+     FROM pg_constraint c
+     JOIN pg_class t ON c.conrelid = t.oid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.contype = 'f'
+       AND t.relname = 'orders'
+       AND c.conname = 'orders_zone_fkey'`
+  );
+  if (fk.rowCount > 0) return;
+  await pool.query(`
+    ALTER TABLE orders
+      ADD CONSTRAINT orders_zone_fkey
+      FOREIGN KEY (zone) REFERENCES delivery_zones (name)
+      ON DELETE SET NULL
+  `  ).catch(async (err) => {
+    if (err && err.code === '23503') {
+      await pool.query(`
+        UPDATE orders o
+        SET zone = NULL
+        WHERE o.zone IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = o.zone)
+      `).catch(() => {});
+      await pool.query(`
+        ALTER TABLE orders
+          ADD CONSTRAINT orders_zone_fkey
+          FOREIGN KEY (zone) REFERENCES delivery_zones (name)
+          ON DELETE SET NULL
+      `);
+      return;
+    }
+    if (err && err.code === '42830') {
+      console.warn(
+        '[db] orders_zone_fkey не добавлен: на delivery_zones(name) должно быть уникальное ограничение.',
+        err.detail || ''
+      );
+      return;
+    }
+    throw err;
+  });
 }
 
 async function ensureOrderAuditEvents(pool) {
@@ -272,6 +388,478 @@ async function ensureOrderAuditEvents(pool) {
     .query(`CREATE INDEX IF NOT EXISTS idx_order_audit_events_created ON order_audit_events (created_at DESC)`)
     .catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_audit_events_order ON order_audit_events (order_id)`).catch(() => {});
+}
+
+/** Колонка zone_id + FK к delivery_zones для пресетов адресов доставки (связь в ERD с зонами). */
+async function ensureDeliveryAddressesZoneForeignKey(pool) {
+  await ensureColumnExists(pool, 'delivery_addresses', 'zone_id', 'INTEGER');
+  await pool
+    .query(
+      `UPDATE delivery_addresses da SET zone_id = NULL
+       WHERE zone_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.id = da.zone_id)`
+    )
+    .catch(() => {});
+  const fk = await pool.query(
+    `SELECT c.conname
+     FROM pg_constraint c
+     JOIN pg_class t ON c.conrelid = t.oid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.contype = 'f'
+       AND t.relname = 'delivery_addresses'
+       AND c.conname = 'delivery_addresses_zone_id_fkey'`
+  );
+  if (fk.rowCount > 0) return;
+  await pool
+    .query(
+      `ALTER TABLE delivery_addresses
+        ADD CONSTRAINT delivery_addresses_zone_id_fkey
+        FOREIGN KEY (zone_id) REFERENCES delivery_zones (id)
+        ON DELETE SET NULL`
+    )
+    .catch(() => {});
+}
+
+/**
+ * Подбор zone_id по совпадению названия зоны с началом метки («Центр — …», «Доп. зона — …»).
+ * Вызывать после insert пресетов и заполнения delivery_zones.
+ */
+async function ensureDeliveryAddressesBackfillZoneId(pool) {
+  await pool
+    .query(
+      `
+    UPDATE delivery_addresses da
+    SET zone_id = dz.id
+    FROM delivery_zones dz
+    WHERE da.zone_id IS NULL
+      AND dz.name <> ''
+      AND strpos(da.label, dz.name) = 1
+      AND substring(da.label FROM char_length(dz.name) + 1) ~ '^[[:space:]]*[—–-]'
+  `
+    )
+    .catch(() => {});
+}
+
+/**
+ * Если остался легаси init-postgres (таблица clients и колонка orders.client_id) — включаем FK.
+ * Рабочее приложение опирается на orders.user_id; client_id может быть пустым.
+ */
+async function ensureLegacyClientsOrdersFk(pool) {
+  const clientsTbl = await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'clients'`
+  );
+  if (!clientsTbl.rowCount) return;
+  await ensureColumnExists(pool, 'orders', 'client_id', 'INTEGER');
+  await pool
+    .query(
+      `UPDATE orders SET client_id = NULL
+       WHERE client_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM clients c WHERE c.id = orders.client_id)`
+    )
+    .catch(() => {});
+  const fk = await pool.query(
+    `SELECT c.conname
+     FROM pg_constraint c
+     JOIN pg_class t ON c.conrelid = t.oid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.contype = 'f'
+       AND t.relname = 'orders'
+       AND c.conname = 'orders_client_id_fkey'`
+  );
+  if (fk.rowCount > 0) return;
+  await pool
+    .query(
+      `ALTER TABLE orders
+        ADD CONSTRAINT orders_client_id_fkey
+        FOREIGN KEY (client_id) REFERENCES clients (id)
+        ON DELETE SET NULL`
+    )
+    .catch(() => {});
+}
+
+async function pgTableExists(pool, tableName) {
+  const r = await pool.query(
+    `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`,
+    [tableName]
+  );
+  return r.rowCount > 0;
+}
+
+async function pgColumnExists(pool, tableName, columnName) {
+  const r = await pool.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+    [tableName, columnName]
+  );
+  return r.rowCount > 0;
+}
+
+/** Одностолбцовый FK: есть ли уже связь child(col) → parent. */
+async function publicForeignKeyExists(pool, childTable, childColumn, parentTable) {
+  const r = await pool.query(
+    `
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class rel ON rel.oid = c.conrelid AND rel.relkind = 'r'
+    JOIN pg_namespace n ON n.oid = rel.relnamespace
+    JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord) ON TRUE
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum AND NOT a.attisdropped
+    JOIN pg_class frel ON frel.oid = c.confrelid
+    JOIN pg_namespace fn ON fn.oid = frel.relnamespace
+    WHERE n.nspname = 'public' AND fn.nspname = 'public'
+      AND c.contype = 'f'
+      AND rel.relname = $1
+      AND a.attname = $2
+      AND frel.relname = $3
+    LIMIT 1`,
+    [childTable, childColumn, parentTable]
+  );
+  return r.rowCount > 0;
+}
+
+async function tryAddForeignKey(pool, sql, label) {
+  try {
+    await pool.query(sql);
+  } catch (e) {
+    if (e && (e.code === '42710' || /already exists/i.test(String(e.message || '')))) return;
+    if (e && e.code === '23503') {
+      console.warn(`[db] FK ${label}: нарушена ссылочная целостность (${e.detail || e.message}). Очистите «битые» строки вручную.`);
+      return;
+    }
+    console.warn(`[db] FK ${label}:`, e.message || e);
+  }
+}
+
+/**
+ * Если таблицы созданы без REFERENCES (старый импорт / ручное DDL), добавляем FK —
+ * pgAdmin ERD показывает линии только при реальных ограничениях в БД.
+ */
+async function ensureDeclarativeForeignKeysPublic(pool) {
+  if ((await pgTableExists(pool, 'orders')) && (await pgColumnExists(pool, 'orders', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'orders', 'user_id', 'users');
+    if (!has) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM orders o
+        WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = o.user_id)`);
+      if (bad.rows[0].n === 0) {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE orders ADD CONSTRAINT orders_user_id_fkey
+           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+          'orders.user_id→users'
+        );
+      } else {
+        console.warn(`[db] Пропуск FK orders→users: ${bad.rows[0].n} заказов с несуществующим user_id.`);
+      }
+    }
+  }
+
+  if ((await pgTableExists(pool, 'products')) && (await pgColumnExists(pool, 'products', 'category_id'))) {
+    const has = await publicForeignKeyExists(pool, 'products', 'category_id', 'categories');
+    if (!has) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM products p
+        WHERE p.category_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.id = p.category_id)`);
+      if (bad.rows[0].n > 0) {
+        console.warn(`[db] Пропуск FK products→categories: ${bad.rows[0].n} товаров с несуществующей category_id.`);
+      } else {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE products ADD CONSTRAINT products_category_id_fkey
+           FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE RESTRICT`,
+          'products.category_id→categories'
+        );
+      }
+    }
+  }
+
+  if ((await pgTableExists(pool, 'bonus_operations')) && (await pgColumnExists(pool, 'bonus_operations', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'bonus_operations', 'user_id', 'users');
+    if (!has) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM bonus_operations b
+        WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = b.user_id)`);
+      if (bad.rows[0].n > 0) {
+        console.warn(`[db] Пропуск FK bonus_operations→users: ${bad.rows[0].n} строк с несуществующим user_id.`);
+      } else {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE bonus_operations ADD CONSTRAINT bonus_operations_user_id_fkey
+           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+          'bonus_operations.user_id→users'
+        );
+      }
+    }
+  }
+
+  if ((await pgTableExists(pool, 'feedback_messages')) && (await pgColumnExists(pool, 'feedback_messages', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'feedback_messages', 'user_id', 'users');
+    if (!has) {
+      await pool.query(`
+        UPDATE feedback_messages SET user_id = NULL
+        WHERE user_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = feedback_messages.user_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE feedback_messages ADD CONSTRAINT feedback_messages_user_id_fkey
+         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL`,
+        'feedback_messages.user_id→users'
+      );
+    }
+  }
+
+  if ((await pgTableExists(pool, 'audit_log')) && (await pgColumnExists(pool, 'audit_log', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'audit_log', 'user_id', 'users');
+    if (!has) {
+      await pool.query(`
+        UPDATE audit_log SET user_id = NULL
+        WHERE user_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = audit_log.user_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_fkey
+         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL`,
+        'audit_log.user_id→users'
+      );
+    }
+  }
+
+  if ((await pgTableExists(pool, 'subscriptions')) && (await pgColumnExists(pool, 'subscriptions', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'subscriptions', 'user_id', 'users');
+    if (!has) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM subscriptions s
+        WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = s.user_id)`);
+      if (bad.rows[0].n > 0) {
+        console.warn(`[db] Пропуск FK subscriptions→users: ${bad.rows[0].n} строк с несуществующим user_id.`);
+      } else {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_user_id_fkey
+           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+          'subscriptions.user_id→users'
+        );
+      }
+    }
+  }
+
+  if (
+    (await pgTableExists(pool, 'orders')) &&
+    (await pgColumnExists(pool, 'orders', 'address_id')) &&
+    (await pgTableExists(pool, 'delivery_addresses'))
+  ) {
+    const has = await publicForeignKeyExists(pool, 'orders', 'address_id', 'delivery_addresses');
+    if (!has) {
+      await pool.query(`
+        UPDATE orders SET address_id = NULL
+        WHERE address_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM delivery_addresses d WHERE d.id = orders.address_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE orders ADD CONSTRAINT orders_address_id_fkey
+         FOREIGN KEY (address_id) REFERENCES delivery_addresses (id) ON DELETE SET NULL`,
+        'orders.address_id→delivery_addresses'
+      );
+    }
+  }
+
+  if (
+    (await pgTableExists(pool, 'orders')) &&
+    (await pgColumnExists(pool, 'orders', 'delivery_zone_id')) &&
+    (await pgTableExists(pool, 'delivery_zones'))
+  ) {
+    const has = await publicForeignKeyExists(pool, 'orders', 'delivery_zone_id', 'delivery_zones');
+    if (!has) {
+      await pool.query(`
+        UPDATE orders SET delivery_zone_id = NULL
+        WHERE delivery_zone_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM delivery_zones z WHERE z.id = orders.delivery_zone_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE orders ADD CONSTRAINT orders_delivery_zone_id_fkey
+         FOREIGN KEY (delivery_zone_id) REFERENCES delivery_zones (id) ON DELETE SET NULL`,
+        'orders.delivery_zone_id→delivery_zones'
+      );
+    }
+  }
+
+  if ((await pgTableExists(pool, 'reviews')) && (await pgColumnExists(pool, 'reviews', 'product_id'))) {
+    const has = await publicForeignKeyExists(pool, 'reviews', 'product_id', 'products');
+    if (!has && (await pgTableExists(pool, 'products'))) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM reviews r
+        WHERE r.product_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM products p WHERE p.id = r.product_id)`);
+      if (bad.rows[0].n > 0) {
+        console.warn(`[db] Пропуск FK reviews→products: «битых» ссылок: ${bad.rows[0].n}.`);
+      } else {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE reviews ADD CONSTRAINT reviews_product_id_fkey
+           FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE`,
+          'reviews.product_id→products'
+        );
+      }
+    }
+  }
+
+  if ((await pgTableExists(pool, 'reviews')) && (await pgColumnExists(pool, 'reviews', 'client_id'))) {
+    if (await pgTableExists(pool, 'clients')) {
+      const has = await publicForeignKeyExists(pool, 'reviews', 'client_id', 'clients');
+      if (!has) {
+        await pool.query(`
+          UPDATE reviews SET client_id = NULL
+          WHERE client_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM clients cl WHERE cl.id = reviews.client_id)`).catch(() => {});
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE reviews ADD CONSTRAINT reviews_client_id_fkey
+           FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE SET NULL`,
+          'reviews.client_id→clients'
+        );
+      }
+    } else if (await pgTableExists(pool, 'users')) {
+      const has = await publicForeignKeyExists(pool, 'reviews', 'client_id', 'users');
+      if (!has) {
+        await pool.query(`
+          UPDATE reviews SET client_id = NULL
+          WHERE client_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = reviews.client_id)`).catch(() => {});
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE reviews ADD CONSTRAINT reviews_client_id_users_fkey
+           FOREIGN KEY (client_id) REFERENCES users (id) ON DELETE SET NULL`,
+          'reviews.client_id→users'
+        );
+      }
+    }
+  }
+
+  if ((await pgTableExists(pool, 'delivery_addresses')) && (await pgColumnExists(pool, 'delivery_addresses', 'client_id'))) {
+    const has = await publicForeignKeyExists(pool, 'delivery_addresses', 'client_id', 'clients');
+    if (!has && (await pgTableExists(pool, 'clients'))) {
+      await pool.query(`
+        UPDATE delivery_addresses SET client_id = NULL
+        WHERE client_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM clients c WHERE c.id = delivery_addresses.client_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE delivery_addresses ADD CONSTRAINT delivery_addresses_client_id_fkey
+         FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE`,
+        'delivery_addresses.client_id→clients'
+      );
+    }
+  }
+
+  if ((await pgTableExists(pool, 'promocodes')) && (await pgColumnExists(pool, 'promocodes', 'created_by_user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'promocodes', 'created_by_user_id', 'users');
+    if (!has) {
+      await pool.query(`
+        UPDATE promocodes SET created_by_user_id = NULL
+        WHERE created_by_user_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = promocodes.created_by_user_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE promocodes ADD CONSTRAINT promocodes_created_by_user_id_fkey
+         FOREIGN KEY (created_by_user_id) REFERENCES users (id) ON DELETE SET NULL`,
+        'promocodes.created_by_user_id→users'
+      );
+    }
+  }
+  if ((await pgTableExists(pool, 'promocodes')) && (await pgColumnExists(pool, 'promocodes', 'user_id'))) {
+    const has = await publicForeignKeyExists(pool, 'promocodes', 'user_id', 'users');
+    if (!has) {
+      await pool.query(`
+        UPDATE promocodes SET user_id = NULL
+        WHERE user_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = promocodes.user_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE promocodes ADD CONSTRAINT promocodes_user_id_fkey
+         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL`,
+        'promocodes.user_id→users'
+      );
+    }
+  }
+
+  /** order_audit_events могли добавить без FK в сторонних скриптах */
+  if ((await pgTableExists(pool, 'order_audit_events')) && (await pgColumnExists(pool, 'order_audit_events', 'order_id'))) {
+    const has = await publicForeignKeyExists(pool, 'order_audit_events', 'order_id', 'orders');
+    if (!has) {
+      const bad = await pool.query(`
+        SELECT COUNT(*)::int AS n FROM order_audit_events e
+        WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id)`);
+      if (bad.rows[0].n > 0) {
+        console.warn(`[db] Пропуск FK order_audit_events→orders: ${bad.rows[0].n} строк без заказа.`);
+      } else {
+        await tryAddForeignKey(
+          pool,
+          `ALTER TABLE order_audit_events ADD CONSTRAINT order_audit_events_order_id_decl_fkey
+           FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE`,
+          'order_audit_events.order_id→orders'
+        );
+      }
+    }
+  }
+  if (
+    (await pgTableExists(pool, 'order_audit_events')) &&
+    (await pgColumnExists(pool, 'order_audit_events', 'actor_user_id'))
+  ) {
+    const has = await publicForeignKeyExists(pool, 'order_audit_events', 'actor_user_id', 'users');
+    if (!has) {
+      await pool.query(`
+        UPDATE order_audit_events SET actor_user_id = NULL
+        WHERE actor_user_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = order_audit_events.actor_user_id)`).catch(() => {});
+      await tryAddForeignKey(
+        pool,
+        `ALTER TABLE order_audit_events ADD CONSTRAINT order_audit_events_actor_user_id_fkey
+         FOREIGN KEY (actor_user_id) REFERENCES users (id) ON DELETE SET NULL`,
+        'order_audit_events.actor_user_id→users'
+      );
+    }
+  }
+}
+
+/** Русские подписи таблиц для ERD/pgAdmin; физические имена латиницей (совместимость с Node.js). */
+async function ensurePublicRussianTableComments(pool) {
+  const esc = (s) => String(s).replace(/'/g, "''");
+  const pairs = [
+    ['users', 'Пользователи'],
+    ['categories', 'Категории товаров'],
+    ['products', 'Товары'],
+    ['orders', 'Заказы'],
+    ['subscriptions', 'Подписки на доставку'],
+    ['delivery_zones', 'Зоны доставки'],
+    ['bonus_operations', 'Операции с бонусами'],
+    ['feedback_messages', 'Сообщения обратной связи'],
+    ['site_settings', 'Настройки сайта'],
+    ['audit_log', 'Журнал аудита'],
+    ['delivery_addresses', 'Пресеты адресов доставки'],
+    ['order_audit_events', 'События по заказам (аудит)'],
+  ];
+  for (const [table, title] of pairs) {
+    await pool.query(`COMMENT ON TABLE "${table}" IS '${esc(title)}'`).catch(() => {});
+  }
+  const clientsTbl = await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'clients'`
+  );
+  if (clientsTbl.rowCount) {
+    await pool.query(`COMMENT ON TABLE clients IS '${esc('Клиенты (легаси-схема)')}'`).catch(() => {});
+  }
+  const sessTbl = await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = 'express_session'`
+  );
+  if (sessTbl.rowCount) {
+    await pool
+      .query(`COMMENT ON TABLE express_session IS '${esc('Сессии веб-приложения (Express/connect-pg-simple)')}'`)
+      .catch(() => {});
+  }
 }
 
 async function ensureIdentityDefault(pool, tableName) {
@@ -318,6 +906,20 @@ async function ensureColumnExists(pool, tableName, columnName, typeSql) {
   await pool.query(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${typeSql}`);
 }
 
+/** Старые БД без полного набора колонок users — иначе INSERT при регистрации падает (42P01/23502/42703). */
+async function ensureUsersRegisterColumns(pool) {
+  await ensureColumnExists(pool, 'users', 'first_name', "TEXT NOT NULL DEFAULT ''");
+  await ensureColumnExists(pool, 'users', 'last_name', "TEXT NOT NULL DEFAULT ''");
+  await ensureColumnExists(pool, 'users', 'patronymic', "TEXT NOT NULL DEFAULT ''");
+  await ensureColumnExists(pool, 'users', 'password_changed_at', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'bonus_balance', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumnExists(pool, 'users', 'role', "TEXT NOT NULL DEFAULT 'client'");
+  await ensureColumnExists(pool, 'users', 'blocked', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumnExists(pool, 'users', 'login_attempts', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumnExists(pool, 'users', 'locked_until', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'created_at', 'TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+}
+
 async function ensureOrdersCompatibility(pool) {
   await ensureColumnExists(pool, 'orders', 'user_id', 'INTEGER');
   await ensureColumnExists(pool, 'orders', 'address', "TEXT NOT NULL DEFAULT ''");
@@ -345,15 +947,53 @@ async function ensureOrdersCompatibility(pool) {
   await pool.query(`ALTER TABLE "orders" ALTER COLUMN "total_sum" SET DEFAULT 0`).catch(() => {});
 }
 
+/**
+ * Если БД уже создавалась со старыми демо-email (@ekvaline.mail / .demo),
+ * синхронизируем их с актуальными адресами @mail.ru, чтобы вход из формы «Вход» совпадал с кодом.
+ */
+async function migrateDemoStaffEmails(pool) {
+  const rows = [
+    {
+      phone: '70000000001',
+      role: 'admin',
+      email: 'adminekva@mail.ru',
+      legacyEmails: ['admin@ekvaline.mail', 'admin@ekvaline.demo'],
+    },
+    {
+      phone: '70000000002',
+      role: 'manager',
+      email: 'managerekva@mail.ru',
+      legacyEmails: ['manager@ekvaline.mail', 'manager@ekvaline.demo'],
+    },
+    {
+      phone: '70000000003',
+      role: 'operator',
+      email: 'operatorekva@mail.ru',
+      legacyEmails: ['operator@ekvaline.mail', 'operator@ekvaline.demo'],
+    },
+  ];
+  for (const r of rows) {
+    const low = r.legacyEmails.map((x) => x.toLowerCase());
+    await pool
+      .query(
+        `UPDATE users SET email = $1 WHERE role = $2 AND (
+          phone = $3 OR lower(email) = ANY($4::text[])
+        )`,
+        [r.email, r.role, r.phone, low],
+      )
+      .catch(() => {});
+  }
+}
+
 async function seedIfEmpty(pool) {
   const count = await pool.query('SELECT COUNT(*)::int AS c FROM users');
   if (count.rows[0].c > 0) return;
 
   const rounds = 12;
   const staff = [
-    ['admin@ekvaline.demo', '70000000001', 'AdminEkva2026!', 'Администратор', 'Системы', 'admin'],
-    ['manager@ekvaline.demo', '70000000002', 'ManagerEkva2026!', 'Менеджер', 'Контента', 'manager'],
-    ['operator@ekvaline.demo', '70000000003', 'OperatorEkva2026!', 'Оператор', 'Линии', 'operator'],
+    ['adminekva@mail.ru', '70000000001', 'AdminEkva2026!', 'Администратор', 'Системы', 'admin'],
+    ['managerekva@mail.ru', '70000000002', 'ManagerEkva2026!', 'Менеджер', 'Контента', 'manager'],
+    ['operatorekva@mail.ru', '70000000003', 'OperatorEkva2026!', 'Оператор', 'Линии', 'operator'],
   ];
 
     for (const s of staff) {
@@ -378,22 +1018,108 @@ async function seedIfEmpty(pool) {
     [catWater, catAcc, catEq]
   );
 
-  await pool.query(
-    `INSERT INTO delivery_zones (name, tariff, bounds_json) VALUES
-     ('Центр',0,'{}'),('Степной',150,'{}'),('Доп. зона',250,'{}')
-     ON CONFLICT (name) DO NOTHING`
-  );
+  await pool.query(`
+    INSERT INTO delivery_zones (name, tariff, bounds_json)
+    SELECT v.name, v.tariff, v.b
+    FROM (
+      VALUES ('Центр'::text, 0::numeric, '{}'::text),
+             ('Степной', 150, '{}'),
+             ('Доп. зона', 250, '{}')
+    ) AS v(name, tariff, b)
+    WHERE NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = v.name)
+  `);
+
+  const demoDeliveryFaq = JSON.stringify([
+    {
+      code: 'Заявки',
+      tag: 'Оператор',
+      question: 'Во сколько можно принять заказ сегодня?',
+      answer:
+        'Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно.',
+    },
+    {
+      code: 'Интервал',
+      tag: 'Квартира',
+      question: 'Какие интервалы доставки доступны для частных клиентов?',
+      answer: 'Для квартиры доступны окна 9:00-14:00, 14:00-17:00 и 17:00-21:00.',
+    },
+    {
+      code: 'График',
+      tag: 'Офис',
+      question: 'Как оформить регулярную доставку воды для офиса?',
+      answer:
+        'Нужно связаться с оператором, выбрать удобные дни и интервал, после этого оператор сам проставит вам регулярные доставки.',
+    },
+    {
+      code: 'Тара',
+      tag: 'Обмен',
+      question: 'Что делать с пустой тарой?',
+      answer:
+        'Курьер заберет пустые бутыли во время следующей доставки. Отдельно везти тару в офис не нужно.',
+    },
+  ]);
+
+  const demoAboutCertificates = JSON.stringify([
+    {
+      image: 'assets/certificate-card.jpg',
+      alt: 'Карточка предприятия',
+      badge: 'Документ',
+      title: 'Карточка предприятия',
+      description:
+        'Реквизиты организации, контакты, банковские данные и юридическая информация.',
+    },
+    {
+      image: 'assets/certificate-eac.jpg',
+      alt: 'Декларация о соответствии ЕАЭС',
+      badge: 'ЕАЭС',
+      title: 'Декларация о соответствии',
+      description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
+    },
+    {
+      image: 'assets/certificate-lab.jpg',
+      alt: 'Протокол лабораторных испытаний',
+      badge: 'Лаборатория',
+      title: 'Протокол испытаний',
+      description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
+    },
+  ]);
+
+  const demoDeliveryCoverage = JSON.stringify({
+    title: 'Зоны покрытия Оренбурга',
+    cards: [
+      {
+        title: 'Интервалы доставки',
+        text: 'Утро: 9:00-14:00, День: 14:00-17:00, Вечер: 17:00-21:00',
+      },
+      {
+        title: 'Доставка для организаций',
+        text: 'Отдельное окно: 9:00-17:00',
+      },
+      {
+        title: 'Прием заказов',
+        text: 'Оператор принимает заявки: 8:00-19:00',
+      },
+    ],
+  });
 
   await pool.query(
     `INSERT INTO site_settings (key, value) VALUES
      ('workLine',$1),
      ('deliverySlots',$2),
-     ('communityIntro',$3)
+     ('communityIntro',$3),
+     ('deliveryFaq',$4),
+     ('sitePolls',$5),
+     ('aboutCertificates',$6),
+     ('deliveryCoverage',$7)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [
       'Пн–Сб 8:00–21:00, Вс 9:00–18:00',
       JSON.stringify(['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00']),
       'Новости, советы о воде и здоровом образе жизни от ЭкваЛайн.',
+      demoDeliveryFaq,
+      '[]',
+      demoAboutCertificates,
+      demoDeliveryCoverage,
     ]
   );
 }
@@ -440,7 +1166,7 @@ async function ensureExtendedCatalog(pool) {
 /** Общедоступная демо-учётка клиента для входа (если ещё нет в таблице users). */
 async function ensureDemoClientUser(pool) {
   const ex = await pool.query('SELECT 1 FROM users WHERE lower(email) = lower($1) LIMIT 1', [
-    'demo.client@ekvaline.demo',
+    'clienteekva@mail.ru',
   ]);
   if (ex.rowCount > 0) return;
   const rounds = 12;
@@ -449,7 +1175,7 @@ async function ensureDemoClientUser(pool) {
       `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
        VALUES ($1,$2,$3,$4,$5,'client', NOW()::text)`,
       [
-        'demo.client@ekvaline.demo',
+        'clienteekva@mail.ru',
         '79001112299',
         bcrypt.hashSync('ClientDemo2026!', rounds),
         'Демо',
@@ -493,7 +1219,7 @@ async function ensureDemoOperatorOrders(pool) {
 
   let clientId;
   const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1)', [
-    'demo.client@ekvaline.demo',
+    'clienteekva@mail.ru',
   ]);
   if (existing.rowCount > 0) {
     clientId = existing.rows[0].id;
@@ -502,7 +1228,7 @@ async function ensureDemoOperatorOrders(pool) {
     const ins = await pool.query(
       `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
        VALUES ($1,$2,$3,$4,$5,'client', NOW()::text) RETURNING id`,
-      ['demo.client@ekvaline.demo', '79001112299', hash, 'Демо', 'Клиент']
+      ['clienteekva@mail.ru', '79001112299', hash, 'Демо', 'Клиент']
     );
     clientId = ins.rows[0].id;
   }

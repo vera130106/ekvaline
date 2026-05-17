@@ -99,12 +99,12 @@
     if (logoutBtn instanceof HTMLElement) logoutBtn.hidden = true;
   }
 
-  function uiShowMain(displayName, driverLabel) {
+  function uiShowMain(displayName) {
     if (loginCard instanceof HTMLElement) loginCard.hidden = true;
     if (mainCard instanceof HTMLElement) mainCard.hidden = false;
     if (userMeta instanceof HTMLElement) {
       userMeta.hidden = false;
-      userMeta.textContent = `${displayName}${driverLabel ? ` · экспедитор: ${driverLabel}` : ''}`;
+      userMeta.textContent = displayName;
     }
     if (refreshBtn instanceof HTMLElement) refreshBtn.hidden = false;
     if (logoutBtn instanceof HTMLElement) logoutBtn.hidden = false;
@@ -236,7 +236,7 @@
     saveLocalUser(u);
     loginForm.reset();
     const name = String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim();
-    uiShowMain(name || u.email, String(u.driver_route_label || '').trim());
+    uiShowMain(name || u.email);
     await refreshOrdersUi();
   });
 
@@ -251,7 +251,7 @@
       if (serverUser && String(serverUser.role || '').toLowerCase() === 'driver') {
         const name =
           String(serverUser.name || [serverUser.first_name, serverUser.last_name].filter(Boolean).join(' ') || '').trim();
-        uiShowMain(name || serverUser.email, String(serverUser.driver_route_label || '').trim());
+        uiShowMain(name || serverUser.email);
         await refreshOrdersUi();
         return;
       }
@@ -264,7 +264,7 @@
       return;
     }
     const name = String(synced.name || [synced.first_name, synced.last_name].filter(Boolean).join(' ') || '').trim();
-    uiShowMain(name || synced.email, String(synced.driver_route_label || '').trim());
+    uiShowMain(name || synced.email);
     await refreshOrdersUi();
   }
 

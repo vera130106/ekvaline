@@ -84,9 +84,8 @@
 
       <section class="delivery-map-section">
         <div class="container">
-          <div class="delivery-section-head">
-            <h2>Зоны покрытия Оренбурга</h2>
-            <p>Наведите на зону, чтобы увидеть доступный интервал доставки</p>
+          <div class="delivery-section-head" id="deliveryCoverageHead">
+            <h2 id="deliveryCoverageHeading">Зоны покрытия Оренбурга</h2>
           </div>
 
           <div class="delivery-map-layout">
@@ -94,31 +93,7 @@
               <div class="delivery-leaflet-map" id="deliveryLeafletMap" aria-label="Карта зон доставки"></div>
             </div>
 
-            <div class="delivery-zone-list" id="deliveryZoneList">
-              <article class="delivery-zone-item is-active">
-                <div class="zone-dot"></div>
-                <div>
-                  <h3>Интервалы доставки</h3>
-                  <p>Утро: <strong>9:00-14:00</strong>, День: <strong>14:00-17:00</strong>, Вечер: <strong>17:00-21:00</strong></p>
-                </div>
-              </article>
-
-              <article class="delivery-zone-item">
-                <div class="zone-dot"></div>
-                <div>
-                  <h3>Доставка для организаций</h3>
-                  <p>Отдельное окно: <strong>9:00-17:00</strong></p>
-                </div>
-              </article>
-
-              <article class="delivery-zone-item">
-                <div class="zone-dot"></div>
-                <div>
-                  <h3>Прием заказов</h3>
-                  <p>Оператор принимает заявки: <strong>8:00-19:00</strong></p>
-                </div>
-              </article>
-            </div>
+            <div class="delivery-zone-list" id="deliveryCoverageCardsRoot"></div>
           </div>
         </div>
       </section>
@@ -154,63 +129,8 @@
             </div>
 
             <div class="delivery-faq-layout" id="deliveryFaqList">
-              <div class="delivery-faq-nav" role="tablist" aria-label="Вопросы по доставке">
-                <button
-                  type="button"
-                  class="delivery-faq-nav-btn is-active"
-                  data-faq-code="Заявки"
-                  data-faq-tag="Оператор"
-                  data-faq-question="Во сколько можно принять заказ сегодня?"
-                  data-faq-answer="Прием заявок оператором: с 8:00 до 19:00. Заказы после 19:00 переносим на ближайшее доступное окно."
-                >
-                  <span class="delivery-faq-nav-top">
-                    <span class="delivery-faq-nav-code">Заявки</span>
-                    <span class="delivery-faq-nav-tag">Оператор</span>
-                  </span>
-                  <span class="delivery-faq-nav-text">Во сколько можно принять заказ сегодня?</span>
-                </button>
-                <button
-                  type="button"
-                  class="delivery-faq-nav-btn"
-                  data-faq-code="Интервал"
-                  data-faq-tag="Квартира"
-                  data-faq-question="Какие интервалы доставки доступны для частных клиентов?"
-                  data-faq-answer="Для квартиры доступны окна 9:00-14:00, 14:00-17:00 и 17:00-21:00."
-                >
-                  <span class="delivery-faq-nav-top">
-                    <span class="delivery-faq-nav-code">Интервал</span>
-                    <span class="delivery-faq-nav-tag">Квартира</span>
-                  </span>
-                  <span class="delivery-faq-nav-text">Какие интервалы доставки доступны для частных клиентов?</span>
-                </button>
-                <button
-                  type="button"
-                  class="delivery-faq-nav-btn"
-                  data-faq-code="График"
-                  data-faq-tag="Офис"
-                  data-faq-question="Как оформить регулярную доставку воды для офиса?"
-                  data-faq-answer="Нужно связаться с оператором, выбрать удобные дни и интервал, после этого оператор сам проставит вам регулярные доставки."
-                >
-                  <span class="delivery-faq-nav-top">
-                    <span class="delivery-faq-nav-code">График</span>
-                    <span class="delivery-faq-nav-tag">Офис</span>
-                  </span>
-                  <span class="delivery-faq-nav-text">Как оформить регулярную доставку воды для офиса?</span>
-                </button>
-                <button
-                  type="button"
-                  class="delivery-faq-nav-btn"
-                  data-faq-code="Тара"
-                  data-faq-tag="Обмен"
-                  data-faq-question="Что делать с пустой тарой?"
-                  data-faq-answer="Курьер заберет пустые бутыли во время следующей доставки. Отдельно везти тару в офис не нужно."
-                >
-                  <span class="delivery-faq-nav-top">
-                    <span class="delivery-faq-nav-code">Тара</span>
-                    <span class="delivery-faq-nav-tag">Обмен</span>
-                  </span>
-                  <span class="delivery-faq-nav-text">Что делать с пустой тарой?</span>
-                </button>
+              <div class="delivery-faq-nav" role="tablist" id="deliveryFaqNav" aria-label="Вопросы по доставке">
+                <p class="delivery-faq-loading" id="deliveryFaqLoading">Загрузка вопросов…</p>
               </div>
 
               <article class="delivery-faq-panel">
@@ -274,6 +194,7 @@
     <script src="app-core.js"></script>
     <script src="api-client.js"></script>
     <script src="maps-runtime.js"></script>
-    <script src="script.js"></script>
+    <script src="/ekvaline-runtime.js"></script>
+    <script src="script.js?v=20260506fc"></script>
   </body>
 </html>

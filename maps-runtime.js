@@ -7,26 +7,71 @@
   function getConfig() {
     if (configCache) return Promise.resolve(configCache);
     if (!configPromise) {
-      configPromise = fetch(`${BASE}/api/public/maps-config`, { credentials: 'same-origin' })
+      configPromise = fetch(`${BASE}/api/public/maps-config`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
         .then((r) => (r.ok ? r.json() : {}))
         .then((c) => {
+          let subs = c.leafletSubdomains;
+          if (!Array.isArray(subs)) {
+            subs =
+              typeof subs === 'string'
+                ? subs.split(',').map((x) => x.trim()).filter(Boolean)
+                : ['a', 'b', 'c'];
+          }
+          if (!subs.length) subs = ['a', 'b', 'c'];
+          const tileUrl = typeof c.leafletTileUrl === 'string' ? c.leafletTileUrl.trim() : '';
           configCache = {
             provider: c.provider === 'yandex' ? 'yandex' : 'osm',
             yandexMapsKey: c.yandexMapsKey || null,
+            leafletTileUrl: tileUrl || null,
+            leafletAttribution: typeof c.leafletAttribution === 'string' ? c.leafletAttribution : '',
+            leafletSubdomains: subs,
           };
           return configCache;
         })
         .catch(() => {
-          configCache = { provider: 'osm', yandexMapsKey: null };
+          configCache = {
+            provider: 'osm',
+            yandexMapsKey: null,
+            leafletTileUrl: null,
+            leafletAttribution: '',
+            leafletSubdomains: ['a', 'b', 'c'],
+          };
           return configCache;
         });
     }
     return configPromise;
   }
 
-  /** Параллельная подгрузка конфигурации и скриптов карты после загрузки страницы оператора или корзины. */
+  /**
+   * Параллельная подгрузка: конфиг + сразу движок (Яндекс при наличии ключа или Leaflet).
+   * Вызывать пораньше со страниц с maps-runtime.js — окно загрузки окажется общим с действиями пользователя.
+   */
   function prefetch() {
-    void getConfig();
+    void getConfig()
+      .then((c) => {
+        if (c?.yandexMapsKey) return loadYmaps().catch(() => null);
+        return loadLeaflet().catch(() => null);
+      })
+      .catch(() => {});
+  }
+
+  /** Не дергаем CDN карт без потребности (меньше лишней загрузки на community/contacts и т.д.). */
+  function documentLikelyUsesMaps() {
+    try {
+      const raw = typeof location !== 'undefined' ? String(location.pathname || '') : '';
+      const path = raw.replace(/\\/g, '/');
+      const leaf = path.split('/').filter(Boolean).pop() || '';
+      if (/^(operator|delivery|catalog)\.html$/i.test(leaf)) return true;
+      if (document.getElementById('deliveryLeafletMap')) return true;
+      if (document.getElementById('checkoutMapRoot')) return true;
+      if (document.body?.classList?.contains?.('catalog-page')) return true;
+    } catch {
+      /**/
+    }
+    return false;
   }
 
   let leafletPromise = null;
@@ -42,21 +87,77 @@
         link.setAttribute('data-leaflet-css', 'true');
         document.head.appendChild(link);
       }
+      const resolveL = () => {
+        if (window.L) resolve(window.L);
+        else reject(new Error('leaflet_load_error'));
+      };
       const existing = document.querySelector('script[data-leaflet-js="true"]');
-      if (existing) {
-        existing.addEventListener('load', () => resolve(window.L));
-        existing.addEventListener('error', () => reject(new Error('leaflet_load_error')));
+      if (existing instanceof HTMLScriptElement) {
+        if (window.L) {
+          resolve(window.L);
+          return;
+        }
+        if (existing.dataset.ekLeafletLoaded === '1') {
+          resolveL();
+          return;
+        }
+        existing.addEventListener(
+          'load',
+          () => {
+            existing.dataset.ekLeafletLoaded = '1';
+            resolveL();
+          },
+          { once: true }
+        );
+        existing.addEventListener(
+          'error',
+          () => reject(new Error('leaflet_load_error')),
+          { once: true }
+        );
+        queueMicrotask(() => {
+          if (window.L && existing.dataset.ekLeafletLoaded !== '1') {
+            existing.dataset.ekLeafletLoaded = '1';
+            resolve(window.L);
+          }
+        });
         return;
       }
       const s = document.createElement('script');
       s.async = true;
       s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
       s.setAttribute('data-leaflet-js', 'true');
-      s.onload = () => resolve(window.L);
+      s.onload = () => {
+        s.dataset.ekLeafletLoaded = '1';
+        resolveL();
+      };
       s.onerror = () => reject(new Error('leaflet_load_error'));
       document.head.appendChild(s);
     });
     return leafletPromise;
+  }
+
+  /**
+   * Подложка: свои XYZ из /api/public/maps-config (LEAFLET_TILE_URL) или OSM по умолчанию.
+   * @param {boolean} attributionVisible — для клиента показывать подпись; у оператора можно скрыть как раньше.
+   */
+  function addLeafletRasterLayer(L, map, attributionVisible) {
+    return getConfig().then((cfg) => {
+      const useOwn = Boolean(cfg.leafletTileUrl);
+      const url = useOwn
+        ? cfg.leafletTileUrl
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+      let attribution = '';
+      if (useOwn) attribution = String(cfg.leafletAttribution || '');
+      else if (attributionVisible) attribution = '&copy; OpenStreetMap';
+      const layerOpts = { maxZoom: 19, attribution };
+      if (/\{s\}/.test(url)) {
+        layerOpts.subdomains =
+          Array.isArray(cfg.leafletSubdomains) && cfg.leafletSubdomains.length
+            ? cfg.leafletSubdomains
+            : ['a', 'b', 'c'];
+      }
+      L.tileLayer(url, layerOpts).addTo(map);
+    });
   }
 
   let ymapsPromise = null;
@@ -72,8 +173,29 @@
           window.ymaps.ready(() => resolve(window.ymaps));
           return;
         }
+        const existing = document.querySelector('script[data-ek-ymaps-api="true"]');
+        if (existing instanceof HTMLScriptElement) {
+          const done = () => {
+            window.ymaps.ready(() => resolve(window.ymaps));
+          };
+          existing.addEventListener(
+            'load',
+            () => done(),
+            { once: true }
+          );
+          existing.addEventListener(
+            'error',
+            () => reject(new Error('ymaps_load_error')),
+            { once: true }
+          );
+          queueMicrotask(() => {
+            if (window.ymaps && window.ymaps.Map) done();
+          });
+          return;
+        }
         const s = document.createElement('script');
         s.async = true;
+        s.setAttribute('data-ek-ymaps-api', 'true');
         s.src = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(c.yandexMapsKey)}&lang=ru_RU`;
         s.onload = () => {
           window.ymaps.ready(() => resolve(window.ymaps));
@@ -100,11 +222,7 @@
       }
       return loadLeaflet().then((L) => {
         const map = L.map(container, { zoomControl: true, scrollWheelZoom: true }).setView(centerLatLng, zoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '&copy; OpenStreetMap',
-        }).addTo(map);
-        return { engine: 'leaflet', map };
+        return addLeafletRasterLayer(L, map, true).then(() => ({ engine: 'leaflet', map }));
       });
     });
   }
@@ -189,10 +307,6 @@
       return loadLeaflet().then((L) => {
         container.innerHTML = '';
         const map = L.map(container).setView(centerLatLng, zoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '&copy; OpenStreetMap',
-        }).addTo(map);
         let marker = null;
 
         function setMarker(lat, lon) {
@@ -217,7 +331,7 @@
           }
         }
 
-        return {
+        return addLeafletRasterLayer(L, map, true).then(() => ({
           engine: 'leaflet',
           map,
           leafLet: L,
@@ -232,7 +346,7 @@
               /**/
             }
           },
-        };
+        }));
       });
     });
   }
@@ -376,10 +490,6 @@
       return loadLeaflet().then((L) => {
         container.innerHTML = '';
         const map = L.map(container, { zoomControl: true, attributionControl: false }).setView(centerLatLng, zoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '',
-        }).addTo(map);
 
         if (!map._opxPopupActionsBound && popupRootHandler) {
           map._opxPopupActionsBound = true;
@@ -402,7 +512,8 @@
         }
 
         const layerBundle = attachOrdersLayer('leaflet', map, () => map.closePopup());
-        return {
+        /** Оператор: без подписи для OSM как раньше; для своих тайлов — текст из LEAFLET_TILE_ATTRIBUTION (часто обязателен). */
+        return addLeafletRasterLayer(L, map, false).then(() => ({
           engine: 'leaflet',
           map,
           invalidateSize: () => map.invalidateSize(),
@@ -414,7 +525,7 @@
               /**/
             }
           },
-        };
+        }));
       });
     });
   }
@@ -433,4 +544,15 @@
       return Boolean(c.yandexMapsKey);
     },
   };
+
+  if (typeof document !== 'undefined') {
+    const startMapsWarmup = () => {
+      if (documentLikelyUsesMaps()) prefetch();
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startMapsWarmup, { once: true });
+    } else {
+      startMapsWarmup();
+    }
+  }
 })();

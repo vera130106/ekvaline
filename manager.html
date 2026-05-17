@@ -53,7 +53,9 @@
 
         <article class="manager-card manager-launch-card">
           <h2>Опрос</h2>
-          <p>Создать и настроить опрос в блоге.</p>
+          <p>
+            Нажмите «Открыть», заполните форму и «Сохранить опрос». Чтобы опрос не показывался на блоге — в том же окне «Скрыть опрос».
+          </p>
           <button type="button" class="manager-btn is-green" data-open-form-modal="managerPollFormModal">Открыть</button>
         </article>
       </section>
@@ -61,6 +63,7 @@
       <section class="manager-card manager-wide">
         <h2>Все посты (архив)</h2>
         <p class="manager-note">В ленте клиента видно максимум 5 последних видимых постов. Остальные остаются здесь и уходят вниз. Скрытые посты затемнены.</p>
+        <div id="managerBlogStats" class="manager-note manager-blog-stats"></div>
         <div class="manager-posts-carousel">
           <button type="button" class="manager-carousel-arrow" id="managerPostsPrevBtn" aria-label="Прокрутить влево">‹</button>
           <div class="manager-posts-viewport" id="managerPostsViewport">
@@ -190,6 +193,9 @@
       <div class="manager-modal-card">
         <button type="button" class="manager-modal-close" data-close-form-modal="managerPollFormModal">×</button>
         <h3 class="manager-modal-title">Опрос</h3>
+        <p class="manager-note">
+          Заполните поля сверху вниз. Ответ — по одному полю; нужна ещё строка — «Добавить вариант». Сохранить — «Сохранить опрос», убрать опрос с блога — «Скрыть опрос».
+        </p>
         <form id="managerPollForm" class="manager-form manager-modal-body" novalidate>
           <label>Заголовок (до 40)
             <input type="text" name="title" maxlength="40" placeholder="Опрос дня" />

@@ -1,4 +1,17 @@
 (function initCabinetPage() {
+  try {
+    const raw = window.localStorage.getItem('ekvaline_current_user');
+    if (raw) {
+      const cu = JSON.parse(raw);
+      if (String(cu?.role || '').toLowerCase() === 'driver') {
+        window.location.replace(new URL('driver.html', window.location.href).href);
+        return;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   const CURRENT_USER_KEY = 'ekvaline_current_user';
 
   const userMeta = document.getElementById('cabinetFullUserMeta');
@@ -187,6 +200,9 @@
     }
     currentUser = me.data.user;
     writeCurrentUser(currentUser);
+    if (typeof window.__ekvalineUpdateHeaderAuth === 'function') {
+      window.__ekvalineUpdateHeaderAuth();
+    }
     renderProfile(currentUser);
     await reloadOrders();
   }

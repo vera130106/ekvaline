@@ -144,14 +144,12 @@
               <span class="about-step-btn-index">01</span>
               <span class="about-step-btn-title">Обработка бутылки</span>
             </button>
-            <!-- остальные кнопки этапов -->
           </div>
           <div class="about-step-panels">
             <article class="about-step-panel is-active" data-step-panel="wash">
               <h3>Обработка бутылки</h3>
               <p>Каждую бутыль принимаем, осматриваем и промываем…</p>
             </article>
-            <!-- остальные панели -->
           </div>
         </div>
       </div>
@@ -1050,7 +1048,6 @@ function renderHydration() {
   valueEl.textContent = normalized.toFixed(1);
   const percent = Math.min(100, Math.round((normalized / DAILY_TARGET) * 100));
   fillEl.style.width = `${percent}%`;
-  /* текст лимита и класс при превышении нормы */
 }
 ```
 
