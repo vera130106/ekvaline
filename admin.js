@@ -29,7 +29,22 @@
 
   const statsGridEl = document.getElementById('adminStatsGrid');
   const statsOrdersEl = document.getElementById('adminStatsOrders');
+  const statsZonesEl = document.getElementById('adminStatsZones');
+  const statsPaymentEl = document.getElementById('adminStatsPayment');
+  const statsDriversEl = document.getElementById('adminStatsDrivers');
   const statsUsersEl = document.getElementById('adminStatsUsers');
+  const statsFromEl = document.getElementById('adminStatsFrom');
+  const statsToEl = document.getElementById('adminStatsTo');
+  const statsBuildBtn = document.getElementById('adminStatsBuildBtn');
+  const statsExcelBtn = document.getElementById('adminStatsExcelBtn');
+  const statsPdfBtn = document.getElementById('adminStatsPdfBtn');
+  const statsPeriodMetaEl = document.getElementById('adminStatsPeriodMeta');
+  const statsMsgEl = document.getElementById('adminStatsMsg');
+  const statsReportRootEl = document.getElementById('adminStatsReportRoot');
+  const statsPrintEl = document.getElementById('adminStatsReportPrint');
+
+  /** Последний успешно сформированный отчёт (для экспорта). */
+  let lastStatsReport = null;
 
   const editModal = document.getElementById('adminProductEditModal');
   const editForm = document.getElementById('adminProductEditForm');
@@ -78,7 +93,11 @@
   const adminAboutCertEditImageFile = document.getElementById('adminAboutCertEditImageFile');
   const adminAboutCertAddImageFile = document.getElementById('adminAboutCertAddImageFile');
 
+  const adminFaqBlockSaveBtn = document.getElementById('adminFaqBlockSave');
+  const adminAboutCertsBlockSaveBtn = document.getElementById('adminAboutCertsBlockSave');
   const adminCoverageCardsNav = document.getElementById('adminCoverageCardsNav');
+  const adminCoverageBlockSaveBtn = document.getElementById('adminCoverageBlockSave');
+  const adminDeliveryCoverageTitle = document.getElementById('adminDeliveryCoverageTitle');
   const adminCoverageCardAddBtn = document.getElementById('adminCoverageCardAdd');
   const adminCoverageCardEditModal = document.getElementById('adminCoverageCardEditModal');
   const adminCoverageCardEditNum = document.getElementById('adminCoverageCardEditNum');
@@ -186,6 +205,222 @@
     cancelled: 'Отменён',
   };
 
+  const PAYMENT_METHOD_LABELS = {
+    cash: 'Наличные',
+    card: 'Карта',
+    noncash: 'Безналичный',
+    settlement: 'Расчётный счёт',
+    invoice: 'Расчётный счёт',
+  };
+
+  function isoDateLocal(d) {
+    const x = d instanceof Date ? d : new Date();
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, '0');
+    const day = String(x.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function shiftIsoDateLocal(iso, deltaDays) {
+    const parts = String(iso || '')
+      .trim()
+      .split('-')
+      .map((s) => Number(s));
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return isoDateLocal(new Date());
+    const base = new Date(parts[0], parts[1] - 1, parts[2]);
+    base.setDate(base.getDate() + deltaDays);
+    return isoDateLocal(base);
+  }
+
+  function formatMoneyRub(n) {
+    const v = Number(n) || 0;
+    return new Intl.NumberFormat('ru-RU', {
+      minimumFractionDigits: v % 1 ? 2 : 0,
+      maximumFractionDigits: 2,
+    }).format(v);
+  }
+
+  function ruDateFromIso(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return String(iso || '—');
+    return `${m[3]}.${m[2]}.${m[1]}`;
+  }
+
+  function paymentLabel(raw) {
+    const k = String(raw || '')
+      .trim()
+      .toLowerCase();
+    if (PAYMENT_METHOD_LABELS[k]) return PAYMENT_METHOD_LABELS[k];
+    const s = String(raw || '').trim();
+    return s || 'Не указан';
+  }
+
+  function formatStatsPeriodLabel(period) {
+    const from = period?.from ? ruDateFromIso(period.from) : null;
+    const to = period?.to ? ruDateFromIso(period.to) : null;
+    if (from && to) return `Период: ${from} — ${to} (по дате доставки заказа)`;
+    if (from) return `Период: с ${from}`;
+    if (to) return `Период: по ${to}`;
+    return 'Период: всё время (все заказы в базе)';
+  }
+
+  function showStatsMsg(text, ok) {
+    if (!(statsMsgEl instanceof HTMLElement)) return;
+    statsMsgEl.textContent = String(text || '');
+    statsMsgEl.classList.toggle('is-ok', Boolean(ok));
+    statsMsgEl.classList.toggle('is-error', !ok && Boolean(text));
+  }
+
+  function readStatsPeriodFromForm() {
+    const from = statsFromEl instanceof HTMLInputElement ? statsFromEl.value.trim() : '';
+    const to = statsToEl instanceof HTMLInputElement ? statsToEl.value.trim() : '';
+    return { from: from || null, to: to || null };
+  }
+
+  /** Ограничение календаря: не позже сегодня (локальная дата). */
+  function syncStatsDateInputLimits() {
+    const today = isoDateLocal(new Date());
+    [statsFromEl, statsToEl].forEach((el) => {
+      if (!(el instanceof HTMLInputElement)) return;
+      el.max = today;
+      const v = el.value.trim();
+      if (v && v > today) el.value = today;
+    });
+  }
+
+  /** Проверка периода перед запросом отчёта. */
+  function validateStatsPeriodForReport() {
+    syncStatsDateInputLimits();
+    const today = isoDateLocal(new Date());
+    const { from, to } = readStatsPeriodFromForm();
+    if (from && from > today) {
+      showStatsMsg('Дата «с» не может быть позже сегодняшнего дня.', false);
+      return false;
+    }
+    if (to && to > today) {
+      showStatsMsg('Дата «по» не может быть в будущем.', false);
+      return false;
+    }
+    if (from && to && from > to) {
+      showStatsMsg('Дата «с» не может быть позже даты «по».', false);
+      return false;
+    }
+    return true;
+  }
+
+  function applyStatsPreset(kind) {
+    const today = isoDateLocal(new Date());
+    if (!(statsFromEl instanceof HTMLInputElement) || !(statsToEl instanceof HTMLInputElement)) return;
+    if (kind === 'all') {
+      statsFromEl.value = '';
+      statsToEl.value = '';
+      syncStatsDateInputLimits();
+      return;
+    }
+    if (kind === 'month') {
+      const d = new Date();
+      const first = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      statsFromEl.value = first;
+      statsToEl.value = today;
+      syncStatsDateInputLimits();
+      return;
+    }
+    const days = kind === '7' ? 7 : 30;
+    statsFromEl.value = shiftIsoDateLocal(today, -(days - 1));
+    statsToEl.value = today;
+    syncStatsDateInputLimits();
+  }
+
+  function statsBarRow(label, count, sum, maxCount) {
+    const c = Number(count) || 0;
+    const pct = maxCount > 0 ? Math.round((c / maxCount) * 100) : 0;
+    return `<tr>
+      <td>${escHtml(label)}</td>
+      <td class="admin-stats-num">${c}</td>
+      <td class="admin-stats-num">${formatMoneyRub(sum)} ₽</td>
+      <td class="admin-stats-bar-cell">
+        <div class="admin-stats-bar" style="width:${pct}%" title="${pct}%"></div>
+      </td>
+    </tr>`;
+  }
+
+  function buildStatsBreakdownTable(rows, labelHeader, labelFn) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return '<p class="admin-empty-note">Нет данных за выбранный период.</p>';
+    const maxC = Math.max(...list.map((x) => Number(x.count) || 0), 1);
+    const body = list
+      .map((x) => {
+        const label = labelFn ? labelFn(x) : String(x.label || x.status || '—');
+        return statsBarRow(label, x.count, x.sum, maxC);
+      })
+      .join('');
+    return `<div class="admin-stats-table-wrap"><table class="admin-stats-table">
+      <thead><tr>
+        <th>${escHtml(labelHeader)}</th>
+        <th class="admin-stats-num">Заказов</th>
+        <th class="admin-stats-num">Сумма</th>
+        <th>Доля</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>`;
+  }
+
+  function buildStatsUsersTable(usersByRole) {
+    const ur = usersByRole || {};
+    const keys = Object.keys(ur).sort((a, b) => a.localeCompare(b, 'ru'));
+    if (!keys.length) return '<p class="admin-empty-note">Нет данных.</p>';
+    const maxC = Math.max(...keys.map((k) => Number(ur[k]) || 0), 1);
+    const body = keys
+      .map((r) =>
+        statsBarRow(
+          roleLabel(r) + (r === 'client' ? ' (регистрация)' : ''),
+          ur[r],
+          0,
+          maxC
+        )
+      )
+      .join('');
+    return `<div class="admin-stats-table-wrap"><table class="admin-stats-table">
+      <thead><tr><th>Роль</th><th class="admin-stats-num">Учёток</th><th class="admin-stats-num">—</th><th>Доля</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>`;
+  }
+
+  function buildStatsPrintHtml(report) {
+    const period = formatStatsPeriodLabel(report.period);
+    const s = report.summary || {};
+    const mkTable = (title, rows, labelFn) => {
+      const list = Array.isArray(rows) ? rows : [];
+      if (!list.length) return `<h3>${escHtml(title)}</h3><p>Нет данных.</p>`;
+      const tr = list
+        .map((x) => {
+          const label = labelFn ? labelFn(x) : x.label || x.status;
+          return `<tr><td>${escHtml(label)}</td><td>${Number(x.count) || 0}</td><td>${formatMoneyRub(x.sum)} ₽</td></tr>`;
+        })
+        .join('');
+      return `<h3>${escHtml(title)}</h3><table><thead><tr><th>Показатель</th><th>Заказов</th><th>Сумма</th></tr></thead><tbody>${tr}</tbody></table>`;
+    };
+    return `<div class="admin-stats-print-inner">
+      <h1>ЭкваЛайн — отчёт администратора</h1>
+      <p>${escHtml(period)}</p>
+      <p>Сформировано: ${escHtml(new Date().toLocaleString('ru-RU'))}</p>
+      <h3>Сводка</h3>
+      <table>
+        <tr><td>Заказов в периоде</td><td>${Number(s.ordersTotal) || 0}</td></tr>
+        <tr><td>Сумма заказов</td><td>${formatMoneyRub(s.ordersSum)} ₽</td></tr>
+        <tr><td>Доставлено (шт.)</td><td>${Number(s.deliveredCount) || 0}</td></tr>
+        <tr><td>Сумма доставленных</td><td>${formatMoneyRub(s.deliveredSum)} ₽</td></tr>
+        <tr><td>Отменено</td><td>${Number(s.cancelledCount) || 0}</td></tr>
+        <tr><td>Товаров в базе / на витрине</td><td>${Number(report.productsTotal) || 0} / ${Number(report.productsVisible) || 0}</td></tr>
+      </table>
+      ${mkTable('Заказы по статусам', report.ordersByStatus, (x) => ORDER_STATUS_LABELS[x.status] || x.status)}
+      ${mkTable('По зонам доставки', report.ordersByZone)}
+      ${mkTable('По способу оплаты', report.ordersByPayment, (x) => paymentLabel(x.label))}
+      ${mkTable('По экспедиторам', report.ordersByDriver)}
+      ${mkTable('Учётные записи по ролям', Object.keys(report.usersByRole || {}).map((k) => ({ label: roleLabel(k), count: report.usersByRole[k], sum: 0 })))}
+    </div>`;
+  }
+
   let users = [];
   let products = [];
   let categories = [];
@@ -195,6 +430,10 @@
   let faqEditModalIdx = -1;
   /** Опросы для блога (sitePolls): редактирование у менеджера; при сохранении настроек админом уходит копия с сервера. */
   let pollsDraft = [];
+  /** Настройки с сервера загружены — без этого полное сохранение не отправляем (не затираем опросы пустым массивом). */
+  let settingsHydrated = false;
+  const DEFAULT_HIDDEN_WORKLINE = 'Пн–Сб 8:00–21:00, Вс 9:00–18:00';
+  const DEFAULT_HIDDEN_SLOTS_TEXT = '09:00 – 14:00\n14:00 – 17:00\n17:00 – 21:00';
   /** Сертификаты блока «О компании». */
   let aboutCertsDraft = [];
   /** Индекс открытого модального редактирования сертификата; −1 если окно закрыто. */
@@ -328,6 +567,233 @@
     el.style.color = ok ? '#177245' : '#b71c1c';
   }
 
+  const PRODUCT_LIMITS = {
+    nameMin: 2,
+    nameMax: 180,
+    descMax: 400,
+    priceMax: 1_000_000,
+    volumeMax: 1000,
+    sortMax: 99999,
+  };
+
+  function productCatalogMode(p) {
+    if (Number(p.hidden)) return 'hidden';
+    if (Number(p.preorder)) return 'preorder';
+    return 'visible';
+  }
+
+  function productStatusLabel(p) {
+    const mode = productCatalogMode(p);
+    if (mode === 'hidden') return 'Скрыт';
+    if (mode === 'preorder') return 'Под заказ';
+    return 'В каталоге';
+  }
+
+  function productStatusClass(p) {
+    const mode = productCatalogMode(p);
+    if (mode === 'hidden') return 'admin-product-hidden';
+    if (mode === 'preorder') return 'admin-product-preorder';
+    return 'admin-product-visible';
+  }
+
+  function formatAdminProductPrice(p) {
+    const price = Math.round(Number(p.price) || 0);
+    if (Number(p.preorder) && price <= 0) return 'Уточнять у оператора';
+    return `${price.toLocaleString('ru-RU')} ₽`;
+  }
+
+  function adminCatalogCategorySlug(categoryName) {
+    const n = String(categoryName || '').toLowerCase();
+    if (n.includes('вода')) return 'water';
+    if (n.includes('аксессуар')) return 'accessories';
+    if (n.includes('оборуд')) return 'equipment';
+    return 'other';
+  }
+
+  function adminCatalogImageForProduct(product, index) {
+    const photo = String(product?.photo_path || '').trim();
+    if (photo && !/^javascript:/i.test(photo)) return photo;
+    const name = String(product?.name || '').toLowerCase();
+    if (/vatten|l\s*45/.test(name)) return 'assets/vatten-l45-ne.png';
+    if (/ael|47c/.test(name)) return 'assets/ael-lk-ael-47c.png';
+    if (/электрическ.*помп/.test(name)) return 'assets/electric-pump.png';
+    if (/помпа механическ/.test(name)) return 'assets/mechanical-pump.png';
+    if (/тара|пуст/.test(name)) return 'assets/empty-bottle.png';
+    if (/стакан/.test(name)) return 'assets/preorder-cups.png';
+    if (/18\.?9|19\s*л/.test(name)) return 'assets/product-18-9-white.png';
+    if (/кулер/.test(name)) return 'assets/vatten-l45-ne.png';
+    return 'assets/one-bottle.png';
+  }
+
+  /** HTML карточки товара как в публичном каталоге (для превью в админке). */
+  function adminCatalogCardHtml(product, index) {
+    const cat = adminCatalogCategorySlug(product.category_name);
+    const bg = ['image-bg-a', 'image-bg-b', 'image-bg-c', 'image-bg-d'][index % 4];
+    const sizes = ['size-md', 'size-lg', 'size-sm', 'size-md'];
+    const img = adminCatalogImageForProduct(product, index);
+    const name = String(product.name || 'Товар');
+    const desc = String(product.description || '').trim();
+    const vol =
+      product.volume_liters != null && product.volume_liters !== ''
+        ? ` · ${String(product.volume_liters).replace(/\.?0+$/, '')} л`
+        : '';
+    const typeLabel = `${String(product.category_name || 'Товар').toUpperCase()}${vol}`;
+    const preorder = Number(product.preorder) === 1;
+    const typeExtra = preorder ? ' · <span class="preorder-mark">ПОД ЗАКАЗ</span>' : '';
+    const hidden = Number(product.hidden) === 1;
+    const statusClass = productStatusClass(product);
+    const statusLabel = productStatusLabel(product);
+
+    return `<article class="full-catalog-card admin-catalog-preview-card${hidden ? ' is-admin-hidden-product' : ''}" data-category="${escHtml(cat)}" data-product-id="${escHtml(product.id)}">
+    <div class="full-card-image-wrap ${bg}">
+      <img src="${escHtml(img)}" alt="${escHtml(name)}" class="full-card-image ${sizes[index % sizes.length]}" loading="lazy" />
+    </div>
+    <p class="full-card-type">${escHtml(typeLabel)}${typeExtra}</p>
+    <h3>${escHtml(name)}</h3>
+    ${desc ? `<p class="full-card-desc">${escHtml(desc)}</p>` : ''}
+    <div class="full-card-bottom admin-catalog-preview-bottom">
+      <p class="full-card-price">${escHtml(formatAdminProductPrice(product))}</p>
+      <div class="admin-catalog-preview-actions">
+        <span class="admin-catalog-preview-status ${statusClass}">${escHtml(statusLabel)}</span>
+        <button type="button" data-edit-product="${escHtml(product.id)}" class="ghost-btn admin-btn-edit">Изменить</button>
+        <button type="button" data-delete-product="${escHtml(product.id)}" class="ghost-btn">Удалить</button>
+      </div>
+    </div>
+  </article>`;
+  }
+
+  function visibilityFromCatalogMode(mode) {
+    if (mode === 'hidden') return { hidden: 1, preorder: 0 };
+    if (mode === 'preorder') return { hidden: 0, preorder: 1 };
+    return { hidden: 0, preorder: 0 };
+  }
+
+  /** Те же правила, что passwordSchema на сервере. */
+  function validateStaffPasswordClient(password) {
+    const p = String(password || '');
+    if (p.length < 8) return 'Пароль: минимум 8 символов.';
+    if (p.length > 128) return 'Пароль: не более 128 символов.';
+    if (!/[A-ZА-ЯЁ]/.test(p)) return 'Пароль: нужна заглавная буква.';
+    if (!/[a-zа-яё]/.test(p)) return 'Пароль: нужна строчная буква.';
+    if (!/\d/.test(p)) return 'Пароль: нужна цифра.';
+    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(p)) return 'Пароль: нужен спецсимвол (!@#$…).';
+    return null;
+  }
+
+  function localizeApiError(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return 'Не удалось выполнить операцию.';
+    if (/[а-яё]/i.test(s)) return s;
+    if (/safe number/i.test(s)) return 'Число слишком большое. Для цены максимум 1 000 000 ₽.';
+    if (/must be a number/i.test(s)) return 'Укажите корректное число.';
+    if (/is required/i.test(s)) return 'Заполните обязательные поля.';
+    return 'Ошибка проверки данных. Проверьте все поля формы.';
+  }
+
+  function parseProductNumericField(raw, { label, min = 0, max, required, integer }) {
+    const s = String(raw ?? '')
+      .trim()
+      .replace(/\s/g, '')
+      .replace(',', '.');
+    if (!s) {
+      if (required) return { ok: false, error: `${label}: укажите значение.` };
+      return { ok: true, value: null };
+    }
+    if (s.length > 15) return { ok: false, error: `${label}: слишком большое число.` };
+    if (!/^-?\d+(\.\d+)?$/.test(s)) return { ok: false, error: `${label}: только цифры.` };
+    const n = integer ? Number.parseInt(s, 10) : Number(s);
+    if (!Number.isFinite(n)) return { ok: false, error: `${label}: должно быть числом.` };
+    if (integer && !Number.isInteger(n)) return { ok: false, error: `${label}: укажите целое число.` };
+    if (n < min) return { ok: false, error: `${label}: не меньше ${min.toLocaleString('ru-RU')}.` };
+    if (n > max) return { ok: false, error: `${label}: не больше ${max.toLocaleString('ru-RU')}.` };
+    return { ok: true, value: n };
+  }
+
+  function readProductPayloadFromForm(form) {
+    if (!(form instanceof HTMLFormElement)) return { ok: false, error: 'Форма товара не найдена.' };
+
+    const priceParsed = parseProductNumericField(form.elements.namedItem('price')?.value, {
+      label: 'Цена',
+      min: 0,
+      max: PRODUCT_LIMITS.priceMax,
+      required: true,
+      integer: true,
+    });
+    if (!priceParsed.ok) return priceParsed;
+
+    const volParsed = parseProductNumericField(form.elements.namedItem('volume_liters')?.value, {
+      label: 'Объём',
+      min: 0,
+      max: PRODUCT_LIMITS.volumeMax,
+      required: false,
+      integer: false,
+    });
+    if (!volParsed.ok) return volParsed;
+
+    const sortParsed = parseProductNumericField(form.elements.namedItem('sort_order')?.value, {
+      label: 'Сортировка',
+      min: 0,
+      max: PRODUCT_LIMITS.sortMax,
+      required: false,
+      integer: true,
+    });
+    if (!sortParsed.ok) return sortParsed;
+
+    const category_id = Number(form.elements.namedItem('category_id')?.value || 0);
+    if (!Number.isInteger(category_id) || category_id <= 0) {
+      return { ok: false, error: 'Выберите категорию.' };
+    }
+
+    const name = String(form.elements.namedItem('name')?.value || '').trim();
+    if (name.length < PRODUCT_LIMITS.nameMin) return { ok: false, error: 'Название: минимум 2 символа.' };
+    if (name.length > PRODUCT_LIMITS.nameMax) {
+      return { ok: false, error: `Название: не более ${PRODUCT_LIMITS.nameMax} символов.` };
+    }
+
+    const description = String(form.elements.namedItem('description')?.value || '').trim();
+    if (description.length > PRODUCT_LIMITS.descMax) {
+      return { ok: false, error: `Описание: не более ${PRODUCT_LIMITS.descMax} символов.` };
+    }
+
+    const catalogMode = String(form.elements.namedItem('catalog_mode')?.value || 'visible');
+    const { hidden, preorder } = visibilityFromCatalogMode(catalogMode);
+
+    return {
+      ok: true,
+      payload: {
+        category_id,
+        name,
+        description,
+        price: priceParsed.value,
+        sort_order: sortParsed.value ?? 0,
+        hidden,
+        preorder,
+        volume_liters: volParsed.value,
+        stock: 1_000_000,
+      },
+    };
+  }
+
+  function bindProductNumericInputs(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const rules = [
+      { name: 'price', maxLen: 7, maxVal: PRODUCT_LIMITS.priceMax },
+      { name: 'volume_liters', maxLen: 8, maxVal: PRODUCT_LIMITS.volumeMax },
+      { name: 'sort_order', maxLen: 5, maxVal: PRODUCT_LIMITS.sortMax },
+    ];
+    rules.forEach(({ name, maxLen, maxVal }) => {
+      const el = form.elements.namedItem(name);
+      if (!(el instanceof HTMLInputElement)) return;
+      el.addEventListener('input', () => {
+        let v = el.value.replace(/[^\d.,]/g, '');
+        if (v.length > maxLen) v = v.slice(0, maxLen);
+        const n = Number(v.replace(',', '.'));
+        if (Number.isFinite(n) && n > maxVal) v = String(maxVal);
+        if (el.value !== v) el.value = v;
+      });
+    });
+  }
+
   let adminConfirmResolve = null;
 
   function closeAdminConfirmModal(result) {
@@ -388,15 +854,6 @@
     if (adminAppRoot instanceof HTMLElement) adminAppRoot.hidden = false;
   }
 
-  function readLocalUser() {
-    try {
-      const raw = localStorage.getItem(CURRENT_USER_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }
-
   async function ensureAdmin() {
     if (!api) {
       redirectUnauthorizedToHome();
@@ -404,15 +861,6 @@
     }
     const me = await api.json('/api/auth/me');
     if (me.ok && me.data?.user?.role === 'admin') return true;
-
-    const localUser = readLocalUser();
-    if (localUser?.role === 'admin' && String(localUser.email || '').toLowerCase() === 'adminekva@mail.ru') {
-      const login = await api.json('/api/auth/login', {
-        method: 'POST',
-        body: { credential: 'adminekva@mail.ru', password: 'AdminEkva2026!' },
-      });
-      if (login.ok && login.data?.user?.role === 'admin') return true;
-    }
 
     if (me.status === 0 || me.status >= 500) {
       redirectUnauthorizedToHome();
@@ -490,64 +938,266 @@
 
   function renderProducts() {
     if (!(productsList instanceof HTMLElement)) return;
-    productsList.innerHTML = products
-      .map(
-        (p) =>
-          `<article class="admin-product-card">
-      <div class="admin-product-head">
-        <strong class="admin-product-title">${escHtml(p.name)}</strong>
-        <span class="admin-product-category">${escHtml(p.category_name || '')}</span>
-      </div>
-      <div class="admin-product-metrics">
-        <span>${Number(p.price || 0)} ₽</span>
-        <span>Остаток: ${Number(p.stock || 0)}${p.volume_liters != null && p.volume_liters !== '' ? ` · ${escHtml(String(p.volume_liters))} л` : ''}</span>
-        <span class="${Number(p.hidden) ? 'admin-product-hidden' : 'admin-product-visible'}">${Number(p.hidden) ? 'Скрыт' : 'В каталоге'}</span>
-      </div>
-      <div class="admin-product-actions">
-        <button type="button" data-edit-product="${p.id}" class="ghost-btn admin-btn-edit">Изменить</button>
-        <button type="button" data-delete-product="${p.id}" class="ghost-btn">Удалить</button>
-      </div>
-    </article>`
-      )
-      .join('');
+    if (!products.length) {
+      productsList.innerHTML = '<p class="admin-empty-note">Товаров пока нет. Добавьте позицию формой выше.</p>';
+      return;
+    }
+    productsList.innerHTML = products.map((p, i) => adminCatalogCardHtml(p, i)).join('');
   }
 
-  function renderStats(stats) {
-    if (!stats) return;
-
-    const totalStaff = ['admin', 'manager', 'operator', 'driver'].reduce((s, k) => s + Number(stats.usersByRole[k] || 0), 0);
-    const totalClients = Number(stats.usersByRole.client || 0);
+  function renderStats(report) {
+    if (!report) return;
+    const s = report.summary || {};
+    const totalStaff = ['admin', 'manager', 'operator', 'driver'].reduce(
+      (acc, k) => acc + Number(report.usersByRole?.[k] || 0),
+      0
+    );
+    const totalClients = Number(report.usersByRole?.client || 0);
 
     if (statsGridEl instanceof HTMLElement) {
       statsGridEl.innerHTML = `
-        <article class="admin-stat-card"><span class="admin-stat-k">Заказов всего</span><strong class="admin-stat-v">${escHtml(String(stats.ordersTotal))}</strong></article>
-        <article class="admin-stat-card"><span class="admin-stat-k">Товаров в базе</span><strong class="admin-stat-v">${escHtml(String(stats.productsTotal))}</strong></article>
-        <article class="admin-stat-card"><span class="admin-stat-k">На витрине</span><strong class="admin-stat-v">${escHtml(String(stats.productsVisible))}</strong></article>
-        <article class="admin-stat-card"><span class="admin-stat-k">Сотрудников (по роли)</span><strong class="admin-stat-v">${escHtml(String(totalStaff))}</strong></article>
-        <article class="admin-stat-card"><span class="admin-stat-k">Клиентов (учёт записей)</span><strong class="admin-stat-v">${escHtml(String(totalClients))}</strong></article>
+        <article class="admin-stat-card admin-stat-card--accent"><span class="admin-stat-k">Заказов в периоде</span><strong class="admin-stat-v">${escHtml(String(s.ordersTotal ?? 0))}</strong></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Сумма заказов</span><strong class="admin-stat-v">${escHtml(formatMoneyRub(s.ordersSum))} ₽</strong></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Доставлено</span><strong class="admin-stat-v">${escHtml(String(s.deliveredCount ?? 0))}</strong><small class="admin-stat-sub">${escHtml(formatMoneyRub(s.deliveredSum))} ₽</small></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Отменено</span><strong class="admin-stat-v">${escHtml(String(s.cancelledCount ?? 0))}</strong></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Товаров / витрина</span><strong class="admin-stat-v">${escHtml(String(report.productsTotal ?? 0))} / ${escHtml(String(report.productsVisible ?? 0))}</strong></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Сотрудников</span><strong class="admin-stat-v">${escHtml(String(totalStaff))}</strong></article>
+        <article class="admin-stat-card"><span class="admin-stat-k">Клиентов</span><strong class="admin-stat-v">${escHtml(String(totalClients))}</strong></article>
       `;
     }
 
     if (statsOrdersEl instanceof HTMLElement) {
-      const rows = (stats.ordersByStatus || []).map(
-        (x) =>
-          `<div class="admin-stat-row"><span>${escHtml(ORDER_STATUS_LABELS[x.status] || x.status)}</span><strong>${Number(x.count) || 0}</strong></div>`
+      statsOrdersEl.innerHTML = buildStatsBreakdownTable(report.ordersByStatus, 'Статус', (x) =>
+        ORDER_STATUS_LABELS[x.status] || x.status || x.label
       );
-      statsOrdersEl.innerHTML = rows.length ? rows.join('') : '<p class="admin-empty-note">Нет данных.</p>';
+    }
+    if (statsZonesEl instanceof HTMLElement) {
+      statsZonesEl.innerHTML = buildStatsBreakdownTable(report.ordersByZone, 'Зона');
+    }
+    if (statsPaymentEl instanceof HTMLElement) {
+      statsPaymentEl.innerHTML = buildStatsBreakdownTable(report.ordersByPayment, 'Оплата', (x) =>
+        paymentLabel(x.label)
+      );
+    }
+    if (statsDriversEl instanceof HTMLElement) {
+      statsDriversEl.innerHTML = buildStatsBreakdownTable(report.ordersByDriver, 'Экспедитор');
+    }
+    if (statsUsersEl instanceof HTMLElement) {
+      statsUsersEl.innerHTML = buildStatsUsersTable(report.usersByRole);
     }
 
-    if (statsUsersEl instanceof HTMLElement) {
-      const ur = stats.usersByRole || {};
-      const keys = Object.keys(ur).sort((a, b) => a.localeCompare(b));
-      statsUsersEl.innerHTML = keys
-        .map(
-          (r) =>
-            `<div class="admin-stat-row"><span>${escHtml(roleLabel(r))}${r === 'client' ? ' (регистрация)' : ''}</span><strong>${Number(ur[r] ?? 0)}</strong></div>`
-        )
-        .join('');
+    if (statsPeriodMetaEl instanceof HTMLElement) {
+      statsPeriodMetaEl.textContent = formatStatsPeriodLabel(report.period);
+    }
+    if (statsPrintEl instanceof HTMLElement) {
+      statsPrintEl.innerHTML = buildStatsPrintHtml(report);
     }
   }
 
+  async function buildAdminStatsReport() {
+    if (!validateStatsPeriodForReport()) return null;
+    const { from, to } = readStatsPeriodFromForm();
+    const q = new URLSearchParams();
+    if (from) q.set('from', from);
+    if (to) q.set('to', to);
+    const path = q.toString() ? `/api/admin/stats?${q.toString()}` : '/api/admin/stats';
+    showStatsMsg('Формируем отчёт…', false);
+    if (statsBuildBtn instanceof HTMLButtonElement) statsBuildBtn.disabled = true;
+    const r = await api.json(path);
+    if (statsBuildBtn instanceof HTMLButtonElement) statsBuildBtn.disabled = false;
+    if (!r.ok) {
+      showStatsMsg(String(r.data?.error || 'Не удалось загрузить статистику.'), false);
+      return null;
+    }
+    lastStatsReport = r.data;
+    renderStats(lastStatsReport);
+    if (statsReportRootEl instanceof HTMLElement) statsReportRootEl.hidden = false;
+    if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
+    if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
+    showStatsMsg('Отчёт сформирован. Можно скачать Excel или PDF.', true);
+    return lastStatsReport;
+  }
+
+  function statsExportFilenameBase() {
+    const from = statsFromEl instanceof HTMLInputElement ? statsFromEl.value : '';
+    const to = statsToEl instanceof HTMLInputElement ? statsToEl.value : '';
+    return `ekvaline-admin-stats_${from || 'all'}_${to || 'all'}`;
+  }
+
+  function getXlsxLib() {
+    const g = typeof globalThis !== 'undefined' ? globalThis : window;
+    return g.XLSX;
+  }
+
+  let xlsxLoadPromise = null;
+
+  function ensureXlsxLoaded() {
+    const lib = getXlsxLib();
+    if (lib && typeof lib.utils?.book_new === 'function') return Promise.resolve(lib);
+    if (xlsxLoadPromise) return xlsxLoadPromise;
+    xlsxLoadPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-admin-xlsx]');
+      if (existing) {
+        existing.addEventListener('load', () => {
+          const x = getXlsxLib();
+          if (x && typeof x.utils?.book_new === 'function') resolve(x);
+          else reject(new Error('xlsx'));
+        });
+        existing.addEventListener('error', () => reject(new Error('xlsx')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'vendor/xlsx.full.min.js';
+      s.async = true;
+      s.dataset.adminXlsx = '1';
+      s.onload = () => {
+        const x = getXlsxLib();
+        if (x && typeof x.utils?.book_new === 'function') resolve(x);
+        else reject(new Error('xlsx'));
+      };
+      s.onerror = () => reject(new Error('xlsx'));
+      document.head.appendChild(s);
+    });
+    return xlsxLoadPromise;
+  }
+
+  async function downloadAdminStatsExcel() {
+    if (!lastStatsReport) {
+      showStatsMsg('Сначала нажмите «Сформировать отчёт».', false);
+      return;
+    }
+    if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = true;
+    let XLSX;
+    try {
+      XLSX = await ensureXlsxLoaded();
+    } catch {
+      showStatsMsg('Не удалось загрузить модуль Excel. Обновите страницу.', false);
+      if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
+      return;
+    }
+    const r = lastStatsReport;
+    const s = r.summary || {};
+    const wb = XLSX.utils.book_new();
+    const summaryRows = [
+      ['Показатель', 'Значение'],
+      ['Период', formatStatsPeriodLabel(r.period)],
+      ['Заказов в периоде', s.ordersTotal ?? 0],
+      ['Сумма заказов, ₽', s.ordersSum ?? 0],
+      ['Доставлено, шт.', s.deliveredCount ?? 0],
+      ['Сумма доставленных, ₽', s.deliveredSum ?? 0],
+      ['Отменено', s.cancelledCount ?? 0],
+      ['Товаров в базе', r.productsTotal ?? 0],
+      ['На витрине', r.productsVisible ?? 0],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Сводка');
+
+    const sheetFromRows = (rows, labelKey) => {
+      const head = ['Показатель', 'Заказов', 'Сумма, ₽'];
+      const body = (rows || []).map((x) => [
+        labelKey ? labelKey(x) : x.label || x.status,
+        Number(x.count) || 0,
+        Number(x.sum) || 0,
+      ]);
+      return XLSX.utils.aoa_to_sheet([head, ...body]);
+    };
+
+    XLSX.utils.book_append_sheet(
+      wb,
+      sheetFromRows(r.ordersByStatus, (x) => ORDER_STATUS_LABELS[x.status] || x.status),
+      'По статусам'
+    );
+    XLSX.utils.book_append_sheet(wb, sheetFromRows(r.ordersByZone), 'По зонам');
+    XLSX.utils.book_append_sheet(
+      wb,
+      sheetFromRows(r.ordersByPayment, (x) => paymentLabel(x.label)),
+      'По оплате'
+    );
+    XLSX.utils.book_append_sheet(wb, sheetFromRows(r.ordersByDriver), 'По экспедиторам');
+
+    const ur = r.usersByRole || {};
+    const userRows = [['Роль', 'Учётных записей'], ...Object.keys(ur).sort().map((k) => [roleLabel(k), ur[k]])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(userRows), 'Пользователи');
+
+    try {
+      XLSX.writeFile(wb, `${statsExportFilenameBase()}.xlsx`);
+      showStatsMsg('Файл Excel сохранён.', true);
+    } catch {
+      showStatsMsg('Не удалось сохранить Excel.', false);
+    } finally {
+      if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
+    }
+  }
+
+  async function downloadAdminStatsPdf() {
+    if (!lastStatsReport) {
+      showStatsMsg('Сначала нажмите «Сформировать отчёт».', false);
+      return;
+    }
+    const g = typeof globalThis !== 'undefined' ? globalThis : window;
+    const h2p = g.html2pdf;
+    if (typeof h2p !== 'function') {
+      showStatsMsg('Генератор PDF не загрузился — обновите страницу.', false);
+      return;
+    }
+    if (!(statsPrintEl instanceof HTMLElement) || !statsPrintEl.innerHTML.trim()) {
+      showStatsMsg('Нет данных для PDF.', false);
+      return;
+    }
+    if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = true;
+    showStatsMsg('Готовим PDF…', false);
+    const sheet = statsPrintEl.querySelector('.admin-stats-print-inner') || statsPrintEl;
+    try {
+      await h2p()
+        .set({
+          margin: [10, 10, 10, 10],
+          filename: `${statsExportFilenameBase()}.pdf`,
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        })
+        .from(sheet)
+        .save();
+      showStatsMsg('PDF сохранён.', true);
+    } catch {
+      showStatsMsg('Не удалось сформировать PDF.', false);
+    } finally {
+      if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
+    }
+  }
+
+  function initStatsPanel() {
+    syncStatsDateInputLimits();
+    [statsFromEl, statsToEl].forEach((el) => {
+      el?.addEventListener('change', () => {
+        syncStatsDateInputLimits();
+        if (!validateStatsPeriodForReport()) return;
+      });
+      el?.addEventListener('input', syncStatsDateInputLimits);
+    });
+    applyStatsPreset('30');
+    document.querySelector('[data-admin-stats-preset="30"]')?.classList.add('is-active');
+    statsBuildBtn?.addEventListener('click', () => {
+      void buildAdminStatsReport();
+    });
+    statsExcelBtn?.addEventListener('click', () => {
+      void downloadAdminStatsExcel();
+    });
+    statsPdfBtn?.addEventListener('click', () => {
+      void downloadAdminStatsPdf();
+    });
+    document.querySelectorAll('[data-admin-stats-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const kind = btn.getAttribute('data-admin-stats-preset') || '30';
+        applyStatsPreset(kind);
+        document.querySelectorAll('[data-admin-stats-preset]').forEach((b) => {
+          b.classList.toggle('is-active', b === btn);
+        });
+        void buildAdminStatsReport();
+      });
+    });
+    void ensureXlsxLoaded().catch(() => {});
+    void buildAdminStatsReport();
+  }
   function coerceAdminFaqItem(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const code = String(raw.code ?? '').trim().slice(0, 40);
@@ -723,9 +1373,18 @@
     ).filter(Boolean);
   }
 
+  function ensureHiddenSiteSettingsDefaults() {
+    if (!(settingsForm instanceof HTMLFormElement)) return;
+    const wl = settingsForm.elements.namedItem('workLine');
+    if (wl instanceof HTMLInputElement && wl.value.trim().length < 3) wl.value = DEFAULT_HIDDEN_WORKLINE;
+    const slotsEl = settingsForm.elements.namedItem('deliverySlotsText');
+    if (slotsEl instanceof HTMLTextAreaElement && !slotsEl.value.trim()) slotsEl.value = DEFAULT_HIDDEN_SLOTS_TEXT;
+  }
+
   /** Полный payload как у формы «Сохранить настройки» (совпадает с Joi на сервере). */
   function buildManagerSettingsPayload() {
-    if (!(settingsForm instanceof HTMLFormElement)) return null;
+    if (!settingsHydrated || !(settingsForm instanceof HTMLFormElement)) return null;
+    ensureHiddenSiteSettingsDefaults();
     const slots = String(settingsForm.elements.namedItem('deliverySlotsText')?.value || '')
       .split('\n')
       .map((s) => s.trim())
@@ -752,6 +1411,10 @@
    */
   async function persistManagerSettings(errorEl) {
     const el = errorEl instanceof HTMLElement ? errorEl : settingsMsg;
+    if (!settingsHydrated) {
+      showMsg(el, 'Настройки ещё не загружены с сервера. Обновите страницу админки и попробуйте снова.');
+      return false;
+    }
     const payload = buildManagerSettingsPayload();
     if (!payload) {
       showMsg(
@@ -797,6 +1460,7 @@
       }
       api.resetCsrf();
       await loadSettings();
+      if (el !== settingsMsg) showMsg(el, 'Сохранено.', true);
       return true;
     } catch {
       showMsg(
@@ -805,6 +1469,105 @@
       );
       return false;
     }
+  }
+
+  async function saveCoverageBlockFromToolbar() {
+    if (coverageCardEditModalIsOpen()) {
+      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования карточки.');
+      return;
+    }
+    if (coverageCardAddModalIsOpen()) {
+      showMsg(settingsMsg, 'Сначала закройте окно «Новая карточка».');
+      return;
+    }
+    const saved = await persistDeliveryCoveragePanel(settingsMsg);
+    if (!saved) return;
+    showMsg(
+      settingsMsg,
+      'Блок «Зоны покрытия» сохранён. Откройте delivery.html и обновите страницу (Ctrl+F5).',
+      true
+    );
+  }
+
+  /** Сохранить только FAQ для страницы «Доставка». */
+  async function persistDeliveryFaqPanel(errorEl) {
+    const el = errorEl instanceof HTMLElement ? errorEl : settingsMsg;
+    const deliveryFaq = buildDeliveryFaqPayload();
+    if (!deliveryFaq.length) {
+      showMsg(el, 'Нужен хотя бы один корректный вопрос: код, тег, вопрос и ответ (от 3 символов).');
+      return false;
+    }
+    try {
+      const r = await api.json('/api/manager/settings/delivery-faq', { method: 'PATCH', body: deliveryFaq });
+      if (!r.ok) {
+        showMsg(el, r.data?.error || 'Сервер отклонил сохранение блока вопросов.');
+        return false;
+      }
+      api.resetCsrf();
+      await loadSettings();
+      if (el !== settingsMsg) showMsg(el, 'Сохранено.', true);
+      return true;
+    } catch {
+      showMsg(
+        el,
+        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
+      );
+      return false;
+    }
+  }
+
+  async function saveFaqBlockFromToolbar() {
+    if (faqEditModalIsOpen()) {
+      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования вопроса.');
+      return;
+    }
+    if (adminFaqAddModal instanceof HTMLElement && !adminFaqAddModal.hidden) {
+      showMsg(settingsMsg, 'Сначала закройте окно «Новый вопрос».');
+      return;
+    }
+    const saved = await persistDeliveryFaqPanel(settingsMsg);
+    if (!saved) return;
+    showMsg(settingsMsg, 'Вопросы сохранены. Откройте delivery.html и обновите страницу (Ctrl+F5).', true);
+  }
+
+  /** Сохранить только сертификаты для страницы «О компании». */
+  async function persistAboutCertificatesPanel(errorEl) {
+    const el = errorEl instanceof HTMLElement ? errorEl : settingsMsg;
+    const aboutCertificates = buildAboutCertificatesPayload();
+    try {
+      const r = await api.json('/api/manager/settings/about-certificates', {
+        method: 'PATCH',
+        body: aboutCertificates,
+      });
+      if (!r.ok) {
+        showMsg(el, r.data?.error || 'Сервер отклонил сохранение сертификатов.');
+        return false;
+      }
+      api.resetCsrf();
+      await loadSettings();
+      if (el !== settingsMsg) showMsg(el, 'Сохранено.', true);
+      return true;
+    } catch {
+      showMsg(
+        el,
+        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
+      );
+      return false;
+    }
+  }
+
+  async function saveAboutCertsBlockFromToolbar() {
+    if (aboutCertEditModalIsOpen()) {
+      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования сертификата.');
+      return;
+    }
+    if (aboutCertAddModalIsOpen()) {
+      showMsg(settingsMsg, 'Сначала закройте окно «Новый сертификат».');
+      return;
+    }
+    const saved = await persistAboutCertificatesPanel(settingsMsg);
+    if (!saved) return;
+    showMsg(settingsMsg, 'Сертификаты сохранены. Откройте about.html и обновите страницу (Ctrl+F5).', true);
   }
 
   function closeFaqEditModal(skipListRefresh = false) {
@@ -899,7 +1662,7 @@
       );
       return;
     }
-    const saved = await persistManagerSettings(adminFaqEditModalMsg);
+    const saved = await persistDeliveryFaqPanel(adminFaqEditModalMsg);
     if (!saved) {
       faqDraft[idx] = backup;
       fillFaqEditModal(idx);
@@ -908,7 +1671,7 @@
     closeFaqEditModal();
     showMsg(
       settingsMsg,
-      'Вопрос сохранён на сервере. Откройте или обновите страницу «Доставка», чтобы увидеть текст у клиентов.',
+      'Вопрос сохранён на сервере. Откройте delivery.html и обновите страницу (Ctrl+F5).',
       true
     );
   }
@@ -933,7 +1696,7 @@
     closeFaqEditModal(true);
     renderFaqDraftList();
 
-    const saved = await persistManagerSettings(settingsMsg);
+    const saved = await persistDeliveryFaqPanel(settingsMsg);
     if (!saved) {
       faqDraft = backup;
       renderFaqDraftList();
@@ -1054,7 +1817,7 @@
       return;
     }
     faqDraft.push(coerced);
-    const saved = await persistManagerSettings(adminFaqAddModalMsg);
+    const saved = await persistDeliveryFaqPanel(adminFaqAddModalMsg);
     if (!saved) {
       faqDraft.pop();
       return;
@@ -1393,14 +2156,14 @@
       );
       return;
     }
-    const saved = await persistManagerSettings(adminAboutCertEditModalMsg);
+    const saved = await persistAboutCertificatesPanel(adminAboutCertEditModalMsg);
     if (!saved) {
       aboutCertsDraft[idx] = backup;
       fillAboutCertEditModal(idx);
       return;
     }
     closeAboutCertEditModal();
-    showMsg(settingsMsg, 'Сертификаты сохранены на сервере. Обновите страницу «О компании».', true);
+    showMsg(settingsMsg, 'Сертификаты сохранены. Откройте about.html и обновите страницу (Ctrl+F5).', true);
   }
 
   async function deleteAboutCertFromEditModal() {
@@ -1419,7 +2182,7 @@
     closeAboutCertEditModal(true);
     renderAboutCertsDraftList();
 
-    const saved = await persistManagerSettings(settingsMsg);
+    const saved = await persistAboutCertificatesPanel(settingsMsg);
     if (!saved) {
       aboutCertsDraft = backup;
       renderAboutCertsDraftList();
@@ -1567,7 +2330,7 @@
       return;
     }
     aboutCertsDraft.push(coerced);
-    const saved = await persistManagerSettings(adminAboutCertAddModalMsg);
+    const saved = await persistAboutCertificatesPanel(adminAboutCertAddModalMsg);
     if (!saved) {
       aboutCertsDraft.pop();
       return;
@@ -1594,21 +2357,27 @@
     renderProducts();
   }
 
-  async function loadStats() {
-    const r = await api.json('/api/admin/stats');
-    if (!r.ok) return;
-    renderStats(r.data);
+  async function refreshStatsIfActive() {
+    if (lastStatsReport) await buildAdminStatsReport();
   }
 
   async function loadSettings() {
     const r = await api.json('/api/manager/settings');
     if (!r.ok || !(settingsForm instanceof HTMLFormElement)) {
+      settingsHydrated = false;
       if (!faqDraft.length) initFaqDraftFromLoaded(null);
       initPollDraftFromLoaded(null);
       initAboutCertsDraftFromLoaded(null);
       initCoveragePanelFromLoaded(null);
+      showMsg(
+        settingsMsg,
+        'Не удалось загрузить настройки с сервера. Обновите страницу. Сохранение на сайт временно недоступно.',
+        false
+      );
       return;
     }
+    settingsHydrated = true;
+    showMsg(settingsMsg, '');
     settingsForm.elements.namedItem('workLine').value = r.data.workLine || '';
     settingsForm.elements.namedItem('communityIntro').value = r.data.communityIntro || '';
     settingsForm.elements.namedItem('deliverySlotsText').value = Array.isArray(r.data.deliverySlots)
@@ -1643,12 +2412,11 @@
     editForm.elements.namedItem('name').value = p.name || '';
     editForm.elements.namedItem('description').value = p.description || '';
     editForm.elements.namedItem('price').value = String(Number(p.price || 0));
-    editForm.elements.namedItem('stock').value = String(Number(p.stock || 0));
     const vol =
       p.volume_liters !== null && p.volume_liters !== undefined && `${p.volume_liters}` !== '' ? String(p.volume_liters) : '';
     editForm.elements.namedItem('volume_liters').value = vol;
     editForm.elements.namedItem('sort_order').value = String(p.sort_order ?? 0);
-    editForm.elements.namedItem('hidden').value = String(Number(p.hidden) ? 1 : 0);
+    editForm.elements.namedItem('catalog_mode').value = productCatalogMode(p);
     if (editCategory instanceof HTMLSelectElement) {
       renderCategoriesInto(editCategory);
       editCategory.value = String(p.category_id || '');
@@ -1669,47 +2437,50 @@
     event.preventDefault();
     if (!(createUserForm instanceof HTMLFormElement)) return;
     const role = String(createUserForm.elements.namedItem('role')?.value || '');
+    const email = String(createUserForm.elements.namedItem('email')?.value || '').trim().toLowerCase();
+    const phone = String(createUserForm.elements.namedItem('phone')?.value || '').replace(/\D/g, '');
+    const password = String(createUserForm.elements.namedItem('password')?.value || '');
+    const pwdErr = validateStaffPasswordClient(password);
+    if (pwdErr) return showMsg(userMsg, pwdErr);
+    if (!/^7\d{10}$/.test(phone)) {
+      return showMsg(userMsg, 'Телефон: 11 цифр, начинается с 7 (например 79001234567).');
+    }
+    if (['operator', 'manager', 'admin', 'driver'].includes(role) && !email.includes('@')) {
+      return showMsg(userMsg, 'Для сотрудника укажите email — вход только по email.');
+    }
     const payload = {
       first_name: String(createUserForm.elements.namedItem('first_name')?.value || '').trim(),
       last_name: String(createUserForm.elements.namedItem('last_name')?.value || '').trim(),
-      email: String(createUserForm.elements.namedItem('email')?.value || '').trim().toLowerCase(),
-      phone: String(createUserForm.elements.namedItem('phone')?.value || '').replace(/\D/g, ''),
-      password: String(createUserForm.elements.namedItem('password')?.value || ''),
+      email,
+      phone,
+      password,
       role,
     };
     const r = await api.json('/api/admin/users', { method: 'POST', body: payload });
-    if (!r.ok) return showMsg(userMsg, r.data?.error || 'Не удалось создать пользователя');
+    if (!r.ok) return showMsg(userMsg, localizeApiError(r.data?.error) || 'Не удалось создать пользователя');
     api.resetCsrf();
     createUserForm.reset();
     refreshCharCounters(createUserForm);
-    showMsg(userMsg, 'Учётная запись создана.', true);
-    await Promise.all([loadUsers(), loadStats()]);
+    showMsg(
+      userMsg,
+      `Учётная запись создана. Вход: email ${email}, пароль — как задали при создании.`,
+      true
+    );
+    await Promise.all([loadUsers(), refreshStatsIfActive()]);
   }
 
   async function submitCreateProduct(event) {
     event.preventDefault();
     if (!(createProductForm instanceof HTMLFormElement)) return;
-    const volRaw = createProductForm.elements.namedItem('volume_liters')?.value;
-    const volume_liters =
-      volRaw !== undefined && `${volRaw}`.trim() !== '' ? Number(`${volRaw}`.replace(',', '.')) : null;
-
-    const payload = {
-      category_id: Number(createProductForm.elements.namedItem('category_id')?.value || 0),
-      name: String(createProductForm.elements.namedItem('name')?.value || '').trim(),
-      description: String(createProductForm.elements.namedItem('description')?.value || '').trim(),
-      price: Number(createProductForm.elements.namedItem('price')?.value || 0),
-      stock: Number(createProductForm.elements.namedItem('stock')?.value || 0),
-      sort_order: Number(createProductForm.elements.namedItem('sort_order')?.value || 0),
-      hidden: Number(createProductForm.elements.namedItem('hidden')?.value || 0),
-      volume_liters: Number.isFinite(volume_liters) ? volume_liters : null,
-    };
-    const r = await api.json('/api/admin/products', { method: 'POST', body: payload });
-    if (!r.ok) return showMsg(productMsg, r.data?.error || 'Не удалось создать товар');
+    const built = readProductPayloadFromForm(createProductForm);
+    if (!built.ok) return showMsg(productMsg, built.error);
+    const r = await api.json('/api/admin/products', { method: 'POST', body: built.payload });
+    if (!r.ok) return showMsg(productMsg, localizeApiError(r.data?.error) || 'Не удалось создать товар');
     api.resetCsrf();
     createProductForm.reset();
     refreshCharCounters(createProductForm);
     showMsg(productMsg, 'Товар добавлен.', true);
-    await Promise.all([loadProducts(), loadStats()]);
+    await Promise.all([loadProducts(), refreshStatsIfActive()]);
   }
 
   async function submitProductEdit(event) {
@@ -1717,27 +2488,18 @@
     if (!(editForm instanceof HTMLFormElement)) return;
     const id = Number(editForm.elements.namedItem('product_id')?.value || 0);
     if (!id) return;
-    const volRaw = editForm.elements.namedItem('volume_liters')?.value;
-    const volume_liters = `${volRaw}`.trim() === '' ? null : Number(`${volRaw}`.replace(',', '.'));
-    const body = {
-      category_id: Number(editForm.elements.namedItem('category_id')?.value || 0),
-      name: String(editForm.elements.namedItem('name')?.value || '').trim(),
-      description: String(editForm.elements.namedItem('description')?.value || '').trim(),
-      price: Number(editForm.elements.namedItem('price')?.value || 0),
-      stock: Number(editForm.elements.namedItem('stock')?.value || 0),
-      sort_order: Number(editForm.elements.namedItem('sort_order')?.value || 0),
-      hidden: Number(editForm.elements.namedItem('hidden')?.value || 0),
-      volume_liters: Number.isFinite(volume_liters) ? volume_liters : null,
-    };
+    const built = readProductPayloadFromForm(editForm);
+    if (!built.ok) return showMsg(editMsg, built.error);
+    const { stock: _drop, ...body } = built.payload;
     const r = await api.json(`/api/admin/products/${encodeURIComponent(id)}`, { method: 'PATCH', body });
     if (!r.ok) {
-      showMsg(editMsg, r.data?.error || 'Не сохранено');
+      showMsg(editMsg, localizeApiError(r.data?.error) || 'Не сохранено');
       return;
     }
     api.resetCsrf();
     showMsg(editMsg, 'Сохранено.', true);
     closeEditProduct();
-    await Promise.all([loadProducts(), loadStats()]);
+    await Promise.all([loadProducts(), refreshStatsIfActive()]);
   }
 
   async function submitSettings(event) {
@@ -1769,7 +2531,11 @@
     }
     const saved = await persistManagerSettings(settingsMsg);
     if (!saved) return;
-    showMsg(settingsMsg, 'Настройки сохранены.', true);
+    showMsg(
+      settingsMsg,
+      'Все настройки сохранены. Проверьте страницы по ссылкам выше (Ctrl+F5 на каждой).',
+      true
+    );
   }
 
   async function onStaffListsClick(ev) {
@@ -1786,7 +2552,7 @@
       });
       if (r.ok) {
         api.resetCsrf();
-        await Promise.all([loadUsers(), loadStats()]);
+        await Promise.all([loadUsers(), refreshStatsIfActive()]);
       }
       return;
     }
@@ -1797,7 +2563,7 @@
       const r = await api.json(`/api/admin/users/${userId}`, { method: 'PATCH', body: { role: selEl.value } });
       if (r.ok) {
         api.resetCsrf();
-        await Promise.all([loadUsers(), loadStats()]);
+        await Promise.all([loadUsers(), refreshStatsIfActive()]);
       }
       return;
     }
@@ -1819,7 +2585,7 @@
       const r = await api.json(`/api/admin/products/${deleteId}`, { method: 'DELETE' });
       if (r.ok) {
         api.resetCsrf();
-        await Promise.all([loadProducts(), loadStats()]);
+        await Promise.all([loadProducts(), refreshStatsIfActive()]);
       }
       return;
     }
@@ -1888,6 +2654,8 @@
 
     createUserForm?.addEventListener('submit', submitCreateUser);
     createProductForm?.addEventListener('submit', submitCreateProduct);
+    bindProductNumericInputs(createProductForm);
+    bindProductNumericInputs(editForm);
     settingsForm?.addEventListener('submit', submitSettings);
 
     deliveryFaqNav?.addEventListener('click', (ev) => {
@@ -1925,6 +2693,14 @@
     });
 
     adminCoverageCardAddBtn?.addEventListener('click', () => openCoverageCardAddModal());
+    adminFaqBlockSaveBtn?.addEventListener('click', () => void saveFaqBlockFromToolbar());
+    adminAboutCertsBlockSaveBtn?.addEventListener('click', () => void saveAboutCertsBlockFromToolbar());
+    adminCoverageBlockSaveBtn?.addEventListener('click', () => void saveCoverageBlockFromToolbar());
+    adminDeliveryCoverageTitle?.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      void saveCoverageBlockFromToolbar();
+    });
 
     adminFaqEditConfirm?.addEventListener('click', () => void submitFaqEditModal());
     adminFaqEditDelete?.addEventListener('click', () => void deleteFaqFromEditModal());
@@ -1996,7 +2772,8 @@
       }
     });
 
-    await Promise.all([loadUsers(), loadProducts(), loadSettings(), loadStats()]);
+    await Promise.all([loadUsers(), loadProducts(), loadSettings()]);
+    initStatsPanel();
     refreshCharCounters(adminAppRoot);
     adminAppRoot?.addEventListener('input', (ev) => {
       const t = ev.target;

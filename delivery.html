@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
   </head>
   <body class="delivery-page">
     <header class="topbar">
@@ -90,7 +91,7 @@
 
           <div class="delivery-map-layout">
             <div class="delivery-map-board" id="deliveryMapBoard">
-              <div class="delivery-leaflet-map" id="deliveryLeafletMap" aria-label="Карта зон доставки"></div>
+              <div class="delivery-yandex-map" id="deliveryZoneMap" aria-label="Карта зон доставки"></div>
             </div>
 
             <div class="delivery-zone-list" id="deliveryCoverageCardsRoot"></div>
@@ -191,10 +192,11 @@
       </div>
     </footer>
 
+    <script src="mobile-nav.js?v=20260519mobile"></script>
     <script src="app-core.js"></script>
     <script src="api-client.js"></script>
-    <script src="maps-runtime.js"></script>
+    <script src="maps-runtime.js?v=20260519ymaps"></script>
     <script src="/ekvaline-runtime.js"></script>
-    <script src="script.js?v=20260506fc"></script>
+    <script src="script.js?v=20260519sync"></script>
   </body>
 </html>

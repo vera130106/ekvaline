@@ -1,5 +1,6 @@
 'use strict';
 
+const orenburgAddress = require('./orenburg-address');
 const YKEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
 
 /** Подложка Leaflet (XYZ), если ключ Яндекса не задан: свои тайлы вместо openstreetmap.org */
@@ -136,6 +137,70 @@ async function yandexGeocode(geocodeQuery, limit) {
   return yandexResponseToRows(json);
 }
 
+/** Разбор «Оренбург, ул. X, д. N» — Nominatim по q часто пустой, нужны city+street. */
+function parseFreeformAddressQuery(q) {
+  const s = String(q || '').trim();
+  if (!s) return null;
+  let city = /оренбург/i.test(s) ? 'Оренбург' : '';
+  const cityM = s.match(/(?:^|[,\s])г\.?\s*([А-Яа-яЁё\-]+)/iu);
+  if (cityM && cityM[1]) city = cityM[1].trim();
+
+  const posMk = s.match(
+    /(?:пос\.?|посёлок|поселок)\s+([^,]+?),?\s*(?:ул\.?|улица)\s+([^,]+?)(?:,|\s+(?:д\.?|дом\.?)\s*(\d+[\w\-\/а-яА-Я]*))?/iu
+  );
+  if (posMk && posMk[2]) {
+    return {
+      city: city || 'Оренбург',
+      street: `${posMk[1].trim()}, ${posMk[2].trim()}`,
+      house: String(posMk[3] || '').trim(),
+    };
+  }
+
+  const ulMk = /(?:ул\.?|улица)\s+([^,]+)/iu.exec(s);
+  if (ulMk && ulMk[1]) {
+    let street = String(ulMk[1]).trim();
+    street = street.replace(/\s*(?:д\.?|дом\.?)\s*\d+.*$/iu, '').trim();
+    const dm = /(?:д\.?|дом\.?)\s*(\d+[\w\-\/а-яА-Я]*)/iu.exec(s);
+    return {
+      city: city || 'Оренбург',
+      street,
+      house: dm ? String(dm[1]).trim() : '',
+    };
+  }
+
+  const prMk = /(?:проспект|пр-кт|пр\.)\s+([^,]+)/iu.exec(s);
+  if (prMk && prMk[1]) {
+    let street = String(prMk[1]).trim();
+    street = street.replace(/\s*(?:д\.?|дом\.?)\s*\d+.*$/iu, '').trim();
+    const dm = /(?:д\.?|дом\.?)\s*(\d+[\w\-\/а-яА-Я]*)/iu.exec(s);
+    return {
+      city: city || 'Оренбург',
+      street,
+      house: dm ? String(dm[1]).trim() : '',
+    };
+  }
+
+  return null;
+}
+
+async function nominatimStructuredSearch(city, street, house, limit, viewbox, bounded, countrycodes) {
+  const houseStr = String(house || '').trim();
+  const streetForNom = street && houseStr ? `${houseStr} ${street}`.trim() : street || houseStr || '';
+  if (!city && !streetForNom) return [];
+  const params = new URLSearchParams({
+    format: 'jsonv2',
+    limit: String(limit),
+    'accept-language': 'ru',
+    addressdetails: '1',
+  });
+  if (countrycodes) params.set('countrycodes', countrycodes);
+  if (viewbox) params.set('viewbox', viewbox);
+  if (bounded) params.set('bounded', '1');
+  if (city) params.set('city', city);
+  if (streetForNom) params.set('street', streetForNom);
+  return nominatimSearch(params);
+}
+
 function buildYandexGeocodeQuery(q, city, street, house, bounded) {
   const houseStr = String(house || '').trim();
   if (city || street || houseStr) {
@@ -196,11 +261,8 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
   app.get('/api/public/maps-config', (req, res) => {
     res.set('Cache-Control', 'private, max-age=120');
     res.json({
-      provider: YKEY ? 'yandex' : LEAFLET_TILE_URL ? 'leaflet' : 'osm',
+      provider: YKEY ? 'yandex' : 'none',
       yandexMapsKey: YKEY || null,
-      leafletTileUrl: LEAFLET_TILE_URL || null,
-      leafletAttribution: LEAFLET_TILE_ATTRIBUTION,
-      leafletSubdomains: LEAFLET_TILE_SUBDOMAINS,
     });
   });
 
@@ -257,7 +319,46 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         rows = await nominatimSearch(params);
       }
 
-      geocodeSearchCacheSet(cacheKey, rows);
+      if (!rows.length && q && !city && !street) {
+        const parsed = parseFreeformAddressQuery(q);
+        if (parsed?.street) {
+          if (YKEY) {
+            try {
+              const yq = buildYandexGeocodeQuery(
+                '',
+                parsed.city,
+                parsed.street,
+                parsed.house,
+                bounded
+              );
+              rows = await yandexGeocode(yq, limit);
+            } catch (e) {
+              console.warn('[geocode-search] yandex structured:', e?.message || e);
+            }
+          }
+          if (!rows.length) {
+            rows = await nominatimStructuredSearch(
+              parsed.city,
+              parsed.street,
+              parsed.house,
+              limit,
+              viewbox,
+              bounded,
+              countrycodes
+            );
+          }
+        }
+      }
+
+      if (bounded) {
+        if (city && !orenburgAddress.isOrenburgCityName(city)) {
+          rows = [];
+        } else {
+          rows = orenburgAddress.filterGeocodeRowsToOrenburg(rows);
+        }
+      }
+
+      if (rows.length) geocodeSearchCacheSet(cacheKey, rows);
       res.set('Cache-Control', 'private, max-age=15');
       res.json(rows.slice(0, limit));
     })

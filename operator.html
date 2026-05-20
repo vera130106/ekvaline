@@ -10,7 +10,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260519limits" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
   </head>
   <body class="operator-page">
     <main class="opx-shell">
@@ -19,7 +20,7 @@
           <button type="button" class="opx-tab is-active" id="opxTabOrders">Заказы</button>
           <button type="button" class="opx-tab" id="opxTabMap">Карта</button>
           <button type="button" class="opx-tab" id="opxTabReports">Отчёты</button>
-          <button type="button" class="opx-tab" disabled>Настройки</button>
+          <button type="button" class="opx-tab" id="opxTabSettings">Настройки</button>
         </nav>
         <div class="opx-right">
           <button
@@ -43,6 +44,7 @@
           id="opxSearchInput"
           class="opx-input"
           placeholder="улица, имя, номер заказа, телефон…"
+          maxlength="120"
           aria-label="Поиск заказов в выбранном дне"
         />
         <label class="opx-date-label" for="opxDateFilter" title="Дата доставки">Дата:</label>
@@ -84,12 +86,10 @@
               title="Это не фильтр таблицы. Выберите статус и нажмите «Применить» — для строк, отмеченных галочкой слева."
             >
               <select id="opxBulkStatusSelect" class="opx-input opx-bulk-inline-select" aria-label="Статус для выбранных заказов">
+                <option value="in_processing" selected>В обработке</option>
                 <option value="confirmed">Подтверждён</option>
-                <option value="processing" selected>В работе</option>
-                <option value="courier">Передан курьеру</option>
                 <option value="on_way">В пути</option>
                 <option value="delivered">Доставлен</option>
-                <option value="new">Новый</option>
               </select>
             </label>
             <button type="button" class="opx-btn opx-btn-sm" id="opxBulkApplyBtn">Применить</button>
@@ -98,6 +98,20 @@
         </div>
       </section>
 
+      <div class="opx-row-legend" aria-label="Подсветка строк заказов">
+        <span class="opx-row-legend-item"
+          ><span class="opx-row-legend-dot is-unassigned" aria-hidden="true"></span>Не назначен, не в работе</span
+        >
+        <span class="opx-row-legend-item"
+          ><span class="opx-row-legend-dot is-in-work" aria-hidden="true"></span>В пути (назначен водитель)</span
+        >
+        <span class="opx-row-legend-item"
+          ><span class="opx-row-legend-dot is-delivered" aria-hidden="true"></span>Доставлен</span
+        >
+        <span class="opx-row-legend-live" id="opxOrdersLiveHint" title="Список обновляется автоматически каждые 10 с"
+          >Обновление в реальном времени</span
+        >
+      </div>
       <section class="opx-grid-wrap">
         <table class="opx-grid">
           <colgroup>
@@ -154,6 +168,7 @@
     </main>
 
     <div id="opxOrdersPrintSheet" class="opx-orders-print-sheet" aria-hidden="true"></div>
+    <div id="opxReportsPdfSheet" class="opx-reports-pdf-sheet" aria-hidden="true"></div>
 
     <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
       <div class="opx-zone-map-toolbar">
@@ -176,14 +191,26 @@
           <button type="button" class="opx-tab" data-opx-reports-switch="orders">Заказы</button>
           <button type="button" class="opx-tab" data-opx-reports-switch="map">Карта</button>
           <button type="button" class="opx-tab is-active" data-opx-reports-switch="reports">Отчёты</button>
-          <button type="button" class="opx-tab" disabled>Настройки</button>
+          <button type="button" class="opx-tab" id="opxTabSettings">Настройки</button>
         </nav>
       </header>
       <div class="opx-reports-toolbar">
-        <div class="opx-reports-title">Отчёты оператора</div>
-        <label>с <input type="date" id="opxReportsDateFrom" class="opx-input opx-date-input" /></label>
-        <label>по <input type="date" id="opxReportsDateTo" class="opx-input opx-date-input" /></label>
-        <button type="button" class="opx-modal-btn" id="opxReportsBuildBtn">Сформировать</button>
+        <div class="opx-reports-toolbar-head">
+          <div class="opx-reports-title-wrap">
+            <div class="opx-reports-title">Отчёты оператора</div>
+            <p class="opx-reports-subtitle">Заказы и журнал за период · действия оператора и водителей</p>
+          </div>
+          <div class="opx-reports-periods" role="group" aria-label="Быстрый выбор периода">
+            <button type="button" class="opx-reports-period-btn" data-opx-report-period="7">7 дней</button>
+            <button type="button" class="opx-reports-period-btn is-active" data-opx-report-period="30">Месяц</button>
+            <button type="button" class="opx-reports-period-btn" data-opx-report-period="90">Квартал</button>
+          </div>
+        </div>
+        <div class="opx-reports-toolbar-dates">
+          <label>с <input type="date" id="opxReportsDateFrom" class="opx-input opx-date-input" /></label>
+          <label>по <input type="date" id="opxReportsDateTo" class="opx-input opx-date-input" /></label>
+          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxReportsBuildBtn">Сформировать</button>
+        </div>
         <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsExcelBtn">Скачать Excel</button>
         <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPrintBtn">Печать</button>
         <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPdfBtn">Скачать PDF</button>
@@ -214,6 +241,7 @@
               <article class="opx-reports-card"><small>Товаров, шт</small><strong id="opxReportItemsCount">0</strong></article>
               <article class="opx-reports-card"><small>Сумма, ₽</small><strong id="opxReportTotalSum">0</strong></article>
               <article class="opx-reports-card"><small>Доставлено</small><strong id="opxReportDeliveredCount">0</strong></article>
+              <article class="opx-reports-card"><small>Отменено</small><strong id="opxReportCancelledCount">0</strong></article>
             </div>
             <div id="opxReportsPrintArea" class="opx-reports-print-area">
               <section id="opxReportsPaneJournal" class="opx-reports-pane is-active" data-report-pane="journal" aria-labelledby="opxReportsJournalTitle">
@@ -244,6 +272,22 @@
                 </div>
                 <div class="opx-reports-table-wrap opx-reports-table-wrap--modern">
                   <table class="opx-reports-table opx-reports-table--financial" id="opxReportsTable">
+                    <colgroup class="opx-reports-fin-cols">
+                      <col class="opx-fin-col-pp" />
+                      <col class="opx-fin-col-driver" />
+                      <col class="opx-fin-col-product" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-pay" />
+                      <col class="opx-fin-col-total" />
+                      <col class="opx-fin-col-total" />
+                    </colgroup>
                     <thead id="opxReportsThead"></thead>
                     <tbody id="opxReportsBody"></tbody>
                     <tfoot id="opxReportsTfoot"></tfoot>
@@ -285,6 +329,34 @@
     </div>
 
 
+
+    <div id="opxSettingsOverlay" class="opx-settings-overlay" hidden>
+      <header class="opx-settings-shell-top">
+        <nav class="opx-tabs" data-opx-settings-tabs aria-label="Разделы">
+          <button type="button" class="opx-tab" data-opx-settings-switch="orders">Заказы</button>
+          <button type="button" class="opx-tab" data-opx-settings-switch="map">Карта</button>
+          <button type="button" class="opx-tab" data-opx-settings-switch="reports">Отчёты</button>
+          <button type="button" class="opx-tab is-active" data-opx-settings-switch="settings">Настройки</button>
+        </nav>
+        <button type="button" class="opx-modal-btn opx-btn-sm" id="opxCloseSettings">Закрыть</button>
+      </header>
+      <div class="opx-settings-body">
+        <div class="opx-settings-head">
+          <h2 class="opx-settings-title">Приём заказов на доставку</h2>
+          <p class="opx-settings-intro">
+            Закройте целый день или отдельные интервалы — клиент не увидит их при оформлении заказа на сайте. Оператор
+            по-прежнему может создавать заказы вручную.
+          </p>
+          <p id="opxSettingsLastChange" class="opx-settings-last-change" hidden></p>
+        </div>
+        <div id="opxSettingsDaysList" class="opx-settings-days" aria-live="polite"></div>
+        <footer class="opx-settings-foot">
+          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxSettingsSaveBtn">Сохранить</button>
+          <span id="opxSettingsStatus" class="opx-settings-status" role="status"></span>
+        </footer>
+      </div>
+    </div>
+
     <div id="opxNewOrdersModal" class="opx-modal opx-new-inbox-modal" hidden>
       <div class="opx-modal-backdrop" data-opx-new-inbox-dismiss="backdrop"></div>
       <section class="opx-modal-card opx-new-inbox-card" role="dialog" aria-modal="true" aria-labelledby="opxNewOrdersModalTitle">
@@ -309,11 +381,11 @@
           <h2 id="opxModalTitle" class="opx-modal-title">Заказ</h2>
           <div class="opx-modal-top-right">
             <select class="opx-modal-status-pill" id="opxModalStatus" aria-label="Статус заказа">
-              <option value="new">Новый</option>
+              <option value="in_processing">В обработке</option>
               <option value="confirmed">Подтверждён</option>
-              <option value="processing">В работе</option>
+              <option value="on_way">В пути</option>
               <option value="delivered">Доставлен</option>
-              <option value="cancelled">Отменён</option>
+              <option value="cancelled" hidden disabled>Отменён</option>
             </select>
             <button type="button" id="opxModalClose" class="opx-modal-close" aria-label="Закрыть">✕</button>
           </div>
@@ -340,6 +412,7 @@
                   autocomplete="off"
                   autocorrect="off"
                   spellcheck="false"
+                  maxlength="60"
                   aria-autocomplete="list"
                   aria-controls="opxModalClientSuggest"
                 />
@@ -354,11 +427,11 @@
             </label>
             <label class="opx-modal-field">
               <span class="opx-modal-label">Телефон</span>
-              <input id="opxModalPhone" type="tel" class="opx-modal-input" autocomplete="tel" />
+              <input id="opxModalPhone" type="tel" class="opx-modal-input" autocomplete="tel" maxlength="20" />
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Адрес доставки</span>
-              <input id="opxModalAddress" type="text" class="opx-modal-input" autocomplete="street-address" />
+              <input id="opxModalAddress" type="text" class="opx-modal-input" autocomplete="street-address" maxlength="500" />
             </label>
           </div>
           <div class="opx-modal-client-actions">
@@ -372,6 +445,7 @@
             <label class="opx-modal-field">
               <span class="opx-modal-label">Дата доставки</span>
               <input id="opxModalDeliveryDate" class="opx-modal-input" type="date" />
+              <span class="opx-modal-hint">Заказы только на следующий день и позже</span>
             </label>
             <label class="opx-modal-field">
               <span class="opx-modal-label">Зона</span>
@@ -380,6 +454,7 @@
                 <option value="Степной">Степной</option>
                 <option value="Центр">Центр</option>
                 <option value="доп.зона">доп.зона</option>
+                <option value="Окраина">Окраина</option>
               </select>
             </label>
             <label class="opx-modal-field">
@@ -416,7 +491,7 @@
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Примечание</span>
-              <textarea id="opxModalNote" class="opx-modal-input opx-modal-textarea"></textarea>
+              <textarea id="opxModalNote" class="opx-modal-input opx-modal-textarea" maxlength="500" rows="3"></textarea>
             </label>
           </div>
         </section>
@@ -425,26 +500,23 @@
 
         <section class="opx-ord-panel" data-opx-ord-panel="goods" hidden>
           <section class="opx-modal-section">
-            <h3 class="opx-modal-section-title">Товары заказа</h3>
-            <div class="opx-modal-grid">
-              <label class="opx-modal-field">
-                <span class="opx-modal-label">Товар</span>
-                <select id="opxModalProduct" class="opx-modal-input">
-                </select>
-              </label>
-              <label class="opx-modal-field">
-                <span class="opx-modal-label">Количество</span>
-                <input id="opxModalQty" class="opx-modal-input" type="number" min="1" max="50" step="1" />
-              </label>
-              <label class="opx-modal-field">
-                <span class="opx-modal-label">Цена за шт., ₽</span>
-                <input id="opxModalUnitPrice" class="opx-modal-input" type="number" min="0" step="1" />
-              </label>
-              <label class="opx-modal-field">
-                <span class="opx-modal-label">Сумма, ₽</span>
-                <input id="opxModalSum" class="opx-modal-input" readonly />
-              </label>
+            <div class="opx-order-cart-head">
+              <h3 class="opx-modal-section-title">Товары заказа</h3>
+              <div class="opx-order-cart-actions">
+                <button type="button" class="opx-modal-btn opx-map-ghost" id="opxOrderCartFromSiteBtn">Из корзины сайта</button>
+                <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxOrderCartAddBtn">+ Добавить товар</button>
+              </div>
             </div>
+            <div id="opxOrderCartList" class="opx-order-cart-list" role="list"></div>
+            <p id="opxOrderCartEmpty" class="opx-cc-empty" hidden>В корзине пока нет позиций.</p>
+            <div class="opx-order-cart-total">
+              <span>Итого по заказу</span>
+              <strong id="opxOrderCartTotal">0 ₽</strong>
+            </div>
+            <select id="opxModalProduct" class="opx-modal-input" hidden aria-hidden="true" tabindex="-1"></select>
+            <input id="opxModalQty" type="number" hidden aria-hidden="true" tabindex="-1" />
+            <input id="opxModalUnitPrice" type="number" hidden aria-hidden="true" tabindex="-1" />
+            <input id="opxModalSum" readonly hidden aria-hidden="true" tabindex="-1" />
           </section>
         </section>
 
@@ -516,7 +588,7 @@
             id="opxOrderReasonText"
             class="opx-modal-input opx-modal-textarea"
             rows="3"
-            maxlength="500"
+            maxlength="2000"
           ></textarea>
         </label>
         <div class="opx-order-reason-actions">
@@ -546,15 +618,15 @@
           <div class="opx-modal-grid">
             <label class="opx-modal-field">
               <span class="opx-modal-label">Имя / организация</span>
-              <input id="opxClientNameInput" class="opx-modal-input" />
+              <input id="opxClientNameInput" class="opx-modal-input" maxlength="60" />
             </label>
             <label class="opx-modal-field">
               <span class="opx-modal-label">Телефон</span>
-              <input id="opxClientPhoneInput" class="opx-modal-input" />
+              <input id="opxClientPhoneInput" class="opx-modal-input" maxlength="20" />
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Адрес доставки</span>
-              <input id="opxClientAddressInput" class="opx-modal-input" readonly />
+              <input id="opxClientAddressInput" class="opx-modal-input" readonly maxlength="500" />
             </label>
           </div>
           <div class="opx-modal-client-actions">
@@ -592,7 +664,8 @@
           <div id="opxClientPriceItems" class="opx-cc-list"></div>
         </section>
         <section class="opx-modal-section opx-cc-panel" data-opx-cc-panel="journal" hidden>
-          <h3 class="opx-modal-section-title">Журнал изменений</h3>
+          <h3 class="opx-modal-section-title">Журнал заказов клиента</h3>
+          <p class="opx-cc-journal-hint">Дата и время, когда клиент оформлял заказы в системе.</p>
           <div id="opxClientJournalList" class="opx-cc-list"></div>
         </section>
         <div class="opx-modal-actions">
@@ -612,26 +685,27 @@
         <div class="opx-map-layout">
           <aside class="opx-map-panel">
             <label class="opx-modal-label" for="opxClientMapCity">Город (н/п)</label>
-            <input type="text" id="opxClientMapCity" class="opx-modal-input" value="Оренбург" />
+            <input type="text" id="opxClientMapCity" class="opx-modal-input" value="Оренбург" readonly aria-readonly="true" title="Доставка только по Оренбургу" />
+            <p class="opx-map-city-hint">Доставка только по Оренбургу. Улицу выбирайте из подсказок.</p>
             <label class="opx-modal-label" for="opxClientMapStreet">Улица</label>
-            <input type="text" id="opxClientMapStreet" class="opx-modal-input" placeholder="Например: Салмышская" autocomplete="off" />
+            <input type="text" id="opxClientMapStreet" class="opx-modal-input" placeholder="Например: Салмышская" autocomplete="off" maxlength="120" />
             <div id="opxStreetSuggestBox" class="opx-street-suggest-box" hidden></div>
             <label class="opx-modal-label" for="opxClientMapHouse">Дом</label>
-            <input type="text" id="opxClientMapHouse" class="opx-modal-input" placeholder="Например: 45" />
+            <input type="text" id="opxClientMapHouse" class="opx-modal-input" placeholder="Например: 45" maxlength="24" />
             <label class="opx-modal-label" for="opxClientMapApartment">Квартира / офис (необязательно)</label>
-            <input type="text" id="opxClientMapApartment" class="opx-modal-input" placeholder="Например: офис 355" />
+            <input type="text" id="opxClientMapApartment" class="opx-modal-input" placeholder="Например: офис 355" maxlength="80" />
             <div class="opx-map-inline-fields">
               <div>
                 <label class="opx-modal-label" for="opxClientMapEntrance">Подъезд</label>
-                <input type="text" id="opxClientMapEntrance" class="opx-modal-input" placeholder="-" />
+                <input type="text" id="opxClientMapEntrance" class="opx-modal-input" placeholder="-" maxlength="12" />
               </div>
               <div>
                 <label class="opx-modal-label" for="opxClientMapFloor">Этаж</label>
-                <input type="text" id="opxClientMapFloor" class="opx-modal-input" placeholder="-" />
+                <input type="text" id="opxClientMapFloor" class="opx-modal-input" placeholder="-" maxlength="12" />
               </div>
             </div>
             <label class="opx-modal-label" for="opxClientMapSearch">Строка с адресом</label>
-            <input type="search" id="opxClientMapSearch" class="opx-modal-input" placeholder="Город, улица, дом..." />
+            <input type="search" id="opxClientMapSearch" class="opx-modal-input" placeholder="Город, улица, дом..." maxlength="240" />
             <div class="opx-map-panel-actions">
               <button type="button" class="opx-modal-btn" id="opxClientMapSearchBtn">Найти</button>
               <button type="button" class="opx-modal-btn opx-map-ghost" id="opxClientMapClearBtn">Сброс</button>
@@ -732,14 +806,34 @@
       </section>
     </div>
 
+    <div id="opxConfirmModal" class="opx-modal opx-confirm-modal" hidden>
+      <div class="opx-modal-backdrop" data-opx-confirm-dismiss="backdrop"></div>
+      <section
+        class="opx-modal-card opx-confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="opxConfirmTitle"
+        aria-describedby="opxConfirmMessage"
+      >
+        <h2 id="opxConfirmTitle" class="opx-confirm-title">Подтверждение</h2>
+        <p id="opxConfirmMessage" class="opx-confirm-message"></p>
+        <footer class="opx-confirm-foot">
+          <button type="button" class="opx-modal-btn opx-modal-btn-soft" id="opxConfirmCancelBtn">Отмена</button>
+          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxConfirmOkBtn">Да</button>
+        </footer>
+      </section>
+    </div>
+
     <div id="opxToast" class="opx-toast" hidden role="status" aria-live="polite" aria-atomic="true">
       <div class="opx-toast-card"><p id="opxToastText"></p></div>
     </div>
 
     <script src="api-client.js"></script>
-    <script src="maps-runtime.js"></script>
-    <script src="operator.js"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="maps-runtime.js?v=20260519ymaps"></script>
+    <script src="delivery-slots.js?v=20260519cleanup"></script>
+    <script src="opx-field-limits.js?v=20260519cleanup"></script>
+    <script src="operator.js?v=20260519cleanup"></script>
+    <script src="vendor/xlsx.full.min.js"></script>
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
       crossorigin="anonymous"

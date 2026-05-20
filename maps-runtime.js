@@ -1,5 +1,8 @@
 (function () {
   const BASE = '';
+  const DEFAULT_CENTER = [51.7682, 55.0969];
+  const MAP_UNAVAILABLE_MSG =
+    'Карта недоступна: на сервере не задан ключ YANDEX_MAPS_API_KEY (JavaScript API и HTTP Геокодер).';
 
   let configCache = null;
   let configPromise = null;
@@ -13,151 +16,40 @@
       })
         .then((r) => (r.ok ? r.json() : {}))
         .then((c) => {
-          let subs = c.leafletSubdomains;
-          if (!Array.isArray(subs)) {
-            subs =
-              typeof subs === 'string'
-                ? subs.split(',').map((x) => x.trim()).filter(Boolean)
-                : ['a', 'b', 'c'];
-          }
-          if (!subs.length) subs = ['a', 'b', 'c'];
-          const tileUrl = typeof c.leafletTileUrl === 'string' ? c.leafletTileUrl.trim() : '';
+          const key = typeof c.yandexMapsKey === 'string' ? c.yandexMapsKey.trim() : '';
           configCache = {
-            provider: c.provider === 'yandex' ? 'yandex' : 'osm',
-            yandexMapsKey: c.yandexMapsKey || null,
-            leafletTileUrl: tileUrl || null,
-            leafletAttribution: typeof c.leafletAttribution === 'string' ? c.leafletAttribution : '',
-            leafletSubdomains: subs,
+            provider: key ? 'yandex' : 'none',
+            yandexMapsKey: key || null,
           };
           return configCache;
         })
         .catch(() => {
-          configCache = {
-            provider: 'osm',
-            yandexMapsKey: null,
-            leafletTileUrl: null,
-            leafletAttribution: '',
-            leafletSubdomains: ['a', 'b', 'c'],
-          };
+          configCache = { provider: 'none', yandexMapsKey: null };
           return configCache;
         });
     }
     return configPromise;
   }
 
-  /**
-   * Параллельная подгрузка: конфиг + сразу движок (Яндекс при наличии ключа или Leaflet).
-   * Вызывать пораньше со страниц с maps-runtime.js — окно загрузки окажется общим с действиями пользователя.
-   */
   function prefetch() {
     void getConfig()
-      .then((c) => {
-        if (c?.yandexMapsKey) return loadYmaps().catch(() => null);
-        return loadLeaflet().catch(() => null);
-      })
+      .then((c) => (c?.yandexMapsKey ? loadYmaps() : null))
       .catch(() => {});
   }
 
-  /** Не дергаем CDN карт без потребности (меньше лишней загрузки на community/contacts и т.д.). */
   function documentLikelyUsesMaps() {
     try {
       const raw = typeof location !== 'undefined' ? String(location.pathname || '') : '';
       const path = raw.replace(/\\/g, '/');
       const leaf = path.split('/').filter(Boolean).pop() || '';
       if (/^(operator|delivery|catalog)\.html$/i.test(leaf)) return true;
-      if (document.getElementById('deliveryLeafletMap')) return true;
+      if (document.getElementById('deliveryZoneMap')) return true;
       if (document.getElementById('checkoutMapRoot')) return true;
       if (document.body?.classList?.contains?.('catalog-page')) return true;
     } catch {
       /**/
     }
     return false;
-  }
-
-  let leafletPromise = null;
-  function loadLeaflet() {
-    if (typeof window !== 'undefined' && window.L) return Promise.resolve(window.L);
-    if (leafletPromise) return leafletPromise;
-    leafletPromise = new Promise((resolve, reject) => {
-      const cssExists = document.querySelector('link[data-leaflet-css="true"]');
-      if (!cssExists) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        link.setAttribute('data-leaflet-css', 'true');
-        document.head.appendChild(link);
-      }
-      const resolveL = () => {
-        if (window.L) resolve(window.L);
-        else reject(new Error('leaflet_load_error'));
-      };
-      const existing = document.querySelector('script[data-leaflet-js="true"]');
-      if (existing instanceof HTMLScriptElement) {
-        if (window.L) {
-          resolve(window.L);
-          return;
-        }
-        if (existing.dataset.ekLeafletLoaded === '1') {
-          resolveL();
-          return;
-        }
-        existing.addEventListener(
-          'load',
-          () => {
-            existing.dataset.ekLeafletLoaded = '1';
-            resolveL();
-          },
-          { once: true }
-        );
-        existing.addEventListener(
-          'error',
-          () => reject(new Error('leaflet_load_error')),
-          { once: true }
-        );
-        queueMicrotask(() => {
-          if (window.L && existing.dataset.ekLeafletLoaded !== '1') {
-            existing.dataset.ekLeafletLoaded = '1';
-            resolve(window.L);
-          }
-        });
-        return;
-      }
-      const s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      s.setAttribute('data-leaflet-js', 'true');
-      s.onload = () => {
-        s.dataset.ekLeafletLoaded = '1';
-        resolveL();
-      };
-      s.onerror = () => reject(new Error('leaflet_load_error'));
-      document.head.appendChild(s);
-    });
-    return leafletPromise;
-  }
-
-  /**
-   * Подложка: свои XYZ из /api/public/maps-config (LEAFLET_TILE_URL) или OSM по умолчанию.
-   * @param {boolean} attributionVisible — для клиента показывать подпись; у оператора можно скрыть как раньше.
-   */
-  function addLeafletRasterLayer(L, map, attributionVisible) {
-    return getConfig().then((cfg) => {
-      const useOwn = Boolean(cfg.leafletTileUrl);
-      const url = useOwn
-        ? cfg.leafletTileUrl
-        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-      let attribution = '';
-      if (useOwn) attribution = String(cfg.leafletAttribution || '');
-      else if (attributionVisible) attribution = '&copy; OpenStreetMap';
-      const layerOpts = { maxZoom: 19, attribution };
-      if (/\{s\}/.test(url)) {
-        layerOpts.subdomains =
-          Array.isArray(cfg.leafletSubdomains) && cfg.leafletSubdomains.length
-            ? cfg.leafletSubdomains
-            : ['a', 'b', 'c'];
-      }
-      L.tileLayer(url, layerOpts).addTo(map);
-    });
   }
 
   let ymapsPromise = null;
@@ -178,16 +70,8 @@
           const done = () => {
             window.ymaps.ready(() => resolve(window.ymaps));
           };
-          existing.addEventListener(
-            'load',
-            () => done(),
-            { once: true }
-          );
-          existing.addEventListener(
-            'error',
-            () => reject(new Error('ymaps_load_error')),
-            { once: true }
-          );
+          existing.addEventListener('load', () => done(), { once: true });
+          existing.addEventListener('error', () => reject(new Error('ymaps_load_error')), { once: true });
           queueMicrotask(() => {
             if (window.ymaps && window.ymaps.Map) done();
           });
@@ -207,45 +91,83 @@
     return ymapsPromise;
   }
 
-  /** Демо-карта / зона доставки: только просмотр. */
+  function renderMapPlaceholder(container, message) {
+    if (!(container instanceof HTMLElement)) return null;
+    container.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'ek-map-unavailable';
+    box.setAttribute('role', 'status');
+    box.textContent = String(message || MAP_UNAVAILABLE_MSG);
+    container.appendChild(box);
+    return {
+      engine: 'none',
+      map: null,
+      setMarker() {},
+      clearMarker() {},
+      flyToMarker() {},
+      invalidateSize() {},
+      clear() {},
+      addOrderMarker() {},
+      closePopup() {},
+      destroy() {
+        container.innerHTML = '';
+      },
+    };
+  }
+
+  function createYandexMap(container, centerLatLng, zoom, options) {
+    const opts = options || {};
+    const map = new window.ymaps.Map(container, {
+      center: centerLatLng,
+      zoom,
+      controls: opts.controls || ['zoomControl'],
+    });
+    if (opts.disableScrollZoom) map.behaviors.disable('scrollZoom');
+    else map.behaviors.enable('scrollZoom');
+
+    function invalidateSize() {
+      try {
+        map.container.fitToViewport();
+      } catch (_) {
+        /**/
+      }
+    }
+
+    return { map, invalidateSize };
+  }
+
+  /** Демо-карта на странице «Доставка». */
   function initStaticMap(container, centerLatLng, zoom) {
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
-    return loadYmaps().then((ymaps) => {
-      if (ymaps) {
-        const map = new ymaps.Map(container, {
-          center: centerLatLng,
-          zoom,
-          controls: ['zoomControl'],
-        });
-        map.behaviors.disable('scrollZoom');
+    const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
+    const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 12;
+    return loadYmaps()
+      .then((ymaps) => {
+        if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
+        container.innerHTML = '';
+        const { map } = createYandexMap(container, center, z, { disableScrollZoom: false });
         return { engine: 'yandex', map };
-      }
-      return loadLeaflet().then((L) => {
-        const map = L.map(container, { zoomControl: true, scrollWheelZoom: true }).setView(centerLatLng, zoom);
-        return addLeafletRasterLayer(L, map, true).then(() => ({ engine: 'leaflet', map }));
-      });
-    });
+      })
+      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
   }
 
   /**
-   * Карта с маркером и кликом по карте (корзина / карта клиента).
-   * @returns {Promise<{ engine: string, invalidateSize: Function, flyToMarker: Function, destroy: Function }>}
+   * Интерактивная карта: клик ставит метку (корзина / адрес оператора).
    */
   function attachInteractiveMap(container, centerLatLng, zoom, handlers) {
+    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
+    const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
+    const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 12;
     const onMapClick =
-      handlers && typeof handlers.onMapClick === 'function'
-        ? handlers.onMapClick
-        : () => {};
+      handlers && typeof handlers.onMapClick === 'function' ? handlers.onMapClick : () => {};
 
-    return loadYmaps().then((ymaps) => {
-      if (ymaps) {
+    return loadYmaps()
+      .then((ymaps) => {
+        if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
-        const map = new ymaps.Map(container, {
-          center: centerLatLng,
-          zoom,
-          controls: ['zoomControl'],
+        const { map, invalidateSize } = createYandexMap(container, center, z, {
+          disableScrollZoom: false,
         });
-        map.behaviors.disable('scrollZoom');
         let placemark = null;
 
         function setMarker(lat, lon) {
@@ -254,7 +176,7 @@
             placemark = new ymaps.Placemark(
               coords,
               {},
-              { draggable: false, preset: 'islands#blueIcon' }
+              { draggable: false, preset: 'islands#blueDotIcon' }
             );
             map.geoObjects.add(placemark);
           } else {
@@ -268,16 +190,8 @@
           onMapClick(c[0], c[1]);
         });
 
-        function flyTo(lat, lon, z) {
-          map.setCenter([lat, lon], z == null ? map.getZoom() : z, { duration: 200 });
-        }
-
-        function invalidateSize() {
-          try {
-            map.container.fitToViewport();
-          } catch (_) {
-            /**/
-          }
+        function flyTo(lat, lon, zLevel) {
+          map.setCenter([lat, lon], zLevel == null ? map.getZoom() : zLevel, { duration: 220 });
         }
 
         function clearMarker() {
@@ -302,136 +216,62 @@
             }
           },
         };
-      }
-
-      return loadLeaflet().then((L) => {
-        container.innerHTML = '';
-        const map = L.map(container).setView(centerLatLng, zoom);
-        let marker = null;
-
-        function setMarker(lat, lon) {
-          if (!marker) marker = L.marker([lat, lon]).addTo(map);
-          else marker.setLatLng([lat, lon]);
-        }
-
-        map.on('click', (e) => {
-          const { lat, lng } = e.latlng;
-          setMarker(lat, lng);
-          onMapClick(lat, lng);
-        });
-
-        function flyTo(lat, lon, zLevel) {
-          map.setView([lat, lon], zLevel != null ? zLevel : map.getZoom());
-        }
-
-        function clearMarker() {
-          if (marker) {
-            map.removeLayer(marker);
-            marker = null;
-          }
-        }
-
-        return addLeafletRasterLayer(L, map, true).then(() => ({
-          engine: 'leaflet',
-          map,
-          leafLet: L,
-          setMarker,
-          clearMarker,
-          flyToMarker: flyTo,
-          invalidateSize: () => map.invalidateSize(),
-          destroy() {
-            try {
-              map.remove();
-            } catch (_) {
-              /**/
-            }
-          },
-        }));
-      });
-    });
+      })
+      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
   }
 
-  /**
-   * Зона заказов: слой маркеров + всплывающее окно.
-   */
   function attachOrdersLayer(engine, hostMap, onPopupActionClose) {
     const closer = typeof onPopupActionClose === 'function' ? onPopupActionClose : () => {};
+    if (engine !== 'yandex' || !hostMap || !window.ymaps) return null;
 
-    if (engine === 'yandex' && hostMap && window.ymaps) {
-      const collection = new window.ymaps.GeoObjectCollection();
-      hostMap.geoObjects.add(collection);
-      return {
-        engine: 'yandex',
-        layer: collection,
-        clear() {
-          collection.removeAll();
-        },
-        addOrderMarker(lat, lng, ringColor, balloonHtml, orderIdTag) {
-          const pm = new window.ymaps.Placemark(
-            [lat, lng],
-            {
-              balloonContent: balloonHtml,
-              hintContent: String(orderIdTag || ''),
-            },
-            {
-              preset: 'islands#circleDotIcon',
-              iconColor: ringColor,
-            }
-          );
-          collection.add(pm);
-          return pm;
-        },
-        closePopup() {
-          try {
-            hostMap.balloon.close();
-          } catch (_) {
-            /**/
-          }
-        },
-      };
-    }
-
-    const L = window.L;
-    if (!hostMap || !L) return null;
-    const layer = L.layerGroup().addTo(hostMap);
+    const collection = new window.ymaps.GeoObjectCollection();
+    hostMap.geoObjects.add(collection);
     return {
-      engine: 'leaflet',
-      layer,
-      leafMap: hostMap,
+      engine: 'yandex',
+      layer: collection,
       clear() {
-        layer.clearLayers();
+        collection.removeAll();
       },
-      addOrderMarker(lat, lng, ringColor, popupHtml /* eslint-disable-line no-unused-vars */) {
-        const m = L.circleMarker([lat, lng], {
-          radius: 14,
-          color: ringColor,
-          weight: 2,
-          fillColor: '#ffffff',
-          fillOpacity: 0.95,
-        });
-        m.bindPopup(popupHtml, {
-          maxWidth: 280,
-          className: 'opx-zone-leaflet-popup',
-        });
-        m.addTo(layer);
-        return m;
+      addOrderMarker(lat, lng, ringColor, balloonHtml, orderIdTag) {
+        const pm = new window.ymaps.Placemark(
+          [lat, lng],
+          {
+            balloonContent: balloonHtml,
+            hintContent: String(orderIdTag || ''),
+          },
+          {
+            preset: 'islands#circleDotIcon',
+            iconColor: ringColor,
+          }
+        );
+        collection.add(pm);
+        return pm;
       },
       closePopup() {
+        try {
+          hostMap.balloon.close();
+        } catch (_) {
+          /**/
+        }
         closer();
       },
     };
   }
 
+  /** Карта заказов оператора: маркеры + балуны. */
   function createOrdersMapHost(container, centerLatLng, zoom, popupRootHandler) {
-    return loadYmaps().then((ymaps) => {
-      if (ymaps) {
+    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
+    const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : [51.78, 55.11];
+    const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 11;
+
+    return loadYmaps()
+      .then((ymaps) => {
+        if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
+
         container.innerHTML = '';
-        const map = new ymaps.Map(container, {
-          center: centerLatLng,
-          zoom,
-          controls: ['zoomControl'],
+        const { map, invalidateSize } = createYandexMap(container, center, z, {
+          disableScrollZoom: true,
         });
-        map.behaviors.disable('scrollZoom');
 
         function closePopupFn() {
           try {
@@ -463,19 +303,13 @@
           });
         }
 
-        function invalidateZoneMapSize() {
-          try {
-            map.container.fitToViewport();
-          } catch (_) {
-            /**/
-          }
-        }
-
         const layerBundle = attachOrdersLayer('yandex', map, closePopupFn);
+        if (!layerBundle) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
+
         return {
           engine: 'yandex',
           map,
-          invalidateSize: invalidateZoneMapSize,
+          invalidateSize,
           ...layerBundle,
           destroy() {
             try {
@@ -485,60 +319,17 @@
             }
           },
         };
-      }
-
-      return loadLeaflet().then((L) => {
-        container.innerHTML = '';
-        const map = L.map(container, { zoomControl: true, attributionControl: false }).setView(centerLatLng, zoom);
-
-        if (!map._opxPopupActionsBound && popupRootHandler) {
-          map._opxPopupActionsBound = true;
-          map.getContainer().addEventListener('click', (event) => {
-            const btOrder = event.target.closest('[data-opx-zone-open-order]');
-            if (btOrder && map.getContainer().contains(btOrder)) {
-              event.preventDefault();
-              event.stopPropagation();
-              map.closePopup();
-              popupRootHandler({ type: 'order', btn: btOrder });
-              return;
-            }
-            const btn = event.target.closest('[data-opx-zone-open-client]');
-            if (!(btn && map.getContainer().contains(btn))) return;
-            event.preventDefault();
-            event.stopPropagation();
-            map.closePopup();
-            popupRootHandler({ type: 'client', btn });
-          });
-        }
-
-        const layerBundle = attachOrdersLayer('leaflet', map, () => map.closePopup());
-        /** Оператор: без подписи для OSM как раньше; для своих тайлов — текст из LEAFLET_TILE_ATTRIBUTION (часто обязателен). */
-        return addLeafletRasterLayer(L, map, false).then(() => ({
-          engine: 'leaflet',
-          map,
-          invalidateSize: () => map.invalidateSize(),
-          ...layerBundle,
-          destroy() {
-            try {
-              map.remove();
-            } catch (_) {
-              /**/
-            }
-          },
-        }));
-      });
-    });
+      })
+      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
   }
 
   window.EkvalineMaps = {
     prefetch,
     getConfig,
-    loadLeaflet,
     loadYmaps,
     initStaticMap,
     attachInteractiveMap,
     createOrdersMapHost,
-    /** Совместимость: для уточняющего кода оператора «есть ли Yandex». */
     async usesYandexTiles() {
       const c = await getConfig();
       return Boolean(c.yandexMapsKey);

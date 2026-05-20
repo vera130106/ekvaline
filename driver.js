@@ -91,6 +91,53 @@
     cancelled: 'Отменён',
   };
 
+  /** Статусы, когда заказ уже в «поле водителя» — показываем блоком сверху и подсветкой строки. */
+  const DRIVER_IN_PROGRESS_STATUSES = new Set(['courier', 'on_way', 'processing']);
+
+  function compareOrdersForDriverList(a, b) {
+    const ra = DRIVER_IN_PROGRESS_STATUSES.has(String(a.status || '')) ? 0 : 1;
+    const rb = DRIVER_IN_PROGRESS_STATUSES.has(String(b.status || '')) ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    const td = String(a.delivery_date || '').localeCompare(String(b.delivery_date || ''));
+    if (td !== 0) return td;
+    const ca = Number(a.created_at ? new Date(a.created_at).getTime() : 0);
+    const cb = Number(b.created_at ? new Date(b.created_at).getTime() : 0);
+    if (cb !== ca) return cb - ca;
+    return Number(b.id) - Number(a.id);
+  }
+
+  /** @returns {string} */
+  function buildDriverOrderRowsHtml(rows) {
+    return rows
+      .map((o) => {
+        const st = STATUS_LABEL[o.status] || o.status || '—';
+        const phone = escapeHtml(o.phone || '—');
+        const hot = DRIVER_IN_PROGRESS_STATUSES.has(String(o.status || ''));
+        const rowClass = hot ? 'drv-row drv-row--hot' : 'drv-row';
+        const tag = hot
+          ? `<span class="drv-status-chip" aria-hidden="true">В работе</span>`
+          : '';
+        return `
+        <tr class="${rowClass}">
+          <td><strong>#${escapeHtml(String(o.id))}</strong></td>
+          <td>${escapeHtml(o.client || '—')}</td>
+          <td>${phone}</td>
+          <td class="drv-addr">${escapeHtml(String(o.address || ''))}</td>
+          <td>${escapeHtml(formatRuDate(o.delivery_date))}</td>
+          <td>${escapeHtml(String(o.delivery_slot || '—'))}</td>
+          <td>${escapeHtml(parseProductLine(o.items_json))}</td>
+          <td>${formatMoney(o.total_sum)} ₽</td>
+          <td class="drv-status-cell">${tag}<span class="drv-status-text">${escapeHtml(st)}</span></td>
+          <td>
+            <button type="button" class="drv-btn drv-btn-sm drv-btn-done" data-drv-done="${escapeHtml(String(o.id))}">
+              Доставлен
+            </button>
+          </td>
+        </tr>`;
+      })
+      .join('');
+  }
+
   function uiShowLogin() {
     if (loginCard instanceof HTMLElement) loginCard.hidden = false;
     if (mainCard instanceof HTMLElement) mainCard.hidden = true;
@@ -145,30 +192,30 @@
       bodyEl.innerHTML = `<tr><td colspan="10" class="drv-empty">Заказов нет на сегодняшний этап доставки.</td></tr>`;
       return;
     }
-    bodyEl.innerHTML = list
-      .map((o) => {
-        const st = STATUS_LABEL[o.status] || o.status || '—';
-        const phone = escapeHtml(o.phone || '—');
-        const id = encodeURIComponent(String(o.id));
-        return `
-        <tr>
-          <td><strong>#${escapeHtml(String(o.id))}</strong></td>
-          <td>${escapeHtml(o.client || '—')}</td>
-          <td>${phone}</td>
-          <td class="drv-addr">${escapeHtml(String(o.address || ''))}</td>
-          <td>${escapeHtml(formatRuDate(o.delivery_date))}</td>
-          <td>${escapeHtml(String(o.delivery_slot || '—'))}</td>
-          <td>${escapeHtml(parseProductLine(o.items_json))}</td>
-          <td>${formatMoney(o.total_sum)} ₽</td>
-          <td>${escapeHtml(st)}</td>
-          <td>
-            <button type="button" class="drv-btn drv-btn-sm drv-btn-done" data-drv-done="${escapeHtml(String(o.id))}">
-              Доставлен
-            </button>
+    const sorted = [...list].sort(compareOrdersForDriverList);
+    const inProg = sorted.filter((o) => DRIVER_IN_PROGRESS_STATUSES.has(String(o.status || '')));
+    const queued = sorted.filter((o) => !DRIVER_IN_PROGRESS_STATUSES.has(String(o.status || '')));
+
+    const parts = [];
+    if (inProg.length) {
+      parts.push(`<tr class="drv-section-head" role="presentation">
+          <td colspan="10">
+            <span class="drv-section-title">В работе у вас</span>
+            <span class="drv-section-caption">передано в доставку — по готовности нажмите «Доставлен»</span>
           </td>
-        </tr>`;
-      })
-      .join('');
+        </tr>`);
+      parts.push(buildDriverOrderRowsHtml(inProg));
+    }
+    if (queued.length) {
+      parts.push(`<tr class="drv-section-head drv-section-head--queued" role="presentation">
+          <td colspan="10">
+            <span class="drv-section-title">Назначены на вас, ожидают этапа</span>
+            <span class="drv-section-caption">у оператора / подготовка — кнопка «Доставлен» когда фактически отдали клиенту</span>
+          </td>
+        </tr>`);
+      parts.push(buildDriverOrderRowsHtml(queued));
+    }
+    bodyEl.innerHTML = parts.join('');
   }
 
   async function confirmDelivered(restId) {

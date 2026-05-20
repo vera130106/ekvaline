@@ -96,6 +96,11 @@
 
   function saveAdminData() {
     localStorage.setItem(BLOG_ADMIN_KEY, JSON.stringify(state.admin));
+    try {
+      window.dispatchEvent(new CustomEvent('ekvaline-blog-admin-updated'));
+    } catch {
+      /* ignore */
+    }
   }
 
   function saveArchivePosts() {
@@ -150,6 +155,11 @@
     const hidden = new Set(state.admin.hiddenPostIds || []);
     const visible = sortByDateDesc(state.posts).filter((post) => !hidden.has(post.id)).slice(0, MAX_PUBLIC_POSTS);
     localStorage.setItem(FEED_KEY, JSON.stringify(visible));
+    try {
+      window.dispatchEvent(new CustomEvent('ekvaline-blog-admin-updated'));
+    } catch {
+      /* ignore */
+    }
   }
 
   function initState() {
@@ -880,7 +890,16 @@
     const logoutBtn = document.getElementById('managerLogoutBtn');
 
     if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
+      logoutBtn.addEventListener('click', async () => {
+        const api = window.EkvalineAPI;
+        if (api?.json) {
+          try {
+            await api.json('/api/auth/logout', { method: 'POST', body: {} });
+          } catch {
+            /* ignore */
+          }
+          api.resetCsrf?.();
+        }
         localStorage.removeItem(CURRENT_USER_KEY);
         window.location.href = 'index.html';
       });
@@ -1383,18 +1402,80 @@
     });
   }
 
+  function persistManagerUserFromApi(u) {
+    if (!u || typeof u !== 'object') return;
+    const name =
+      String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() ||
+      String(u.email || 'Менеджер');
+    localStorage.setItem(
+      CURRENT_USER_KEY,
+      JSON.stringify({
+        id: u.id,
+        name,
+        email: u.email,
+        phone: u.phone || '',
+        role: u.role,
+        first_name: u.first_name,
+        last_name: u.last_name,
+        bonus_balance: u.bonus_balance,
+      })
+    );
+  }
+
+  /** Сессия cookie + профиль с сервера (не только localStorage после входа). */
+  async function hydrateManagerFromServerSession() {
+    const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
+    if (!api) return;
+    try {
+      const r = await api.json('/api/auth/me');
+      if (!r.ok) {
+        if (Number(r.status) === 401 || Number(r.status) === 403) {
+          const cur = readCurrentUser();
+          const role = String(cur?.role || '').toLowerCase();
+          if (cur && (role === 'manager' || role === 'admin')) {
+            localStorage.removeItem(CURRENT_USER_KEY);
+          }
+        }
+        return;
+      }
+      const u = r.data?.user;
+      if (u && typeof u === 'object') {
+        persistManagerUserFromApi(u);
+        return;
+      }
+      const cur = readCurrentUser();
+      const role = String(cur?.role || '').toLowerCase();
+      if (cur && (role === 'manager' || role === 'admin')) {
+        localStorage.removeItem(CURRENT_USER_KEY);
+      }
+    } catch {
+      /* сеть недоступна — оставляем localStorage */
+    }
+  }
+
   function enforceAccess() {
     const user = readCurrentUser();
     const role = String(user?.role || '').toLowerCase();
-    /** Как на сервере: GET/PUT `/api/manager/settings` — `requireRole('manager', 'admin')`. */
     if (!user || (role !== 'manager' && role !== 'admin')) {
+      window.location.href = 'index.html';
+      return false;
+    }
+    const id = Number(user.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      localStorage.removeItem(CURRENT_USER_KEY);
       window.location.href = 'index.html';
       return false;
     }
     return true;
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  async function initManagerApp() {
+    try {
+      await window.EkvalineAPI?.awaitBootReconciliation?.();
+    } catch {
+      /* ignore */
+    }
+    await hydrateManagerFromServerSession();
     if (!enforceAccess()) return;
     initState();
     renderAll();
@@ -1403,5 +1484,9 @@
     initBackToTopButton();
     bindEvents();
     ensureSuccessModal();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    void initManagerApp();
   });
 })();

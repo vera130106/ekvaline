@@ -9,11 +9,24 @@ const pgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const Tokens = require('csrf');
-const { openDatabase } = require('./db');
-const { checkPostgresConnection } = require('./postgres');
+const { openDatabase, checkPostgresConnection } = require('./db');
 const schemas = require('./schemas');
 const { estimateWaterConsumption } = require('./waterCalcEngine');
 const { mountGeocodeRoutes } = require('./geocode-proxy');
+const deliveryAvailability = require('./delivery-availability');
+const orenburgAddress = require('./orenburg-address');
+const orderPricing = require('./order-pricing');
+const {
+  deliveryDateStoredChanged,
+  deliverySlotStoredChanged,
+} = require('./delivery-slots');
+const {
+  securityHeaders,
+  createRateLimiter,
+  assertProductionSessionSecret,
+} = require('./security-middleware');
+
+assertProductionSessionSecret();
 
 const http = require('http');
 const tokens = new Tokens();
@@ -21,6 +34,52 @@ const tokens = new Tokens();
 const CLIENT_BOOT_ID = crypto.randomBytes(12).toString('hex');
 const app = express();
 const db = openDatabase();
+
+/** Заказы принимаются только на следующий календарный день и позже (не на сегодня). */
+function isoCalendarDayLocal(d = new Date()) {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+function earliestDeliveryDateIso() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return isoCalendarDayLocal(d);
+}
+
+function validateDeliveryDateForBooking(deliveryDate) {
+  const raw = String(deliveryDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { ok: false, error: 'Дата доставки: формат ГГГГ-ММ-ДД.' };
+  }
+  const min = earliestDeliveryDateIso();
+  if (raw < min) {
+    return {
+      ok: false,
+      error: `Заказы принимаются с ${min.split('-').reverse().join('.')} (на следующий день, не на сегодня).`,
+    };
+  }
+  return { ok: true, value: raw };
+}
+
+async function loadDeliveryAvailabilityRecord() {
+  const row = await db.prepare("SELECT value FROM site_settings WHERE key = 'deliveryAvailability'").get();
+  return deliveryAvailability.parseAvailabilityRecord(row?.value);
+}
+
+async function loadDeliveryAvailability() {
+  return (await loadDeliveryAvailabilityRecord()).availability;
+}
+
+async function saveDeliveryAvailability(payload, actorUser) {
+  const normalized = deliveryAvailability.parseAvailabilityStored(payload);
+  const meta = actorUser ? deliveryAvailability.buildChangeMeta(actorUser) : null;
+  const stored = meta ? { ...normalized, meta } : normalized;
+  await db
+    .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+    .run('deliveryAvailability', JSON.stringify(stored));
+  return { availability: normalized, meta };
+}
 
 /** Базовые вопросы FAQ на странице «Доставка» при пустой настройке в БД. */
 const DEFAULT_DELIVERY_FAQ = Object.freeze([
@@ -267,6 +326,22 @@ const PORT_FALLBACK_STEPS = (() => {
 let resolvedListenPort = LISTEN_PREF;
 
 app.set('trust proxy', 1);
+
+app.use(securityHeaders);
+
+const authRateLimit = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  message: 'Слишком много попыток входа. Подождите 15 минут.',
+  keyFn: (req) => `auth:${req.ip || req.socket?.remoteAddress || 'unknown'}`,
+});
+
+const feedbackRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 6,
+  message: 'Слишком много сообщений. Повторите через минуту.',
+  keyFn: (req) => `feedback:${req.ip || req.socket?.remoteAddress || 'unknown'}`,
+});
 
 /** Настройки сайта одним PUT включают FAQ, опросы и сертификаты с data:image — типичный лимит 1mb режет запрос без явной ошибки в UI. */
 app.use(express.json({ limit: '15mb' }));
@@ -721,10 +796,18 @@ app.get('/api/public/checkout-options', asyncHandler(async (req, res) => {
   } catch {
     addresses = [];
   }
-  res.json({ deliverySlots, addresses });
+  const availability = await loadDeliveryAvailability();
+  res.json({ deliverySlots, addresses, availability });
+}));
+
+app.get('/api/public/delivery-availability', asyncHandler(async (_req, res) => {
+  const availability = await loadDeliveryAvailability();
+  res.set('Cache-Control', 'no-store');
+  res.json(availability);
 }));
 
 app.get('/api/products', asyncHandler(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const rows = await db
     .prepare(
       `SELECT p.*, c.name AS category_name FROM products p
@@ -746,7 +829,7 @@ app.get('/api/auth/me', asyncHandler(async (req, res) => {
   res.json({ user: publicUser(user) });
 }));
 
-app.post('/api/auth/register', csrfMiddleware, asyncHandler(async (req, res) => {
+app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.registerSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
@@ -821,7 +904,7 @@ app.post('/api/auth/register', csrfMiddleware, asyncHandler(async (req, res) => 
   res.json({ user: publicUser(user) });
 }));
 
-app.post('/api/auth/login', csrfMiddleware, asyncHandler(async (req, res) => {
+app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.loginSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
@@ -892,7 +975,7 @@ app.options('/api/feedback', publicFeedbackCors, (req, res) => {
   res.sendStatus(204);
 });
 
-app.post('/api/feedback', publicFeedbackCors, (req, res) => {
+app.post('/api/feedback', publicFeedbackCors, feedbackRateLimit, (req, res) => {
   handlePublicFeedbackSubmit(req, res).catch((err) => {
     // eslint-disable-next-line no-console
     console.error('[feedback] необработанный reject:', err);
@@ -911,7 +994,12 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   const v = schemas.validate(schemas.orderCreateSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
-  const { address, delivery_date, delivery_slot, payment_method, bonuses_used, items } = v.value;
+  const { address, delivery_date, delivery_slot, payment_method, bonuses_used, items, courier_note } = v.value;
+  const availability = await loadDeliveryAvailability();
+  const bookCheck = deliveryAvailability.validateDeliveryBooking(delivery_date, delivery_slot, availability);
+  if (!bookCheck.ok) return res.status(400).json({ error: bookCheck.error });
+  const addrCheck = orenburgAddress.validateDeliveryAddressLine(address);
+  if (!addrCheck.ok) return res.status(400).json({ error: addrCheck.error });
 
   let subtotal = 0;
   const lineItems = [];
@@ -934,18 +1022,20 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
     await db.withTransaction(async (tx) => {
       const o = await tx
         .prepare(
-          `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method, bonuses_used, bonuses_earned, items_json)
-         VALUES (?, ?, ?, ?, 'processing', ?, ?, ?, ?)`
+          `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method, bonuses_used, bonuses_earned, items_json, courier_note, total_sum)
+         VALUES (?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?)`
         )
         .run(
           req.user.id,
           address,
-          delivery_date,
-          delivery_slot,
+          bookCheck.value.date,
+          bookCheck.value.slot,
           payment_method,
           bonusSpend,
           earn,
-          itemsJson
+          itemsJson,
+          String(courier_note || '').trim(),
+          payable
         );
       orderId = o.lastInsertRowid;
 
@@ -971,6 +1061,7 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   }
 
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  await insertOrderAuditEvent(db, order.id, 'order_create', 'Заказ оформлен клиентом', req.user.id, '');
   audit(db, req.user.id, 'order_create', `id=${order.id}`, req.ip);
   const user = await getUserById(req.user.id);
   res.json({ order, user: publicUser(user) });
@@ -984,6 +1075,10 @@ app.post(
   asyncHandler(async (req, res) => {
     const v = schemas.validate(schemas.operatorOrderCreateSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
+    const dateCheck = validateDeliveryDateForBooking(v.value.delivery_date);
+    if (!dateCheck.ok) return res.status(400).json({ error: dateCheck.error });
+    const addrCheckOp = orenburgAddress.validateDeliveryAddressLine(v.value.address);
+    if (!addrCheckOp.ok) return res.status(400).json({ error: addrCheckOp.error });
 
     let phoneDigits = String(v.value.customer_phone || '').replace(/\D/g, '');
     if (phoneDigits.length === 11 && phoneDigits[0] === '8') phoneDigits = `7${phoneDigits.slice(1)}`;
@@ -997,16 +1092,9 @@ app.post(
     const driverVal = String(v.value.driver || '').trim() || null;
 
     const customer = await ensurePhoneCallerUser(phoneDigits, v.value.customer_name);
-    const qty = Number(v.value.qty);
-    const unit = Number(v.value.unit_price);
-    const total_sum = Math.round(qty * unit);
-    const itemsJson = JSON.stringify([
-      {
-        title: String(v.value.product_title).trim(),
-        qty,
-        unit_price: unit,
-      },
-    ]);
+    const priced = await orderPricing.resolveOperatorOrderLines(db, v.value);
+    if (!priced.ok) return res.status(400).json({ error: priced.error });
+    const { lineItems, total_sum, itemsJson } = priced;
 
     let orderId;
     try {
@@ -1019,7 +1107,7 @@ app.post(
         .run(
           customer.id,
           v.value.address,
-          v.value.delivery_date,
+          dateCheck.value,
           v.value.delivery_slot,
           v.value.payment_method,
           itemsJson,
@@ -1035,6 +1123,7 @@ app.post(
     }
 
     const orderRow = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    await insertOrderAuditEvent(db, orderId, 'order_operator_create', 'Создан оператором', req.user.id, '');
     audit(db, req.user.id, 'order_operator_create', `id=${orderId}`, req.ip);
     res.json({ order: orderRow });
   })
@@ -1076,6 +1165,38 @@ app.get('/api/orders/operator/drivers', requireAuth, requireRole('operator', 'ma
   res.json({ drivers: list });
 }));
 
+app.get(
+  '/api/orders/operator/delivery-availability',
+  requireAuth,
+  requireRole('operator', 'manager', 'admin'),
+  asyncHandler(async (_req, res) => {
+    const record = await loadDeliveryAvailabilityRecord();
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      availability: record.availability,
+      lastChange: record.meta,
+      slotDefs: deliveryAvailability.BOOKING_SLOT_DEFS,
+      days: deliveryAvailability.enumerateBookingDays(30),
+    });
+  })
+);
+
+app.put(
+  '/api/orders/operator/delivery-availability',
+  requireAuth,
+  requireRole('operator', 'manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.operatorDeliveryAvailabilitySchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    const saved = await saveDeliveryAvailability(v.value, req.user);
+    const auditAction =
+      req.user.role === 'admin' ? 'admin_delivery_availability' : 'delivery_availability';
+    audit(db, req.user.id, auditAction, saved.meta?.label || 'update', req.ip);
+    res.json({ ok: true, availability: saved.availability, lastChange: saved.meta });
+  })
+);
+
 app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id заказа.' });
@@ -1087,7 +1208,7 @@ app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) =>
     return res.status(403).json({ error: 'Недостаточно прав.' });
   }
 
-  const rows = await db
+  const auditRows = await db
     .prepare(
       `SELECT a.id, a.action, a.detail, a.created_at,
               COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email, 'Система') AS actor_name,
@@ -1100,7 +1221,38 @@ app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) =>
        LIMIT 300`
     )
     .all(`%id=${id}%`);
-  res.json({ journal: rows });
+
+  let eventRows = [];
+  try {
+    eventRows = await db
+      .prepare(
+        `SELECT e.id, e.action, e.reason, e.detail, e.created_at,
+                COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email, 'Система') AS actor_name,
+                COALESCE(u.role, 'system') AS actor_role
+         FROM order_audit_events e
+         LEFT JOIN users u ON u.id = e.actor_user_id
+         WHERE e.order_id = ?
+         ORDER BY e.id DESC
+         LIMIT 300`
+      )
+      .all(id);
+  } catch {
+    eventRows = [];
+  }
+
+  const journal = [
+    ...eventRows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      detail: String(row.reason || row.detail || '').trim(),
+      created_at: row.created_at,
+      actor_name: row.actor_name,
+      actor_role: row.actor_role,
+    })),
+    ...auditRows,
+  ].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+  res.json({ journal: journal.slice(0, 300) });
 }));
 
 app.get('/api/orders/operator/audit-report', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (req, res) => {
@@ -1109,6 +1261,7 @@ app.get('/api/orders/operator/audit-report', requireAuth, requireRole('operator'
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return res.status(400).json({ error: 'Укажите период from и to в формате ГГГГ-ММ-ДД.' });
   }
+  const operatorView = req.user.role === 'operator';
   const rows = await db
     .prepare(
       `SELECT e.id, e.order_id, e.action, e.reason, e.detail, e.created_at,
@@ -1118,6 +1271,8 @@ app.get('/api/orders/operator/audit-report', requireAuth, requireRole('operator'
        LEFT JOIN users u ON u.id = e.actor_user_id
        WHERE (e.created_at AT TIME ZONE 'Europe/Moscow')::date >= ?::date
          AND (e.created_at AT TIME ZONE 'Europe/Moscow')::date <= ?::date
+         ${operatorView ? "AND e.action NOT LIKE 'admin_%' AND e.action <> 'manager_settings'" : ''}
+         ${operatorView ? "AND COALESCE(u.role, '') IN ('operator', 'driver', '')" : ''}
        ORDER BY e.created_at DESC
        LIMIT 3000`
     )
@@ -1220,16 +1375,33 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   if (staffRoles.includes(req.user.role)) {
     const v = schemas.validate(schemas.orderPatchSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
+    if (v.value.delivery_date != null) {
+      const dateCheck = validateDeliveryDateForBooking(v.value.delivery_date);
+      if (!dateCheck.ok) return res.status(400).json({ error: dateCheck.error });
+      v.value.delivery_date = dateCheck.value;
+    }
     const changeReason = String(v.value.change_reason || '').trim();
     const requiresReason =
-      (v.value.delivery_date != null && v.value.delivery_date !== order.delivery_date) ||
-      (v.value.delivery_slot != null && v.value.delivery_slot !== order.delivery_slot) ||
+      (v.value.delivery_date != null &&
+        deliveryDateStoredChanged(order.delivery_date, v.value.delivery_date)) ||
+      (v.value.delivery_slot != null &&
+        deliverySlotStoredChanged(order.delivery_slot, v.value.delivery_slot)) ||
       (v.value.status != null && v.value.status === 'cancelled' && order.status !== 'cancelled');
     if (requiresReason && changeReason.length < 3) {
       return res.status(400).json({
         error: 'Укажите причину переноса доставки или отмены заказа (не менее 3 символов).',
       });
     }
+
+    if (v.value.items_json != null) {
+      const pricedPatch = await orderPricing.resolveStaffOrderItemsPatch(db, v.value.items_json);
+      if (!pricedPatch.ok) return res.status(400).json({ error: pricedPatch.error });
+      v.value.items_json = pricedPatch.itemsJson;
+      v.value.total_sum = pricedPatch.total_sum;
+    } else {
+      delete v.value.total_sum;
+    }
+
     const fields = [];
     const values = [];
     const allowed = [
@@ -1261,8 +1433,10 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
     let evtAction = 'operator_patch';
     if (v.value.status === 'cancelled' && order.status !== 'cancelled') evtAction = 'order_status_cancelled';
     else if (
-      (v.value.delivery_date != null && v.value.delivery_date !== order.delivery_date) ||
-      (v.value.delivery_slot != null && v.value.delivery_slot !== order.delivery_slot)
+      (v.value.delivery_date != null &&
+        deliveryDateStoredChanged(order.delivery_date, v.value.delivery_date)) ||
+      (v.value.delivery_slot != null &&
+        deliverySlotStoredChanged(order.delivery_slot, v.value.delivery_slot))
     ) {
       evtAction = 'order_reschedule';
     }
@@ -1278,26 +1452,33 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   }
   const v = schemas.validate(schemas.orderClientPatchSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
-  if (!['processing', 'confirmed'].includes(order.status)) {
+  if (!['new', 'pending_operator', 'confirmed'].includes(order.status)) {
     return res.status(400).json({ error: 'Заказ на этой стадии нельзя изменить.' });
   }
   const { address, delivery_date, delivery_slot, change_reason } = v.value;
+  const availability = await loadDeliveryAvailability();
+  const nextDate = delivery_date != null ? String(delivery_date).trim() : String(order.delivery_date || '').trim();
+  const nextSlot = delivery_slot != null ? String(delivery_slot).trim() : String(order.delivery_slot || '').trim();
+  const bookCheck = deliveryAvailability.validateDeliveryBooking(nextDate, nextSlot, availability);
+  if (!bookCheck.ok) return res.status(400).json({ error: bookCheck.error });
   const parts = [];
   const vals = [];
   const touched = [];
   if (address != null) {
+    const addrCheckClient = orenburgAddress.validateDeliveryAddressLine(address);
+    if (!addrCheckClient.ok) return res.status(400).json({ error: addrCheckClient.error });
     parts.push('address = ?');
     vals.push(address);
     touched.push('address');
   }
   if (delivery_date != null) {
     parts.push('delivery_date = ?');
-    vals.push(delivery_date);
+    vals.push(bookCheck.value.date);
     touched.push('delivery_date');
   }
   if (delivery_slot != null) {
     parts.push('delivery_slot = ?');
-    vals.push(delivery_slot);
+    vals.push(bookCheck.value.slot);
     touched.push('delivery_slot');
   }
   if (!parts.length) {
@@ -1314,14 +1495,113 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
   res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
 }));
 
+/** Дата заказа для отчётов: доставка или дата создания. */
+const ADMIN_ORDER_DATE_EXPR = `COALESCE(NULLIF(trim(o.delivery_date), ''), to_char(o.created_at, 'YYYY-MM-DD'))`;
+
+function todayIsoLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseAdminStatsPeriodQuery(req) {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  let from = iso.test(String(req.query.from || '').trim()) ? String(req.query.from).trim() : null;
+  let to = iso.test(String(req.query.to || '').trim()) ? String(req.query.to).trim() : null;
+  const today = todayIsoLocal();
+  if (from && from > today) {
+    return { error: 'Дата «с» не может быть позже сегодняшнего дня.' };
+  }
+  if (to && to > today) {
+    return { error: 'Дата «по» не может быть в будущем.' };
+  }
+  if (from && to && from > to) {
+    return { error: 'Дата «с» не может быть позже даты «по».' };
+  }
+  return { from, to };
+}
+
+function adminStatsOrderPeriodClause(from, to) {
+  const parts = [];
+  const vals = [];
+  if (from) {
+    parts.push(`${ADMIN_ORDER_DATE_EXPR} >= ?`);
+    vals.push(from);
+  }
+  if (to) {
+    parts.push(`${ADMIN_ORDER_DATE_EXPR} <= ?`);
+    vals.push(to);
+  }
+  const where = parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+  return { where, vals };
+}
+
 app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  const parsed = parseAdminStatsPeriodQuery(req);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const { from, to } = parsed;
+  const { where, vals } = adminStatsOrderPeriodClause(from, to);
+
   const byRoleRows = await db.prepare(`SELECT role, COUNT(*)::int AS c FROM users GROUP BY role ORDER BY role`).all();
   const usersByRole = {};
   for (const row of byRoleRows || []) usersByRole[String(row.role)] = Number(row.c) || 0;
-  const ordersTotalRow = await db.prepare(`SELECT COUNT(*)::int AS c FROM orders`).get();
+
+  const summaryRow =
+    (await db
+      .prepare(
+        `SELECT COUNT(*)::int AS orders_total,
+                COALESCE(SUM(o.total_sum), 0)::float AS orders_sum,
+                COUNT(*) FILTER (WHERE o.status = 'delivered')::int AS delivered_count,
+                COALESCE(SUM(o.total_sum) FILTER (WHERE o.status = 'delivered'), 0)::float AS delivered_sum,
+                COUNT(*) FILTER (WHERE o.status = 'cancelled')::int AS cancelled_count
+         FROM orders o ${where}`
+      )
+      .get(...vals)) || {};
+
   const ordersByStatus = await db
-    .prepare(`SELECT status, COUNT(*)::int AS c FROM orders GROUP BY status ORDER BY status`)
-    .all();
+    .prepare(
+      `SELECT o.status AS status,
+              COUNT(*)::int AS c,
+              COALESCE(SUM(o.total_sum), 0)::float AS sum
+       FROM orders o ${where}
+       GROUP BY o.status
+       ORDER BY c DESC, o.status`
+    )
+    .all(...vals);
+
+  const ordersByZone = await db
+    .prepare(
+      `SELECT COALESCE(NULLIF(trim(o.zone), ''), 'Не указана') AS label,
+              COUNT(*)::int AS c,
+              COALESCE(SUM(o.total_sum), 0)::float AS sum
+       FROM orders o ${where}
+       GROUP BY 1
+       ORDER BY c DESC, label`
+    )
+    .all(...vals);
+
+  const ordersByPayment = await db
+    .prepare(
+      `SELECT COALESCE(NULLIF(trim(o.payment_method), ''), 'Не указан') AS label,
+              COUNT(*)::int AS c,
+              COALESCE(SUM(o.total_sum), 0)::float AS sum
+       FROM orders o ${where}
+       GROUP BY 1
+       ORDER BY c DESC, label`
+    )
+    .all(...vals);
+
+  const ordersByDriver = await db
+    .prepare(
+      `SELECT COALESCE(NULLIF(trim(o.driver), ''), 'Не назначен') AS label,
+              COUNT(*)::int AS c,
+              COALESCE(SUM(o.total_sum), 0)::float AS sum
+       FROM orders o ${where}
+       GROUP BY 1
+       ORDER BY c DESC, label
+       LIMIT 20`
+    )
+    .all(...vals);
+
   const prodRow =
     (await db
       .prepare(
@@ -1330,13 +1610,33 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
          FROM products`
       )
       .get()) || {};
-  res.json({
-    usersByRole,
-    ordersTotal: Number(ordersTotalRow?.c ?? 0),
-    ordersByStatus: (ordersByStatus || []).map((x) => ({
-      status: x.status,
+
+  const mapRows = (rows) =>
+    (rows || []).map((x) => ({
+      label: x.label != null ? String(x.label) : String(x.status || ''),
+      status: x.status != null ? String(x.status) : undefined,
       count: Number(x.c) || 0,
+      sum: Math.round((Number(x.sum) || 0) * 100) / 100,
+    }));
+
+  res.json({
+    period: { from, to },
+    usersByRole,
+    summary: {
+      ordersTotal: Number(summaryRow.orders_total ?? 0),
+      ordersSum: Math.round((Number(summaryRow.orders_sum) || 0) * 100) / 100,
+      deliveredCount: Number(summaryRow.delivered_count ?? 0),
+      deliveredSum: Math.round((Number(summaryRow.delivered_sum) || 0) * 100) / 100,
+      cancelledCount: Number(summaryRow.cancelled_count ?? 0),
+    },
+    ordersByStatus: mapRows(ordersByStatus).map((x) => ({
+      status: x.status || x.label,
+      count: x.count,
+      sum: x.sum,
     })),
+    ordersByZone: mapRows(ordersByZone),
+    ordersByPayment: mapRows(ordersByPayment),
+    ordersByDriver: mapRows(ordersByDriver),
     productsTotal: Number(prodRow.total ?? 0),
     productsVisible: Number(prodRow.visible ?? prodRow.total ?? 0),
   });
@@ -1464,8 +1764,8 @@ app.post('/api/admin/products', requireAuth, requireRole('admin'), csrfMiddlewar
   if (!cat) return res.status(400).json({ error: 'Категория не найдена.' });
   const info = await db
     .prepare(
-      `INSERT INTO products (category_id, name, description, price, volume_liters, stock, sort_order, hidden)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO products (category_id, name, description, price, volume_liters, stock, sort_order, hidden, preorder)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       p.category_id,
@@ -1475,7 +1775,8 @@ app.post('/api/admin/products', requireAuth, requireRole('admin'), csrfMiddlewar
       p.volume_liters ?? null,
       p.stock,
       p.sort_order ?? 0,
-      p.hidden ?? 0
+      p.hidden ?? 0,
+      p.preorder ?? 0
     );
   const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(info.lastInsertRowid);
   audit(db, req.user.id, 'admin_product_create', `id=${product.id}`, req.ip);
@@ -1495,7 +1796,7 @@ app.patch('/api/admin/products/:id', requireAuth, requireRole('admin'), csrfMidd
   }
   const fields = [];
   const values = [];
-  const keys = ['category_id', 'name', 'description', 'price', 'volume_liters', 'stock', 'sort_order', 'hidden'];
+  const keys = ['category_id', 'name', 'description', 'price', 'volume_liters', 'stock', 'sort_order', 'hidden', 'preorder'];
   keys.forEach((k) => {
     if (p[k] == null && p[k] !== 0) return;
     fields.push(`${k} = ?`);
@@ -1587,6 +1888,38 @@ app.patch(
       .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
       .run('deliveryCoverage', JSON.stringify(v.value));
     audit(db, req.user.id, 'manager_settings', 'deliveryCoverage', req.ip);
+    res.json({ ok: true });
+  })
+);
+
+app.patch(
+  '/api/manager/settings/delivery-faq',
+  requireAuth,
+  requireRole('manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.deliveryFaqPanelSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    await db
+      .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+      .run('deliveryFaq', JSON.stringify(v.value));
+    audit(db, req.user.id, 'manager_settings', 'deliveryFaq', req.ip);
+    res.json({ ok: true });
+  })
+);
+
+app.patch(
+  '/api/manager/settings/about-certificates',
+  requireAuth,
+  requireRole('manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.aboutCertificatesPanelSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    await db
+      .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+      .run('aboutCertificates', JSON.stringify(v.value));
+    audit(db, req.user.id, 'manager_settings', 'aboutCertificates', req.ip);
     res.json({ ok: true });
   })
 );
@@ -1723,6 +2056,12 @@ server.on('listening', () => {
   console.log('  managerekva@mail.ru      / ManagerEkva2026!');
   // eslint-disable-next-line no-console
   console.log('  operatorekva@mail.ru     / OperatorEkva2026!');
+  if (!String(process.env.YANDEX_MAPS_API_KEY || '').trim()) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Карты: задайте YANDEX_MAPS_API_KEY в .env (см. .env.example) — без ключа Яндекс.Карты не загрузятся.'
+    );
+  }
 
   checkPostgresConnection();
 });

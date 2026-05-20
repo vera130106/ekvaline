@@ -6,6 +6,9 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -32,8 +35,14 @@ const PUBLIC_WITH_TOPBAR = [
 const ROOT_JS = [
   'server.js',
   'db.js',
-  'postgres.js',
   'schemas.js',
+  'security-middleware.js',
+  'order-pricing.js',
+  'delivery-slots.js',
+  'delivery-availability.js',
+  'orenburg-address.js',
+  'geocode-proxy.js',
+  'opx-field-limits.js',
   'app-core.js',
   'api-client.js',
   'script.js',
@@ -119,6 +128,60 @@ function checkIndexCalc() {
   ok('Главная + script.js: калькулятор и уведомления');
 }
 
+function checkOperatorHtml() {
+  const html = read('operator.html');
+  const a = scriptSrcIndex(html, 'api-client.js');
+  const slots = scriptSrcIndex(html, 'delivery-slots.js');
+  const lim = scriptSrcIndex(html, 'opx-field-limits.js');
+  const b = scriptSrcIndex(html, 'operator.js');
+  if (a === -1 || slots === -1 || lim === -1 || b === -1) {
+    fail('operator.html: нужны api-client, delivery-slots, opx-field-limits, operator.js');
+  }
+  if (!(a < slots && slots < lim && lim < b)) {
+    fail('operator.html: порядок api-client → delivery-slots → opx-field-limits → operator.js');
+  }
+  for (const id of ['opxOrdersBody', 'opxLogoutBtn', 'opxRefreshBtn', 'opxToast']) {
+    if (!html.includes(`id="${id}"`)) fail(`operator.html: нет #${id}`);
+  }
+  const limits = require(join(ROOT, 'opx-field-limits.js'));
+  const checks = [
+    ['opxModalClient', limits.NAME_MAX],
+    ['opxModalAddress', limits.ADDRESS_MAX],
+    ['opxModalNote', limits.NOTE_MAX],
+    ['opxOrderReasonText', limits.CHANGE_REASON_MAX],
+    ['opxSearchInput', limits.SEARCH_MAX],
+  ];
+  for (const [id, max] of checks) {
+    const re = new RegExp(`id="${id}"[^>]*maxlength="${max}"`, 'i');
+    const re2 = new RegExp(`maxlength="${max}"[^>]*id="${id}"`, 'i');
+    if (!re.test(html) && !re2.test(html)) {
+      fail(`operator.html: у #${id} ожидался maxlength="${max}"`);
+    }
+  }
+  ok('operator.html: скрипты, лимиты полей и ключевые элементы панели');
+}
+
+function checkRescheduleDetection() {
+  const slots = read('delivery-slots.js');
+  if (!slots.includes('function deliveryDateStoredChanged')) {
+    fail('delivery-slots.js: нет deliveryDateStoredChanged');
+  }
+  if (!slots.includes('function deliverySlotStoredChanged')) {
+    fail('delivery-slots.js: нет deliverySlotStoredChanged');
+  }
+  const op = read('operator.js');
+  if (!op.includes('window.DeliverySlots')) {
+    fail('operator.js: должен использовать DeliverySlots из delivery-slots.js');
+  }
+  if (op.includes('effectiveDeliveryDateIsoForOrder(order)') && op.includes('orderDeliveryRescheduleChanged')) {
+    const fn = op.slice(op.indexOf('function orderDeliveryRescheduleChanged'), op.indexOf('function orderDeliveryRescheduleChanged') + 600);
+    if (fn.includes('effectiveDeliveryDateIsoForOrder')) {
+      fail('operator.js: orderDeliveryRescheduleChanged не должен сравнивать с датой из created_at');
+    }
+  }
+  ok('Перенос доставки: delivery-slots.js + оператор');
+}
+
 function checkCatalogImages() {
   const html = read('catalog.html');
   for (const s of ['assets/product-18-9-white.png', 'assets/product-2-4.png', 'assets/product-5.png']) {
@@ -152,6 +215,48 @@ checkSyntax();
 checkForbiddenTypos();
 checkPublicHtml();
 checkIndexCalc();
+checkOperatorHtml();
+checkRescheduleDetection();
+
+function checkSecurityModules() {
+  const srv = read('server.js');
+  if (!srv.includes("require('./security-middleware')")) {
+    fail('server.js: не подключён security-middleware');
+  }
+  if (!srv.includes("require('./order-pricing')")) {
+    fail('server.js: не подключён order-pricing (пересчёт цен на сервере)');
+  }
+  if (!srv.includes('resolveOperatorOrderLines')) {
+    fail('server.js: operator create должен вызывать resolveOperatorOrderLines');
+  }
+  if (!srv.includes('resolveStaffOrderItemsPatch')) {
+    fail('server.js: staff PATCH должен пересчитывать items_json');
+  }
+  const adminJs = read('admin.js');
+  if (/AdminEkva2026!/.test(adminJs) && adminJs.includes('api/auth/login')) {
+    fail('admin.js: не должно быть автологина с паролем из исходника');
+  }
+  const op = read('operator.js');
+  if (!op.includes('staffSessionOk')) {
+    fail('operator.js: нет проверки staffSessionOk (сессия сервера)');
+  }
+  const scr = read('script.js');
+  if (/OperatorEkva2026!|AdminEkva2026!/.test(scr)) {
+    fail('script.js: не должно быть паролей сотрудников в исходнике');
+  }
+  ok('Безопасность: middleware, цены на сервере, сессия staff');
+}
+
+checkSecurityModules();
+
+function checkDockerFiles() {
+  for (const f of ['Dockerfile', 'docker-compose.yml', 'docker/entrypoint.sh', '.dockerignore']) {
+    if (!existsSync(join(ROOT, f))) fail(`Нет файла Docker: ${f}`);
+  }
+  ok('Docker: Dockerfile, compose, entrypoint');
+}
+
+checkDockerFiles();
 checkCatalogImages();
 
 console.log('\n\x1b[32mПроверки пройдены.\x1b[0m');

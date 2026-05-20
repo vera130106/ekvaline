@@ -17,12 +17,11 @@
 (function initAuthAndCabinet() {
   const USERS_KEY = 'ekvaline_users';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
-  const STAFF_DEMO_ACCOUNTS = {
-    'manager@ekvaline.local': { password: 'AquaManager2026', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
-    'managerekva@mail.ru': { password: 'ManagerEkva2026!', role: 'manager', name: 'Менеджер блога', redirect: 'manager.html' },
-    'operatorekva@mail.ru': { password: 'OperatorEkva2026!', role: 'operator', name: 'Оператор', redirect: 'operator.html' },
-    'adminekva@mail.ru': { password: 'AdminEkva2026!', role: 'admin', name: 'Администратор', redirect: 'admin.html' },
-  };
+  const STAFF_RESERVED_EMAILS = new Set([
+    'managerekva@mail.ru',
+    'operatorekva@mail.ru',
+    'adminekva@mail.ru',
+  ]);
 
   const loginTrigger = document.querySelector('[data-auth-login]');
   const registerTrigger = document.querySelector('[data-auth-register]');
@@ -73,7 +72,7 @@
 
         <form id="authRegisterForm" class="auth-form hidden" novalidate>
           <label>Имя
-            <input type="text" id="authRegName" maxlength="40" placeholder="Ваше имя" autocomplete="name" />
+            <input type="text" id="authRegName" maxlength="40" placeholder="Ева" autocomplete="name" />
           </label>
           <label>Email
             <input type="email" id="authRegEmail" placeholder="example@mail.ru" autocomplete="email" />
@@ -663,6 +662,30 @@
     return 'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
   }
 
+  function staffPageForRole(role) {
+    const r = String(role || '').toLowerCase();
+    if (r === 'admin') return 'admin.html';
+    if (r === 'operator') return 'operator.html';
+    if (r === 'manager') return 'manager.html';
+    if (r === 'driver') return 'driver.html';
+    return null;
+  }
+
+  function persistLoggedInUserFromApi(u) {
+    const displayName =
+      String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email || 'Пользователь';
+    saveCurrentUser({
+      id: u.id,
+      name: displayName,
+      email: u.email,
+      phone: u.phone || '',
+      role: u.role,
+      first_name: u.first_name,
+      last_name: u.last_name,
+      bonus_balance: u.bonus_balance,
+    });
+  }
+
   authLoginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authLoginError.textContent = '';
@@ -678,66 +701,9 @@
     }
 
     const looksLikeEmail = /\S@\S/.test(credential);
-    const staff = looksLikeEmail ? STAFF_DEMO_ACCOUNTS[byEmail] : undefined;
-    if (staff) {
-      if (password !== staff.password) {
-        authLoginError.textContent = 'Неверный пароль сотрудника.';
-        return;
-      }
-      const skipServerSession = byEmail === 'manager@ekvaline.local';
-      if (skipServerSession) {
-        saveCurrentUser({
-          id: staff.role,
-          name: staff.name,
-          email: byEmail,
-          phone: '',
-          role: staff.role,
-        });
-        closeAuthModal();
-        window.location.href = staff.redirect;
-        return;
-      }
-      const api = window.EkvalineAPI;
-      if (!api || typeof api.json !== 'function') {
-        authLoginError.textContent =
-          'Вход сотрудника требует сервер: в папке проекта npm start и адрес http://localhost:3001 (не файл с диска).';
-        return;
-      }
-      const r = await api.json('/api/auth/login', {
-        method: 'POST',
-        body: { credential, password },
-      });
-      if (!r.ok) {
-        authLoginError.textContent = String(
-          r.data?.error || 'Сервер отклонил вход. Проверьте, что БД запущена и есть демо-пользователи (см. вывод npm start).'
-        );
-        return;
-      }
-      const u = r.data?.user;
-      if (!u || String(u.role || '').toLowerCase() !== staff.role) {
-        authLoginError.textContent = 'Учётная запись в базе не совпадает с ролью оператора/админа. Обратитесь к администратору БД.';
-        return;
-      }
-      api.resetCsrf?.();
-      const displayName =
-        String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email || staff.name;
-      saveCurrentUser({
-        id: u.id,
-        name: displayName,
-        email: u.email,
-        phone: u.phone || '',
-        role: u.role,
-        first_name: u.first_name,
-        last_name: u.last_name,
-        bonus_balance: u.bonus_balance,
-      });
-      closeAuthModal();
-      window.location.href = staff.redirect;
-      return;
-    }
-
-    const user = readUsers().find((item) => item.email === byEmail || item.phone === byPhone);
     const apiCli = window.EkvalineAPI;
+
+    /** Сначала всегда сервер (пароль из БД — в т.ч. учётки, созданные админом). */
     if (apiCli?.json) {
       let rApi;
       try {
@@ -746,58 +712,57 @@
           body: { credential, password },
         });
       } catch {
-        authLoginError.textContent =
-          'Не удалось связаться с сервером. Запустите в папке проекта команду запуска и откройте сайт по адресу с номером порта (не файл с диска и не режим предпросмотра без сервера).';
-        return;
+        rApi = null;
       }
-      if (rApi.ok && rApi.data?.user) {
-        const u = rApi.data.user;
-        apiCli.resetCsrf?.();
-        const displayName =
-          String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email;
-        saveCurrentUser({
-          id: u.id,
-          name: displayName,
-          email: u.email,
-          phone: u.phone || '',
-          role: u.role,
-          first_name: u.first_name,
-          last_name: u.last_name,
-          bonus_balance: u.bonus_balance,
-        });
-        updateHeaderAuth();
-        closeAuthModal();
-        const roleAfterLogin = String(u.role || '').toLowerCase();
-        if (roleAfterLogin === 'driver') {
-          window.location.href = 'driver.html';
+
+      if (rApi) {
+        if (rApi.ok && rApi.data?.user) {
+          const u = rApi.data.user;
+          apiCli.resetCsrf?.();
+          persistLoggedInUserFromApi(u);
+          updateHeaderAuth();
+          closeAuthModal();
+          const staffPage = staffPageForRole(u.role);
+          if (staffPage) {
+            window.location.href = staffPage;
+            return;
+          }
+          window.setTimeout(() => openCabinet(), 50);
           return;
         }
-        window.setTimeout(() => openCabinet(), 50);
-        return;
-      }
-      if (rApi.status === 401) {
-        authLoginError.textContent = String(rApi.data?.error || 'Неверный логин или пароль.');
-        return;
-      }
-      if (rApi.status === 423) {
-        authLoginError.textContent = String(rApi.data?.error || 'Вход временно заблокирован.');
-        return;
-      }
-      if (rApi.status === 403) {
-        const raw = String(rApi.data?.error || '');
-        authLoginError.textContent = /csrf|токен/i.test(raw)
-          ? 'Сессия устарела. Обновите страницу и войдите снова.'
-          : raw || 'Вход сейчас недоступен. Попробуйте позже.';
-        return;
-      }
-      if (Number(rApi.status) > 0 && rApi.status !== 401) {
-        authLoginError.textContent = 'Не удалось войти. Проверьте подключение к интернету или попробуйте позже.';
-        return;
+        if (rApi.status === 401) {
+          authLoginError.textContent = String(rApi.data?.error || 'Неверный логин или пароль.');
+          return;
+        }
+        if (rApi.status === 423) {
+          authLoginError.textContent = String(rApi.data?.error || 'Вход временно заблокирован.');
+          return;
+        }
+        if (rApi.status === 403) {
+          const raw = String(rApi.data?.error || '');
+          authLoginError.textContent = /csrf|токен/i.test(raw)
+            ? 'Сессия устарела. Обновите страницу и войдите снова.'
+            : raw || 'Вход сейчас недоступен. Попробуйте позже.';
+          return;
+        }
+        if (Number(rApi.status) > 0) {
+          authLoginError.textContent = 'Не удалось войти. Попробуйте позже.';
+          return;
+        }
       }
     }
 
+    if (looksLikeEmail && STAFF_RESERVED_EMAILS.has(byEmail)) {
+      authLoginError.textContent =
+        'Вход сотрудника только через сервер (npm start). Пароль проверяется в базе данных.';
+      return;
+    }
+
+    const user = readUsers().find((item) => item.email === byEmail || item.phone === byPhone);
     if (!user || user.password !== password) {
-      authLoginError.textContent = 'Неверные данные для входа.';
+      authLoginError.textContent = apiCli?.json
+        ? 'Неверный логин или пароль.'
+        : 'Неверные данные для входа. Запустите сервер для входа по учётке из админ-панели.';
       return;
     }
 
@@ -833,7 +798,7 @@
       authRegisterError.textContent = 'Введите корректный email.';
       return;
     }
-    if (STAFF_DEMO_ACCOUNTS[email]) {
+    if (STAFF_RESERVED_EMAILS.has(email)) {
       authRegisterError.textContent = 'Этот логин зарезервирован для служебного аккаунта.';
       return;
     }
@@ -1158,11 +1123,22 @@
     if (!(card instanceof HTMLElement)) return null;
     const title = card.querySelector('h3')?.textContent?.trim() || 'Товар';
     const priceText = card.querySelector('.full-card-price, .catalog-price')?.textContent || '';
-    const preorder = hasPreorderMark(card) || /уточнять/i.test(priceText);
+    const preorder =
+      card.getAttribute('data-preorder') === '1' || hasPreorderMark(card) || /уточнять/i.test(priceText);
     const water = isWaterProduct(title);
-    const id = water ? 'water_18_9' : title.toLowerCase().replace(/\s+/g, '_');
-    const price = preorder ? 0 : parsePrice(priceText);
-    return { id, title, price, qty: 1, water, preorder };
+    const productId = card.getAttribute('data-product-id');
+    const priceAttr = card.getAttribute('data-price');
+    const id = productId
+      ? `product_${productId}`
+      : water
+        ? 'water_18_9'
+        : title.toLowerCase().replace(/\s+/g, '_');
+    let price = preorder ? 0 : parsePrice(priceText);
+    if (!preorder && priceAttr != null && priceAttr !== '') {
+      const n = Number(priceAttr);
+      if (Number.isFinite(n)) price = n;
+    }
+    return { id, title, price, qty: 1, water, preorder, productId: productId ? Number(productId) : undefined };
   }
 
   function normalizeCartItems(items) {
@@ -1231,6 +1207,7 @@
           </label>
           <label class="checkout-field">Дата доставки
             <input type="date" id="checkoutDeliveryDate" name="deliveryDate" required />
+            <span class="checkout-field-hint" id="checkoutDeliveryDateHint">Доставка с завтрашнего дня (сегодня выбрать нельзя)</span>
           </label>
           <label class="checkout-field">Интервал доставки
             <select id="checkoutDeliverySlot" name="deliverySlot" required>
@@ -1261,7 +1238,7 @@
         <p class="checkout-subtitle">Заполните поля адреса, карта автоматически покажет точку.</p>
         <div class="checkout-map-form">
           <label class="checkout-field">Город
-            <input type="text" id="mapCityInput" maxlength="60" placeholder="Например: Москва" list="mapCitySuggestions" autocomplete="off" />
+            <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
           </label>
           <label class="checkout-field">Улица
             <div class="address-suggest-wrap">
@@ -1376,6 +1353,167 @@
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+  }
+
+  function earliestDeliveryIsoDate() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function deliveryDateAllowed(iso) {
+    const d = String(iso || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= earliestDeliveryIsoDate();
+  }
+
+  const CHECKOUT_SLOT_DEFS = [
+    { key: '09:00-14:00', label: '09:00–14:00' },
+    { key: '14:00-17:00', label: '14:00–17:00' },
+    { key: '17:00-21:00', label: '17:00–21:00' },
+    { key: '09:00-17:00', label: 'Для организаций: 09:00–17:00' },
+  ];
+
+  let checkoutAvailability = { closedDays: [], closedSlots: [] };
+
+  function normalizeCheckoutSlotKey(raw) {
+    const flat = String(raw || '')
+      .trim()
+      .replace(/\u2013|\u2014|\u2212/g, '-')
+      .replace(/\s+/g, '');
+    if (!flat) return '';
+    for (const def of CHECKOUT_SLOT_DEFS) {
+      const k = def.key.replace(/\s/g, '');
+      if (flat === k || flat.includes(k)) return def.key;
+    }
+    const m = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/.exec(flat);
+    if (m) {
+      const cand = `${m[1]}-${m[2]}`;
+      if (CHECKOUT_SLOT_DEFS.some((s) => s.key === cand)) return cand;
+    }
+    return '';
+  }
+
+  function isCheckoutDayClosed(iso) {
+    const d = String(iso || '').trim();
+    return checkoutAvailability.closedDays.includes(d);
+  }
+
+  function isCheckoutSlotClosed(iso, slotKey) {
+    const d = String(iso || '').trim();
+    const slot = normalizeCheckoutSlotKey(slotKey);
+    if (!d || !slot) return false;
+    if (isCheckoutDayClosed(d)) return true;
+    return checkoutAvailability.closedSlots.some((r) => r.date === d && r.slot === slot);
+  }
+
+  function availableCheckoutSlots(iso) {
+    if (!deliveryDateAllowed(iso) || isCheckoutDayClosed(iso)) return [];
+    return CHECKOUT_SLOT_DEFS.filter((s) => !isCheckoutSlotClosed(iso, s.key));
+  }
+
+  function addIsoCalendarDays(iso, days) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return iso;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setDate(d.getDate() + days);
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${day}`;
+  }
+
+  function firstCheckoutDateWithSlots(fromIso) {
+    let cur = String(fromIso || earliestDeliveryIsoDate()).trim();
+    for (let i = 0; i < 90; i += 1) {
+      if (availableCheckoutSlots(cur).length) return cur;
+      cur = addIsoCalendarDays(cur, 1);
+    }
+    return '';
+  }
+
+  function setCheckoutDeliveryHint(text) {
+    const el = document.getElementById('checkoutDeliveryDateHint');
+    if (el instanceof HTMLElement) el.textContent = text;
+  }
+
+  async function loadCheckoutAvailability() {
+    try {
+      const res = await fetch('/api/public/delivery-availability', {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      checkoutAvailability = {
+        closedDays: Array.isArray(data.closedDays) ? data.closedDays.map((d) => String(d).trim()).filter(Boolean) : [],
+        closedSlots: Array.isArray(data.closedSlots)
+          ? data.closedSlots
+              .map((r) => ({
+                date: String(r?.date || '').trim(),
+                slot: normalizeCheckoutSlotKey(r?.slot),
+              }))
+              .filter((r) => r.date && r.slot)
+          : [],
+      };
+    } catch {
+      checkoutAvailability = { closedDays: [], closedSlots: [] };
+    }
+  }
+
+  function refreshCheckoutDeliveryUi() {
+    if (!(checkoutDeliveryDate instanceof HTMLInputElement) || !(checkoutDeliverySlot instanceof HTMLSelectElement)) {
+      return;
+    }
+    const minDate = earliestDeliveryIsoDate();
+    checkoutDeliveryDate.min = minDate;
+    let date = checkoutDeliveryDate.value || minDate;
+    if (date < minDate) date = minDate;
+
+    if (isCheckoutDayClosed(date) || !availableCheckoutSlots(date).length) {
+      const next = firstCheckoutDateWithSlots(minDate);
+      if (!next) {
+        setCheckoutDeliveryHint('Приём заказов временно закрыт на все даты. Свяжитесь с оператором.');
+        checkoutDeliverySlot.innerHTML = '<option value="">Нет доступных интервалов</option>';
+        checkoutDeliverySlot.disabled = true;
+        return;
+      }
+      date = next;
+      checkoutDeliveryDate.value = date;
+    }
+
+    const slots = availableCheckoutSlots(date);
+    checkoutDeliverySlot.disabled = !slots.length;
+    const prev = normalizeCheckoutSlotKey(checkoutDeliverySlot.value);
+    checkoutDeliverySlot.innerHTML = slots.length
+      ? slots.map((s) => `<option value="${s.key}">${s.label}</option>`).join('')
+      : '<option value="">Нет доступных интервалов</option>';
+    if (slots.some((s) => s.key === prev)) checkoutDeliverySlot.value = prev;
+    else if (slots.length) checkoutDeliverySlot.value = slots[0].key;
+
+    if (isCheckoutDayClosed(date)) {
+      setCheckoutDeliveryHint('На выбранную дату приём заказов закрыт — выберите другой день.');
+    } else if (!slots.length) {
+      setCheckoutDeliveryHint('На эту дату все интервалы закрыты — выберите другой день.');
+    } else {
+      setCheckoutDeliveryHint('Доставка с завтрашнего дня (сегодня выбрать нельзя)');
+    }
+  }
+
+  function validateCheckoutBooking(date, slot) {
+    if (!deliveryDateAllowed(date)) {
+      return 'Проверьте дату доставки (не раньше завтра).';
+    }
+    if (isCheckoutDayClosed(date)) {
+      return 'На выбранную дату приём заказов закрыт оператором.';
+    }
+    const slotKey = normalizeCheckoutSlotKey(slot);
+    if (!slotKey || isCheckoutSlotClosed(date, slotKey)) {
+      return 'Выбранный интервал недоступен на эту дату.';
+    }
+    return '';
   }
 
   function setCartError(message) {
@@ -1526,6 +1664,15 @@
     const direct = address.road || address.pedestrian || address.footway || '';
     if (!direct) return '';
     return toTitleCase(direct);
+  }
+
+  function isOrenburgCityName(city) {
+    const t = normalizeAddressToken(city);
+    return t === 'оренбург' || t.includes('оренбург');
+  }
+
+  function enforceOrenburgCityInput() {
+    if (mapCityInput instanceof HTMLInputElement) mapCityInput.value = DEFAULT_CITY;
   }
 
   function isOrenburgCityAddress(row) {
@@ -1868,6 +2015,7 @@
     let best = null;
     let bestScore = -1;
     rows.forEach((row) => {
+      if (!isOrenburgCityAddress(row)) return;
       const addr = row.address || {};
       const city = normalizeAddressToken(addr.city || addr.town || addr.village || addr.state || '');
       const street = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
@@ -1972,10 +2120,16 @@
 
   function applyReverseAddress(data) {
     const addr = (data && data.address) || {};
-    const city = addr.city || addr.town || addr.village || addr.state || '';
+    const cityRaw = addr.city || addr.town || addr.village || addr.state || '';
+    if (!isOrenburgCityName(cityRaw) && !/оренбург/i.test(String(data?.display_name || ''))) {
+      if (checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent = 'Эта точка вне зоны доставки по Оренбургу.';
+      }
+      return;
+    }
     const street = addr.road || addr.pedestrian || addr.footway || '';
     const house = addr.house_number || '';
-    if (mapCityInput instanceof HTMLInputElement && city) mapCityInput.value = city;
+    enforceOrenburgCityInput();
     if (mapStreetInput instanceof HTMLInputElement && street) mapStreetInput.value = street;
     if (mapHouseInput instanceof HTMLInputElement && house) mapHouseInput.value = house;
   }
@@ -1988,7 +2142,12 @@
   }
 
   function updatePickedAddressLabel() {
+    enforceOrenburgCityInput();
     const parts = readAddressParts();
+    if (!isOrenburgCityName(parts.city)) {
+      parts.city = DEFAULT_CITY;
+      enforceOrenburgCityInput();
+    }
     pickedAddress = formatAddressByTemplate(parts);
     const apartmentFilled = Boolean(parts.apartment);
     const apartmentExtrasOk = apartmentFilled ? Boolean(parts.floor && parts.entrance) : true;
@@ -2200,11 +2359,17 @@
           ? `В корзине есть товары "под заказ". Укажите свою почту в примечании к заказу: компания пришлет всю необходимую информацию и дату доставки. Текущая сумма оплачиваемых позиций: ${subtotal} ₽.`
           : `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
     }
-    if (checkoutDeliveryDate instanceof HTMLInputElement) {
-      const minDate = currentIsoDate();
-      checkoutDeliveryDate.min = minDate;
-      if (!checkoutDeliveryDate.value) checkoutDeliveryDate.value = minDate;
-    }
+    void (async () => {
+      await loadCheckoutAvailability();
+      if (checkoutDeliveryDate instanceof HTMLInputElement) {
+        const minDate = earliestDeliveryIsoDate();
+        checkoutDeliveryDate.min = minDate;
+        if (!checkoutDeliveryDate.value || checkoutDeliveryDate.value < minDate) {
+          checkoutDeliveryDate.value = minDate;
+        }
+      }
+      refreshCheckoutDeliveryUi();
+    })();
     checkoutModal?.classList.add('open');
     checkoutModal?.setAttribute('aria-hidden', 'false');
     updateCheckoutCommentCounter();
@@ -2323,10 +2488,14 @@
     }
   });
 
+  checkoutDeliveryDate?.addEventListener('change', () => {
+    refreshCheckoutDeliveryUi();
+  });
+
   if (checkoutForm instanceof HTMLFormElement) {
     updateCheckoutCommentCounter();
     checkoutCommentField?.addEventListener('input', updateCheckoutCommentCounter);
-    checkoutForm.addEventListener('submit', (event) => {
+    checkoutForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const user = readCurrentUser();
       if (!user || user.role === 'manager') return;
@@ -2342,81 +2511,138 @@
       const hasEntrance = /подъезд\s+\S+/i.test(address);
       const hasApartment = /кв\.\s*\S+/i.test(address);
       const apartmentAddressValid = hasApartment ? hasFloor && hasEntrance : true;
+      const bookingErr = validateCheckoutBooking(deliveryDate, deliverySlot);
       if (
         !address ||
         address.length > CHECKOUT_ADDRESS_MAX ||
         comment.length > CHECKOUT_COMMENT_MAX ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate) ||
-        !deliverySlot ||
+        bookingErr ||
         !apartmentAddressValid
       ) {
         showAppToast(
-          'Проверьте поля: выберите адрес на карте, дату и интервал доставки. Если указана квартира — обязательно заполните этаж и подъезд.',
+          bookingErr ||
+            'Проверьте поля: адрес на карте, дату (не раньше завтра) и интервал. Для квартиры укажите этаж и подъезд.',
           'error'
         );
         return;
       }
 
       const hasPreorderItems = items.some((item) => item.preorder);
+      if (hasPreorderItems) {
+        showAppToast('Товары «под заказ» оформляет оператор — уберите их из корзины или оставьте комментарий в поддержке.', 'error');
+        return;
+      }
+
+      const api = window.EkvalineAPI;
+      if (!api || typeof api.json !== 'function') {
+        showAppToast('Нет связи с сервером — обновите страницу и войдите в кабинет.', 'error');
+        return;
+      }
+
+      let products = [];
+      try {
+        const pr = await api.json('/api/products');
+        if (pr.ok && Array.isArray(pr.data?.products)) products = pr.data.products;
+      } catch {
+        showAppToast('Не удалось загрузить каталог товаров.', 'error');
+        return;
+      }
+
+      const resolveProductId = (item) => {
+        if (item.productId && Number.isFinite(Number(item.productId))) return Number(item.productId);
+        if (item.water) {
+          const w = products.find((p) => /вода|18\.?9/i.test(String(p.name || '')));
+          if (w) return Number(w.id);
+        }
+        const t = String(item.title || '').trim().toLowerCase();
+        const hit = products.find((p) => String(p.name || '').trim().toLowerCase() === t);
+        return hit ? Number(hit.id) : null;
+      };
+
+      const lineItems = [];
+      for (const item of items) {
+        const pid = resolveProductId(item);
+        if (!pid) {
+          showAppToast(`Не найден товар в каталоге: ${item.title || 'позиция'}`, 'error');
+          return;
+        }
+        lineItems.push({ product_id: pid, qty: Math.max(1, Number(item.qty) || 1) });
+      }
+
       const subtotal = items.reduce((sum, item) => {
-        if (item.preorder) return sum;
         const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
         return sum + unitPrice * (item.qty || 0);
       }, 0);
-      const currentBonus = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
-      const bonusSpend = hasPreorderItems
-        ? 0
-        : Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
-      const total = Math.max(0, subtotal - bonusSpend);
-      const bonusEarned = Math.floor(total * 0.05);
+      const currentBonus = Number(user.bonus_balance ?? readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
+      const bonusSpend = Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
 
-      const orders = readByUser(ORDERS_KEY, String(user.id), []);
-      orders.unshift({
-        id: nextOrderId(),
-        createdAt: new Date().toISOString(),
-        status: hasPreorderItems ? 'pending_operator' : 'new',
-        items,
-        subtotal,
-        bonusSpend,
-        bonusEarned,
-        total,
-        address,
-        deliveryDate,
-        deliverySlot,
-        comment,
-        paymentDeferred: hasPreorderItems,
-      });
-      writeByUser(ORDERS_KEY, String(user.id), orders);
+      try {
+        const response = await api.json('/api/orders', {
+          method: 'POST',
+          body: {
+            address,
+            delivery_date: deliveryDate,
+            delivery_slot: deliverySlot,
+            payment_method: 'cash',
+            bonuses_used: bonusSpend,
+            courier_note: comment,
+            items: lineItems,
+          },
+        });
+        if (!response.ok) {
+          showAppToast(String(response.data?.error || 'Не удалось оформить заказ.'), 'error');
+          return;
+        }
+        api.resetCsrf?.();
+        const order = response.data?.order;
+        const updatedUser = response.data?.user;
+        if (updatedUser) {
+          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedUser));
+          if (typeof window.__ekvalineUpdateHeaderAuth === 'function') window.__ekvalineUpdateHeaderAuth();
+        }
+        const bonusEarned = Number(order?.bonuses_earned || Math.floor(Math.max(0, subtotal - bonusSpend) * 0.05));
 
-      const addresses = readByUser(ADDRESSES_KEY, String(user.id), []);
-      if (!addresses.includes(address)) {
-        addresses.unshift(address);
-        writeByUser(ADDRESSES_KEY, String(user.id), addresses.slice(0, 10));
-      }
+        const addresses = readByUser(ADDRESSES_KEY, String(user.id), []);
+        if (!addresses.includes(address)) {
+          addresses.unshift(address);
+          writeByUser(ADDRESSES_KEY, String(user.id), addresses.slice(0, 10));
+        }
 
-      writeByUser(BONUSES_KEY, String(user.id), currentBonus - bonusSpend + bonusEarned);
-      saveCart([]);
-      updateCartBadge();
-      renderCart();
-      closeCheckout();
-      closeCartModal();
-      checkoutForm.reset();
-      if (checkoutDeliveryDate instanceof HTMLInputElement) {
-        checkoutDeliveryDate.value = currentIsoDate();
-      }
-      updateCheckoutCommentCounter();
-      if (hasPreorderItems) {
+        saveCart([]);
+        updateCartBadge();
+        renderCart();
+        closeCheckout();
+        closeCartModal();
+        checkoutForm.reset();
+        if (checkoutDeliveryDate instanceof HTMLInputElement) {
+          checkoutDeliveryDate.value = earliestDeliveryIsoDate();
+        }
+        updateCheckoutCommentCounter();
         showAppToast(
-          'Заказ с товарами "под заказ" принят. Укажите свою почту в примечании: компания пришлет всю необходимую информацию и дату доставки.'
+          `Заказ №${order?.id || ''} принят. Статус «В обработке» — оператор подтвердит доставку. Начислено бонусов: ${bonusEarned}.`
         );
-      } else {
-        showAppToast(`Заказ оформлен! Начислено бонусов: ${bonusEarned}.`);
+      } catch {
+        showAppToast('Ошибка сети при оформлении заказа.', 'error');
       }
     });
   }
 
   applyMapAddressBtn?.addEventListener('click', () => {
+    enforceOrenburgCityInput();
+    const parts = readAddressParts();
+    if (!isOrenburgCityName(parts.city)) {
+      showAppToast('Доставка только по Оренбургу.', 'error');
+      return;
+    }
+    if (!parts.street || !parts.house) {
+      showAppToast('Укажите улицу из подсказок и номер дома.', 'error');
+      return;
+    }
     if (!pickedAddress || !(checkoutAddressInput instanceof HTMLInputElement)) return;
+    if (!/оренбург/i.test(pickedAddress)) {
+      showAppToast('Адрес должен быть в Оренбурге.', 'error');
+      return;
+    }
     checkoutAddressInput.value = pickedAddress.slice(0, CHECKOUT_ADDRESS_MAX);
     closeMapPicker();
   });
@@ -2435,10 +2661,7 @@
   });
 
   mapCityInput?.addEventListener('input', () => {
-    if (citySuggestTimer) window.clearTimeout(citySuggestTimer);
-    citySuggestTimer = window.setTimeout(() => {
-      void updateCitySuggestions();
-    }, 220);
+    enforceOrenburgCityInput();
   });
 
   mapStreetInput?.addEventListener('input', () => {
@@ -3050,20 +3273,6 @@ const heroBubbles = document.getElementById('catalogHeroBubbles');
 const coolerDetailsModal = document.getElementById('coolerDetailsModal');
 const aelDetailsModal = document.getElementById('aelDetailsModal');
 
-if (heroBubbles) {
-  for (let i = 0; i < 14; i += 1) {
-    const bubble = document.createElement('span');
-    const size = 8 + Math.random() * 14;
-    bubble.className = 'bubble';
-    bubble.style.width = `${size}px`;
-    bubble.style.height = `${size}px`;
-    bubble.style.left = `${Math.random() * 100}%`;
-    bubble.style.setProperty('--bubble-delay', `${Math.random() * 4}s`);
-    bubble.style.setProperty('--bubble-duration', `${5 + Math.random() * 5}s`);
-    heroBubbles.appendChild(bubble);
-  }
-}
-
 if (catalogFilters && catalogCards.length > 0) {
   const filterButtons = Array.from(catalogFilters.querySelectorAll('.catalog-filter-btn'));
 
@@ -3091,6 +3300,20 @@ if (catalogFilters && catalogCards.length > 0) {
       applyCatalogFilter(category);
     });
   });
+}
+
+if (heroBubbles) {
+  for (let i = 0; i < 14; i += 1) {
+    const bubble = document.createElement('span');
+    const size = 8 + Math.random() * 14;
+    bubble.className = 'bubble';
+    bubble.style.width = `${size}px`;
+    bubble.style.height = `${size}px`;
+    bubble.style.left = `${Math.random() * 100}%`;
+    bubble.style.setProperty('--bubble-delay', `${Math.random() * 4}s`);
+    bubble.style.setProperty('--bubble-duration', `${5 + Math.random() * 5}s`);
+    heroBubbles.appendChild(bubble);
+  }
 }
 
 function setupCatalogModal(modalElement, openSelector, closeSelector) {
@@ -3137,7 +3360,6 @@ catalogCards.forEach((card) => {
     const rotateX = (0.5 - y) * 4;
     card.style.transform = `translateY(-4px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
   });
-
   card.addEventListener('mouseleave', () => {
     card.style.transform = '';
   });
@@ -3380,10 +3602,10 @@ async function hydrateDeliveryCoverageSection() {
 
 void hydrateDeliveryCoverageSection();
 
-const deliveryLeafletMap = document.getElementById('deliveryLeafletMap');
+const deliveryZoneMap = document.getElementById('deliveryZoneMap');
 
-if (deliveryLeafletMap && window.EkvalineMaps && typeof window.EkvalineMaps.initStaticMap === 'function') {
-  void window.EkvalineMaps.initStaticMap(deliveryLeafletMap, [51.768, 55.102], 12).catch(() => {});
+if (deliveryZoneMap && window.EkvalineMaps && typeof window.EkvalineMaps.initStaticMap === 'function') {
+  void window.EkvalineMaps.initStaticMap(deliveryZoneMap, [51.768, 55.102], 12).catch(() => {});
 }
 
 const aboutSteps = document.getElementById('aboutSteps');

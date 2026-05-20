@@ -1,0 +1,41 @@
+# Запуск: docker compose up --build
+# Сайт: http://localhost:3001
+# Перед первым запуском скопируйте .env.example → .env и задайте SESSION_SECRET (≥32 символов).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ekvaline
+      POSTGRES_PASSWORD: ekvaline
+      POSTGRES_DB: ekvaline
+    volumes:
+      - ekvaline_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ekvaline -d ekvaline']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3001}:3001'
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgres://ekvaline:ekvaline@db:5432/ekvaline
+      SESSION_SECRET: ${SESSION_SECRET:-docker-local-dev-secret-min-32-chars!!}
+      YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  ekvaline_pgdata:

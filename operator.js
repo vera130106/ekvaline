@@ -32,8 +32,20 @@
   const TAB_ORDERS = document.getElementById('opxTabOrders');
   const TAB_MAP = document.getElementById('opxTabMap');
   const TAB_REPORTS = document.getElementById('opxTabReports');
+  const TAB_SETTINGS = document.getElementById('opxTabSettings');
+  const SETTINGS_OVERLAY = document.getElementById('opxSettingsOverlay');
+  const SETTINGS_DAYS_LIST = document.getElementById('opxSettingsDaysList');
+  const SETTINGS_SAVE_BTN = document.getElementById('opxSettingsSaveBtn');
+  const SETTINGS_STATUS = document.getElementById('opxSettingsStatus');
+  const SETTINGS_LAST_CHANGE = document.getElementById('opxSettingsLastChange');
+  const SETTINGS_CLOSE = document.getElementById('opxCloseSettings');
   const TOAST = document.getElementById('opxToast');
   const TOAST_TEXT = document.getElementById('opxToastText');
+  const CONFIRM_MODAL = document.getElementById('opxConfirmModal');
+  const CONFIRM_TITLE = document.getElementById('opxConfirmTitle');
+  const CONFIRM_MESSAGE = document.getElementById('opxConfirmMessage');
+  const CONFIRM_OK_BTN = document.getElementById('opxConfirmOkBtn');
+  const CONFIRM_CANCEL_BTN = document.getElementById('opxConfirmCancelBtn');
   const ZONE_MAP_OVERLAY = document.getElementById('opxZoneMapOverlay');
   const ZONE_MAP_CANVAS = document.getElementById('opxZoneMapCanvas');
   const ZONE_MAP_CLOSE = document.getElementById('opxCloseZoneMap');
@@ -50,6 +62,7 @@
   const REPORTS_ITEMS = document.getElementById('opxReportItemsCount');
   const REPORTS_SUM = document.getElementById('opxReportTotalSum');
   const REPORTS_DELIVERED = document.getElementById('opxReportDeliveredCount');
+  const REPORTS_CANCELLED = document.getElementById('opxReportCancelledCount');
   const REPORTS_JOURNAL_META = document.getElementById('opxReportsJournalMeta');
   const REPORTS_JOURNAL_BODY = document.getElementById('opxJournalReportBody');
   const REPORTS_CATEGORIES_META = document.getElementById('opxReportsCategoriesMeta');
@@ -86,6 +99,12 @@
   const MODAL_QTY = document.getElementById('opxModalQty');
   const MODAL_UNIT_PRICE = document.getElementById('opxModalUnitPrice');
   const MODAL_SUM = document.getElementById('opxModalSum');
+  const ORDER_CART_LIST = document.getElementById('opxOrderCartList');
+  const ORDER_CART_ADD_BTN = document.getElementById('opxOrderCartAddBtn');
+  const ORDER_CART_FROM_SITE_BTN = document.getElementById('opxOrderCartFromSiteBtn');
+  const ORDER_CART_TOTAL = document.getElementById('opxOrderCartTotal');
+  const ORDER_CART_EMPTY = document.getElementById('opxOrderCartEmpty');
+  const SITE_CART_LS_KEY = 'ekvaline_cart_items';
   const MODAL_DRIVER = document.getElementById('opxModalDriver');
   const MODAL_NOTE = document.getElementById('opxModalNote');
   const ORDER_REASON_OVERLAY = document.getElementById('opxOrderReasonOverlay');
@@ -147,6 +166,7 @@
   const FILTERS_OPEN_BTN = document.getElementById('opxOpenFiltersBtn');
   const ORDERS_EXPORT_BTN = document.getElementById('opxOrdersExportBtn');
   const ORDERS_PRINT_SHEET = document.getElementById('opxOrdersPrintSheet');
+  const REPORTS_PDF_SHEET = document.getElementById('opxReportsPdfSheet');
   const FILTERS_CLOSE_BTN = document.getElementById('opxFiltersCloseBtn');
   const FILTERS_CLOSE_FOOTER = document.getElementById('opxFiltersCloseFooterBtn');
   const FILTERS_DISABLE_BTN = document.getElementById('opxFiltersDisableBtn');
@@ -176,12 +196,15 @@
     orderModalTab: 'basic',
     zoneMapOpen: false,
     reportsOpen: false,
+    settingsOpen: false,
     /** Активный лист отчёта на оверлее: journal | forwarders | categories | cancellations */
     reportsPane: 'journal',
     /** Куда записать адрес после выбора на карте — поля клиентской карточки или модалки заказа (черновик) */
     clientMapApplyTarget: 'client',
     /** Открыто создание заказа в общей модалке #opxOrderModal без id в базе */
     creatingOrder: false,
+    /** Позиции во вкладке «Товары» (как корзина на сайте) */
+    orderModalCartLines: [],
     modalClientSuggestTimer: null,
     advanced: {
       /** Один выбранный интервал: ключ data-opx-adv-slot ('all' | morning | …). */
@@ -249,7 +272,17 @@
   let filtersModalStaticReady = false;
 
   /** Имена по умолчанию для локальной демо-выгрузки; к ним добавляются водители из БД. */
-  const DEMO_DRIVER_POOL = ['Казаченко Сергей', 'Комаров Сергей', 'Лукашин Евгений', 'Макаров Александр', 'Кравцов Илья'];
+  const DEMO_DRIVER_POOL = [
+    'Петров Пётр Петрович',
+    'Сидоров Сергей Сергеевич',
+    'Казаченко Сергей',
+    'Комаров Сергей',
+    'Лукашин Евгений',
+    'Макаров Александр Александрович',
+    'Кравцов Илья Петрович',
+    'Новиков Дмитрий Сергеевич',
+    'Белов Андрей Владимирович',
+  ];
 
   /** Слияние: имена из API (роль водитель), уже назначенные в заказах, демо-пул для обратной совместимости. */
   let mergedDriverChoices = [...DEMO_DRIVER_POOL].sort((a, b) => a.localeCompare(b, 'ru'));
@@ -261,7 +294,7 @@
     { value: 'order_pinned', label: 'Закреплённое примечание к заказу' },
   ];
   const products = ['Вода', 'Тара', 'Помпа электрическая', 'Помпа механическая', 'Кулер верхний', 'Кулер нижний', 'Стаканчики'];
-  const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона'];
+  const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона', 'Окраина'];
   const streetFallback = [
     'Салмышская', 'Родимцева', 'Пролетарская', 'Просторная', 'Терешковой', 'Чкалова', 'Советская',
     'Туркестанская', 'Брестская', 'Комсомольская', 'Победы', 'Донгузская', 'Монтажников', 'Новая',
@@ -283,12 +316,12 @@
   const MAX_ZONE_PREFETCH_GEO_CALLS_PER_RUN = 42;
 
   const statusLabels = {
-    new: 'Новый',
+    new: 'В обработке',
+    pending_operator: 'В обработке',
     confirmed: 'Подтверждён',
-    pending_operator: 'В работе',
-    processing: 'В работе',
-    courier: 'В работе',
-    on_way: 'В работе',
+    processing: 'В пути',
+    courier: 'В пути',
+    on_way: 'В пути',
     delivered: 'Доставлен',
     cancelled: 'Отменён',
   };
@@ -308,6 +341,11 @@
     const hh = Number.isFinite(h) ? Math.min(23, Math.max(0, h)) : 0;
     const mm = Number.isFinite(m) ? Math.min(59, Math.max(0, m)) : 0;
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+
+  function slotKey(raw) {
+    const fn = window.DeliverySlots?.normalizeDeliverySlotKey;
+    return typeof fn === 'function' ? fn(raw) : String(raw ?? '').trim();
   }
 
   /** Интервал доставки как ключ SLOT_PRESETS (тире, пробелы, «правильное» или «нетипичное» тире из кабинета). */
@@ -330,6 +368,7 @@
     Степной: '#ef6c00',
     Центр: '#1565c0',
     'доп.зона': '#7b1fa2',
+    Окраина: '#5d4037',
     delivered: '#2e7d32',
   };
   const ZONE_CENTERS = {
@@ -337,35 +376,57 @@
     Степной: [51.838, 55.165],
     Центр: [51.772, 55.102],
     'доп.зона': [51.815, 55.145],
+    Окраина: [51.79, 55.18],
   };
 
-  /** Статусы с подписью «В работе» в таблице — жёлтая подсветка строки и кольца на карте (только если дата доставки не в будущем). */
-  const WORK_ORDER_STATUSES = new Set(['pending_operator', 'processing', 'courier', 'on_way']);
+  /** Статусы «в пути» (жёлтая строка при назначенном водителе). */
+  const WORK_ORDER_STATUSES = new Set(['on_way', 'processing', 'courier']);
 
-  /** Статус в БД «доставлен», но дата доставки ещё впереди — зелень не показываем (ещё не мог быть доставлен). */
-  function orderIsPastOrTodayDelivery(orderLike) {
-    const del = isoDate(orderLike?.delivery_date ?? orderLike?.created_at);
-    if (!del) return true;
-    const today = isoDate(new Date());
-    return del <= today;
+  const MAP_STATUS_COLORS = {
+    unassigned: '#e53935',
+    inWork: '#f9a825',
+    delivered: '#2e7d32',
+  };
+
+  function orderIsCancelled(orderLike) {
+    return String(orderLike?.status || '').toLowerCase().trim() === 'cancelled';
   }
 
-  /** «В работе» визуально — только для доставки сегодня или раньше; на «завтра» подсветку не даём. */
-  function orderShowsInWorkHighlight(orderLike) {
-    if (!orderIsPastOrTodayDelivery(orderLike)) return false;
+  function orderHasAssignedDriver(orderLike) {
+    const d = String(orderLike?.driver ?? '').trim();
+    return d.length > 0 && !/^не\s*назначен/i.test(d);
+  }
+
+  function orderIsInWorkStatus(orderLike) {
     const st = String(orderLike?.status || '').toLowerCase().trim();
     return WORK_ORDER_STATUSES.has(st);
   }
 
+  /** Водитель отметил доставку — зелёная строка (обновляется при авто-опросе списка). */
   function orderShowsDeliveredHighlight(orderLike) {
-    return (
-      String(orderLike?.status || '').toLowerCase().trim() === 'delivered' && orderIsPastOrTodayDelivery(orderLike)
-    );
+    if (orderIsCancelled(orderLike)) return false;
+    return String(orderLike?.status || '').toLowerCase().trim() === 'delivered';
+  }
+
+  /** Назначен водитель и заказ в работе / в пути — жёлтая строка. */
+  function orderShowsInWorkHighlight(orderLike) {
+    if (orderIsCancelled(orderLike)) return false;
+    if (orderShowsDeliveredHighlight(orderLike)) return false;
+    return orderHasAssignedDriver(orderLike) && orderIsInWorkStatus(orderLike);
+  }
+
+  /** Нет водителя и заказ ещё не в работе — красная строка. */
+  function orderShowsUnassignedHighlight(orderLike) {
+    if (orderIsCancelled(orderLike)) return false;
+    if (orderShowsDeliveredHighlight(orderLike)) return false;
+    if (orderShowsInWorkHighlight(orderLike)) return false;
+    return !orderHasAssignedDriver(orderLike) && !orderIsInWorkStatus(orderLike);
   }
 
   function operatorRowHighlightClass(order) {
     if (orderShowsDeliveredHighlight(order)) return 'opx-row-delivered';
     if (orderShowsInWorkHighlight(order)) return 'opx-row-in-work';
+    if (orderShowsUnassignedHighlight(order)) return 'opx-row-unassigned';
     return '';
   }
 
@@ -384,6 +445,7 @@
   const PAYMENT_SETTLEMENT_INVOICE_VALUE = 'Рассчетный счет';
   const PAYMENT_MODAL_CASH = 'Наличная';
   const PAYMENT_MODAL_NONCASH = 'Безнал';
+  const DEFAULT_CITY = 'Оренбург';
   const ORENBURG_VIEWBOX = {
     left: 54.85,
     top: 51.92,
@@ -408,7 +470,7 @@
 
   function geoCacheKeyForOrder(order) {
     const k = normalizedGeoKey(String(order?.address || ''));
-    if (k) return `${k}@geov4`;
+    if (k) return `${k}@geov5`;
     return `__orphan:${String(order?.id ?? '')}`;
   }
 
@@ -438,11 +500,79 @@
     );
   }
 
-  function inferCityFromAddress(addressRaw) {
-    const s = cleanOrderAddressForGeocode(addressRaw);
-    const m = s.match(/г\\.?\s*([А-Яа-яЁё\-]+)/i);
-    if (m && m[1]) return m[1].trim();
-    return 'Оренбург';
+  function inferCityFromAddress(_addressRaw) {
+    return DEFAULT_CITY;
+  }
+
+  function isOrenburgCityName(city) {
+    const t = normalizeToken(city);
+    return t === 'оренбург' || t.includes('оренбург');
+  }
+
+  function enforceOrenburgCityField() {
+    if (CLIENT_MAP_CITY instanceof HTMLInputElement) {
+      if (!isOrenburgCityName(CLIENT_MAP_CITY.value)) CLIENT_MAP_CITY.value = DEFAULT_CITY;
+    }
+  }
+
+  function normalizeStreetTokenForMatch(name) {
+    return normalizeToken(stripRussianStreetPrefix(name));
+  }
+
+  function streetNameMatchesKnown(street, candidates) {
+    const want = normalizeStreetTokenForMatch(street);
+    if (!want || want.length < 2) return false;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const got = normalizeStreetTokenForMatch(candidates[i]);
+      if (!got) continue;
+      if (got === want || got.startsWith(want) || want.startsWith(got)) return true;
+    }
+    return false;
+  }
+
+  async function collectOrenburgStreetCandidates(query) {
+    const q = normalizeAddressPart(query);
+    const local = getLocalStreetSuggestions(q);
+    let remote = [];
+    try {
+      remote = await suggestStreets(q);
+    } catch {
+      remote = [];
+    }
+    return Array.from(new Set([...local, ...remote, ...streetFallback]));
+  }
+
+  async function validateStreetInOrenburg(street) {
+    const st = normalizeStreetName(street);
+    if (st.length < 2) return false;
+    const candidates = await collectOrenburgStreetCandidates(st);
+    if (streetNameMatchesKnown(st, candidates)) return true;
+    const probe = await geocodeByFields(DEFAULT_CITY, st, '1', `${DEFAULT_CITY}, ул. ${st}`);
+    return Boolean(probe && coordsInOrenburgView(probe.lat, probe.lon));
+  }
+
+  function validateClientMapAddressSync() {
+    enforceOrenburgCityField();
+    const city = normalizeAddressPart(CLIENT_MAP_CITY instanceof HTMLInputElement ? CLIENT_MAP_CITY.value : DEFAULT_CITY) || DEFAULT_CITY;
+    const street = normalizeStreetName(CLIENT_MAP_STREET instanceof HTMLInputElement ? CLIENT_MAP_STREET.value : '');
+    const house = normalizeAddressPart(CLIENT_MAP_HOUSE instanceof HTMLInputElement ? CLIENT_MAP_HOUSE.value : '');
+    if (!isOrenburgCityName(city)) {
+      return { ok: false, error: 'Доставка только по Оренбургу.' };
+    }
+    if (street.length < 2) {
+      return { ok: false, error: 'Укажите улицу из подсказки (улицы Оренбурга).' };
+    }
+    if (!house) {
+      return { ok: false, error: 'Укажите номер дома.' };
+    }
+    if (state.mapSelectedCoords) {
+      const lat = Number(state.mapSelectedCoords.lat);
+      const lon = Number(state.mapSelectedCoords.lon);
+      if (!coordsInOrenburgView(lat, lon)) {
+        return { ok: false, error: 'Точка на карте вне зоны доставки Оренбурга.' };
+      }
+    }
+    return { ok: true, city, street, house };
   }
 
   function normalizeParsedHouse(raw) {
@@ -647,10 +777,11 @@
       let bestLoose = null;
       let bestLooseScore = -1;
       for (let i = 0; i < list.length; i += 1) {
-        const item = list[i];
-        const lat = Number(item.lat);
-        const lon = Number(item.lon);
-        if (!coordsInOrenburgView(lat, lon)) continue;
+      const item = list[i];
+      if (!isOrenburgAddress(item)) continue;
+      const lat = Number(item.lat);
+      const lon = Number(item.lon);
+      if (!coordsInOrenburgView(lat, lon)) continue;
 
         let score = Number(item.importance);
         score = Number.isFinite(score) ? Math.min(8, score * 5) : 0;
@@ -692,6 +823,7 @@
     let bestScore = -1;
     for (let i = 0; i < list.length; i += 1) {
       const item = list[i];
+      if (!isOrenburgAddress(item)) continue;
       const lat = Number(item.lat);
       const lon = Number(item.lon);
       if (!coordsInOrenburgView(lat, lon)) continue;
@@ -719,9 +851,9 @@
       }
     }
 
-    let minOk = 42;
-    if (wantedStreet && wantedHouse) minOk = 52;
-    else if (wantedStreet) minOk = 40;
+    let minOk = 38;
+    if (wantedStreet && wantedHouse) minOk = 48;
+    else if (wantedStreet) minOk = 36;
 
     if (!best || bestScore < minOk) return null;
     return nominatimResultFromItem(best);
@@ -766,8 +898,12 @@
     );
   }
 
+  /** Подтверждённая сессия на сервере (не доверяем только localStorage — защита от подмены в DevTools). */
+  let staffSessionOk = false;
+
   /** Синхронизация с сессией сервера после POST /api/auth/login (и при смене localhost ↔ 127.0.0.1 с отдельными localStorage). */
   async function hydrateStaffFromServerSession() {
+    staffSessionOk = false;
     const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
     if (!api) return;
     try {
@@ -789,6 +925,8 @@
 
       const u = r.data?.user;
       if (u && typeof u === 'object') {
+        const role = String(u.role || '').toLowerCase();
+        if (['operator', 'manager', 'admin'].includes(role)) staffSessionOk = true;
         persistStaffUserFromApi(u);
         return;
       }
@@ -803,6 +941,11 @@
   }
 
   function ensureAccess() {
+    const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
+    if (api && !isOperatorUiDevHost() && !staffSessionOk) {
+      window.location.href = 'index.html';
+      return false;
+    }
     const user = readUser();
     const role = String(user?.role || '').toLowerCase();
     if (!user || !['operator', 'manager', 'admin'].includes(role)) {
@@ -821,16 +964,84 @@
     return true;
   }
 
-  function showToast(text, hideAfterMs = 2800) {
+  function opxLimits() {
+    return typeof window.OpxFieldLimits === 'object' && window.OpxFieldLimits ? window.OpxFieldLimits : null;
+  }
+
+  function showToast(text, hideAfterMs = 2800, variant = 'info') {
     if (!(TOAST instanceof HTMLElement) || !(TOAST_TEXT instanceof HTMLElement)) return;
-    TOAST_TEXT.textContent = String(text || '');
+    const msg = String(text || '').trim();
+    if (!msg) return;
+    if (TOAST.parentElement !== document.body) document.body.appendChild(TOAST);
+    TOAST_TEXT.textContent = msg;
+    const v = variant === 'success' || variant === 'error' ? variant : 'info';
+    TOAST.dataset.variant = v;
     TOAST.hidden = false;
+    TOAST.classList.remove('is-visible');
     const ms =
       typeof hideAfterMs === 'number' && hideAfterMs > 0 ? hideAfterMs : 2800;
     if (state.toastTimer) window.clearTimeout(state.toastTimer);
+    window.requestAnimationFrame(() => {
+      TOAST.classList.add('is-visible');
+    });
     state.toastTimer = window.setTimeout(() => {
+      TOAST.classList.remove('is-visible');
       TOAST.hidden = true;
     }, ms);
+  }
+
+  let confirmResolve = null;
+
+  function closeOpxConfirm(result) {
+    if (!(CONFIRM_MODAL instanceof HTMLElement)) {
+      if (confirmResolve) {
+        const done = confirmResolve;
+        confirmResolve = null;
+        done(Boolean(result));
+      }
+      return;
+    }
+    CONFIRM_MODAL.classList.remove('is-open');
+    CONFIRM_MODAL.hidden = true;
+    CONFIRM_MODAL.setAttribute('aria-hidden', 'true');
+    refreshBodyBackdropClass();
+    if (confirmResolve) {
+      const done = confirmResolve;
+      confirmResolve = null;
+      done(Boolean(result));
+    }
+  }
+
+  function showOpxConfirm(options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const title = String(opts.title || 'Подтверждение');
+    const message = String(opts.message || '');
+    const okLabel = String(opts.okLabel || 'Да');
+    const cancelLabel = String(opts.cancelLabel || 'Отмена');
+    const danger = opts.variant === 'danger';
+
+    if (!(CONFIRM_MODAL instanceof HTMLElement)) {
+      return Promise.resolve(window.confirm(message || title));
+    }
+
+    return new Promise((resolve) => {
+      confirmResolve = resolve;
+      if (CONFIRM_TITLE instanceof HTMLElement) CONFIRM_TITLE.textContent = title;
+      if (CONFIRM_MESSAGE instanceof HTMLElement) CONFIRM_MESSAGE.textContent = message;
+      if (CONFIRM_OK_BTN instanceof HTMLButtonElement) {
+        CONFIRM_OK_BTN.textContent = okLabel;
+        CONFIRM_OK_BTN.classList.toggle('opx-modal-btn-danger', danger);
+        CONFIRM_OK_BTN.classList.toggle('opx-modal-btn-primary', !danger);
+      }
+      if (CONFIRM_CANCEL_BTN instanceof HTMLButtonElement) CONFIRM_CANCEL_BTN.textContent = cancelLabel;
+      CONFIRM_MODAL.hidden = false;
+      CONFIRM_MODAL.classList.add('is-open');
+      CONFIRM_MODAL.setAttribute('aria-hidden', 'false');
+      refreshBodyBackdropClass();
+      window.requestAnimationFrame(() => {
+        if (CONFIRM_OK_BTN instanceof HTMLButtonElement) CONFIRM_OK_BTN.focus();
+      });
+    });
   }
 
   /** Состояние кнопки «Сохранить» пока PATCH/POST в карточке заказа. */
@@ -879,6 +1090,54 @@
     const d = new Date(s);
     if (Number.isNaN(d.getTime())) return '';
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function earliestDeliveryDateIso() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return isoDate(d);
+  }
+
+  function applyModalDeliveryDateConstraints() {
+    if (!(MODAL_DELIVERY_DATE instanceof HTMLInputElement)) return;
+    const min = earliestDeliveryDateIso();
+    MODAL_DELIVERY_DATE.min = min;
+    const cur = String(MODAL_DELIVERY_DATE.value || '').trim();
+    /** Пустая дата — подставляем «завтра». Уже сохранённую в заказе не сдвигаем молча (иначе ложный «перенос»). */
+    if (!cur) MODAL_DELIVERY_DATE.value = min;
+    if (MODAL_DATE_TODAY instanceof HTMLButtonElement) {
+      MODAL_DATE_TODAY.hidden = true;
+      MODAL_DATE_TODAY.disabled = true;
+    }
+  }
+
+  function deliveryDateAllowed(iso) {
+    const d = String(iso || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+    return d >= earliestDeliveryDateIso();
+  }
+
+  /** Та же дата, что в форме при открытии заказа (не «сегодня» при пустом delivery_date в БД). */
+  function effectiveDeliveryDateIsoForOrder(order) {
+    if (!order || typeof order !== 'object') return '';
+    const fromDelivery = String(order.delivery_date ?? '').trim();
+    if (fromDelivery) {
+      const iso = isoDate(fromDelivery);
+      if (iso) return iso;
+    }
+    return isoDate(order.created_at) || '';
+  }
+
+  function orderDeliveryRescheduleChanged(order, deliveryDateInput, slotInput) {
+    const storedDateRaw = String(order?.delivery_date ?? '').trim();
+    const storedDateIso = storedDateRaw ? isoDate(storedDateRaw) : '';
+    const deliveryIso = isoDate(deliveryDateInput);
+    const dateChanged = Boolean(storedDateIso) && storedDateIso !== deliveryIso;
+
+    const storedSlotRaw = String(order?.delivery_slot ?? '').trim();
+    const slotChanged = Boolean(storedSlotRaw) && slotKey(storedSlotRaw) !== slotKey(slotInput);
+
+    return dateChanged || slotChanged;
   }
 
   /** Сместить календарную дату ISO (локальный день Y-M-D), не полагаясь на парсинг строки браузером. */
@@ -950,11 +1209,86 @@
     return String(user.name || user.email || user.role || 'Оператор');
   }
 
+  /** В панели оператора в журнале всегда «Оператор …», не «Администратор Системы». */
+  function getOperatorActorLabel() {
+    const user = readUser();
+    let name = user ? String(user.name || user.email || '').trim() : '';
+    if (/^администратор\s+системы$/i.test(name)) name = '';
+    if (name.startsWith('Оператор ')) return name;
+    if (name) return `Оператор ${name}`;
+    return 'Оператор';
+  }
+
+  function displayJournalActorName(entry) {
+    const role = String(entry?.actor_role || '').toLowerCase();
+    let name = String(entry?.actor_name || entry?.actor || '').trim();
+    name = name.replace(/^\[(admin|operator|manager|driver)\]\s*/i, '').trim();
+    if (/^администратор\s+системы$/i.test(name)) name = '';
+    if (role === 'driver') {
+      if (name.startsWith('Водитель ')) return name;
+      if (name) return `Водитель ${name}`;
+      return 'Водитель';
+    }
+    if (['operator', 'manager', 'admin', 'system', ''].includes(role) || !name || /^администратор/i.test(name)) {
+      if (name.startsWith('Оператор ')) return name;
+      if (name) return `Оператор ${name}`;
+      return 'Оператор';
+    }
+    return name || 'Система';
+  }
+
+  function journalWhoCellHtml(entry) {
+    const role = String(entry?.actor_role || '').toLowerCase();
+    const who = displayJournalActorName(entry);
+    let chip = 'is-operator';
+    if (role === 'driver') chip = 'is-driver';
+    else if (role === 'manager') chip = 'is-manager';
+    return `<span class="opx-reports-who ${chip}">${escapeHtml(who)}</span>`;
+  }
+
+  function auditEventVisibleInOperatorReport(entry) {
+    const action = String(entry?.action || '').trim();
+    if (action.startsWith('admin_') || action === 'manager_settings') return false;
+    const role = String(entry?.actor_role || '').toLowerCase();
+    if (role === 'admin') return false;
+    return true;
+  }
+
+  function paymentLabelDisplay(raw) {
+    const p = String(raw ?? '').trim();
+    if (!p) return '—';
+    const low = p.toLowerCase().replace(/ё/g, 'е');
+    if (low === 'cash') return PAYMENT_MODAL_CASH;
+    if (low === 'noncash') return PAYMENT_MODAL_NONCASH;
+    if (low === 'card' || low === 'карта') return 'Карта';
+    if (orderLooksLikeSettlementInvoicePayment(p)) return PAYMENT_SETTLEMENT_INVOICE_VALUE;
+    const modal = paymentRawToModalSelectValue(p);
+    return modal || p;
+  }
+
+  function slotLabelDisplay(raw) {
+    const key = normalizeDeliverySlotStored(raw);
+    const preset = SLOT_PRESETS[key];
+    if (!preset) return String(raw || '—').trim() || '—';
+    return `${preset.from} – ${preset.to}`;
+  }
+
+  function journalFieldChange(label, fromVal, toVal, format = (v) => String(v ?? '—')) {
+    const a = format(fromVal);
+    const b = format(toVal);
+    if (a === b) return '';
+    return `${label}: ${a} → ${b}`;
+  }
+
   function appendOrderJournal(orderId, message) {
     const map = readStore(ORDER_JOURNAL_KEY, {});
     const idKey = String(orderId || '').trim();
     const list = Array.isArray(map[idKey]) ? map[idKey] : [];
-    list.unshift({ at: new Date().toISOString(), actor: getActorLabel(), message: String(message || '').trim() });
+    list.unshift({
+      at: new Date().toISOString(),
+      actor: getOperatorActorLabel(),
+      message: String(message || '').trim(),
+    });
     map[idKey] = list.slice(0, 120);
     writeStore(ORDER_JOURNAL_KEY, map);
   }
@@ -968,6 +1302,9 @@
     const map = {
       order_create: 'Создан заказ',
       order_patch: 'Изменён заказ',
+      operator_patch: 'Изменён заказ (оператор)',
+      order_reschedule: 'Перенос доставки',
+      order_status_cancelled: 'Заказ отменён',
       order_client_update: 'Изменён заказ клиентом',
       order_cancel: 'Заказ отменён',
       admin_address_create: 'Добавлен адрес доставки',
@@ -975,6 +1312,8 @@
       admin_address_delete: 'Удалён адрес доставки',
       admin_zone_patch: 'Изменена зона доставки',
       manager_settings: 'Изменены настройки менеджером',
+      delivery_availability: 'Закрыты дни/интервалы приёма заказов',
+      admin_delivery_availability: 'Закрыты дни/интервалы (администратор)',
       admin_user_patch: 'Изменён пользователь админом',
       login: 'Вход в систему',
       logout: 'Выход из системы',
@@ -982,21 +1321,59 @@
     return map[String(action || '')] || String(action || 'Изменение');
   }
 
+  function dedupeJournalEntries(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    return list.filter((entry, i, arr) => {
+      const action = String(entry.action || '');
+      const detail = String(entry.detail || '').trim();
+      if (action !== 'order_patch' || !/^id=\d+$/i.test(detail)) return true;
+      const t = new Date(entry.created_at || entry.at || 0).getTime();
+      return !arr.some((other, j) => {
+        if (j === i) return false;
+        const oa = String(other.action || '');
+        if (!['operator_patch', 'order_status_cancelled', 'order_reschedule', 'order_cancel'].includes(oa)) {
+          return false;
+        }
+        const ot = new Date(other.created_at || other.at || 0).getTime();
+        return Number.isFinite(t) && Number.isFinite(ot) && Math.abs(ot - t) < 120000;
+      });
+    });
+  }
+
+  function journalEntryMessage(entry) {
+    const action = String(entry.action || '');
+    const details = String(entry.detail || '').trim();
+    if (action === 'order_status_cancelled' || action === 'order_cancel') {
+      return details ? `Заказ отменён. Причина: ${details}` : 'Заказ отменён';
+    }
+    if (action === 'order_reschedule') {
+      return details ? `Перенос доставки. Причина: ${details}` : journalActionLabel(action);
+    }
+    if (details && !details.startsWith('{') && details.length < 220 && !/^id=\d+$/i.test(details)) {
+      return details;
+    }
+    const label = journalActionLabel(action);
+    if (details && !details.startsWith('{') && details.length < 220) {
+      return `${label} (${details})`;
+    }
+    return label;
+  }
+
   function renderJournalListHtml(entries) {
-    if (!entries.length) return '<p class="opx-cc-empty">Изменений пока нет.</p>';
-    return entries
+    const rows = dedupeJournalEntries(entries);
+    if (!rows.length) return '<p class="opx-cc-empty">Изменений пока нет.</p>';
+    return rows
       .map((entry) => {
         const ts = entry.created_at || entry.at;
         const dt = ruDateTime(ts);
         const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(ts || '');
         if (entry.action) {
-          const actor = `[${String(entry.actor_role || 'system')}] ${String(entry.actor_name || 'Система')}`;
-          const details = String(entry.detail || '').trim();
-          const msg = details ? `${journalActionLabel(entry.action)} (${details})` : journalActionLabel(entry.action);
+          const actor = displayJournalActorName(entry);
+          const msg = journalEntryMessage(entry);
           return `<div class="opx-cc-item"><strong>${escapeHtml(dtText)}</strong><span>${escapeHtml(actor)}: ${escapeHtml(msg)}</span></div>`;
         }
         return `<div class="opx-cc-item"><strong>${escapeHtml(dtText)}</strong><span>${escapeHtml(
-          String(entry.actor || 'Система')
+          displayJournalActorName(entry)
         )}: ${escapeHtml(String(entry.message || 'Изменение'))}</span></div>`;
       })
       .join('');
@@ -1026,8 +1403,10 @@
         fetchServerJournal(order.id),
         Promise.resolve(getOrderJournal(order.id)),
       ]);
-      const merged = [...serverEntries, ...localEntries].sort(
-        (a, b) => new Date(b.created_at || b.at || 0).getTime() - new Date(a.created_at || a.at || 0).getTime()
+      const merged = dedupeJournalEntries(
+        [...serverEntries, ...localEntries].sort(
+          (a, b) => new Date(b.created_at || b.at || 0).getTime() - new Date(a.created_at || a.at || 0).getTime()
+        )
       );
       ORDER_JOURNAL_LIST.innerHTML = renderJournalListHtml(merged.slice(0, 300));
     } catch {
@@ -1043,6 +1422,72 @@
     return isoDate(d);
   }
 
+  function modalDeliveryDateIso() {
+    const raw = MODAL_DELIVERY_DATE instanceof HTMLInputElement ? MODAL_DELIVERY_DATE.value : '';
+    return String(raw || '').trim() || isoDate(new Date());
+  }
+
+  function slotEndMinutes(slotKey) {
+    const preset = SLOT_PRESETS[normalizeDeliverySlotStored(slotKey)];
+    if (!preset) return 0;
+    const [h, m] = String(preset.to || '0:0')
+      .split(':')
+      .map((x) => Number.parseInt(x, 10));
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+  }
+
+  /** Слот недоступен, если дата доставки — сегодня и окно интервала уже закончилось. */
+  function isSlotExpiredForDate(slotKey, deliveryDateIso) {
+    const day = String(deliveryDateIso || '').trim();
+    if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+    const today = isoDate(new Date());
+    if (day !== today) return false;
+    const now = new Date();
+    const nowMins = now.getHours() * 60 + now.getMinutes();
+    return nowMins >= slotEndMinutes(slotKey);
+  }
+
+  function firstAvailableModalSlot(deliveryDateIso) {
+    for (const btn of MODAL_SLOT_BTNS) {
+      const key = normalizeDeliverySlotStored(btn.getAttribute('data-opx-slot'));
+      if (!isSlotExpiredForDate(key, deliveryDateIso)) return key;
+    }
+    return null;
+  }
+
+  function applyModalSlot(slotValue) {
+    const slot = normalizeDeliverySlotStored(slotValue);
+    setModalValue(MODAL_SLOT, slot);
+    const preset = SLOT_PRESETS[slot];
+    setModalValue(MODAL_TIME_FROM, preset.from);
+    setModalValue(MODAL_TIME_TO, preset.to);
+    MODAL_SLOT_BTNS.forEach((btn) => {
+      const key = normalizeDeliverySlotStored(btn.getAttribute('data-opx-slot'));
+      btn.classList.toggle('is-active', key === slot && !btn.disabled);
+    });
+  }
+
+  function syncModalSlotAvailability() {
+    const deliveryDate = modalDeliveryDateIso();
+    const today = isoDate(new Date());
+    MODAL_SLOT_BTNS.forEach((btn) => {
+      const key = normalizeDeliverySlotStored(btn.getAttribute('data-opx-slot'));
+      const expired = isSlotExpiredForDate(key, deliveryDate);
+      btn.disabled = expired;
+      btn.classList.toggle('is-disabled', expired);
+      btn.setAttribute('aria-disabled', expired ? 'true' : 'false');
+    });
+    const current = normalizeDeliverySlotStored(
+      String(MODAL_SLOT instanceof HTMLInputElement ? MODAL_SLOT.value : '')
+    );
+    if (deliveryDate === today && isSlotExpiredForDate(current, deliveryDate)) {
+      const next = firstAvailableModalSlot(deliveryDate);
+      if (next) applyModalSlot(next);
+    } else {
+      applyModalSlot(current);
+    }
+  }
+
   function updateQuickDateButtons() {
     const selected = String(MODAL_DELIVERY_DATE instanceof HTMLInputElement ? MODAL_DELIVERY_DATE.value : '');
     const today = isoDate(new Date());
@@ -1053,20 +1498,30 @@
     MODAL_DATE_TODAY?.classList.toggle('is-active', selected === today);
     MODAL_DATE_TOMORROW?.classList.toggle('is-active', selected === tomorrow);
     MODAL_DATE_MONDAY?.classList.toggle('is-active', selected === monday);
+    syncModalSlotAvailability();
   }
 
-  function setModalSlot(slotValue) {
-    const slot = normalizeDeliverySlotStored(slotValue);
-    setModalValue(MODAL_SLOT, slot);
-    const preset = SLOT_PRESETS[slot];
-    setModalValue(MODAL_TIME_FROM, preset.from);
-    setModalValue(MODAL_TIME_TO, preset.to);
-    MODAL_SLOT_BTNS.forEach((btn) => btn.classList.toggle('is-active', btn.getAttribute('data-opx-slot') === slot));
+  function setModalSlot(slotValue, options = {}) {
+    const silent = Boolean(options.silent);
+    const deliveryDate = modalDeliveryDateIso();
+    let slot = normalizeDeliverySlotStored(slotValue);
+    if (isSlotExpiredForDate(slot, deliveryDate)) {
+      const next = firstAvailableModalSlot(deliveryDate);
+      if (next) {
+        slot = next;
+        if (!silent) showToast('Этот интервал уже недоступен для выбранной даты');
+      }
+    }
+    applyModalSlot(slot);
+    syncModalSlotAvailability();
   }
 
   function setOrderModalTab(tabId) {
     const prev = state.orderModalTab;
-    if (prev === 'notes' && tabId !== 'notes') tryFinalizeOrderNotesOnSave();
+    if (prev === 'notes' && tabId !== 'notes') {
+      const notesSaved = tryFinalizeOrderNotesOnSave();
+      if (notesSaved) showToast('Заметки сохранены.', 3200, 'success');
+    }
     state.orderModalTab = tabId;
     if (tabId === 'notes') orderNotesVisitedThisOpen = true;
     ORDER_TAB_BTNS.forEach((btn) => {
@@ -1125,23 +1580,239 @@
     return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
   }
 
-  function getDefaultPriceForOrder(order, productName) {
-    const key = normalizeClientKey(order);
-    const qty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
-    return getClientProductPrice(key, productName) || baseUnitPrice(productName, qty);
+  function getDefaultPriceForOrder(order, productName, qtyHint) {
+    const key = order ? normalizeClientKey(order) : '';
+    const qty = Math.min(
+      50,
+      Math.max(1, Number(qtyHint != null ? qtyHint : MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1)
+    );
+    return (order && getClientProductPrice(key, productName)) || baseUnitPrice(productName, qty);
+  }
+
+  function productSelectOptionsHtml(selectedName) {
+    const sel = normalizeProductName(selectedName);
+    return products
+      .map((name) => `<option value="${escapeHtml(name)}"${name === sel ? ' selected' : ''}>${escapeHtml(name)}</option>`)
+      .join('');
+  }
+
+  function parseOrderItemsFromJson(itemsJson) {
+    try {
+      const items = JSON.parse(itemsJson || '[]');
+      if (!Array.isArray(items)) return [];
+      return items
+        .map((it) => ({
+          title: normalizeProductName(String(it?.title || it?.name || '').trim()),
+          qty: Math.min(50, Math.max(1, Number(it?.qty) || 1)),
+          unit_price: Math.max(0, Math.round(Number(it?.unit_price ?? it?.price) || 0)),
+        }))
+        .filter((it) => it.title);
+    } catch {
+      return [];
+    }
+  }
+
+  function computeOrderCartTotal(lines) {
+    const list = Array.isArray(lines) ? lines : [];
+    return list.reduce((sum, it) => sum + Math.round((Number(it.qty) || 0) * (Number(it.unit_price) || 0)), 0);
+  }
+
+  function buildOrderItemsJson(lines) {
+    const list = (Array.isArray(lines) ? lines : [])
+      .map((it) => ({
+        title: normalizeProductName(String(it.title || '').trim()),
+        qty: Math.min(50, Math.max(1, Number(it.qty) || 1)),
+        unit_price: Math.max(0, Math.round(Number(it.unit_price) || 0)),
+      }))
+      .filter((it) => it.title);
+    return JSON.stringify(list);
+  }
+
+  function formatOrderItemsForJournal(itemsJson) {
+    const items = parseOrderItemsFromJson(itemsJson);
+    if (!items.length) return '—';
+    return items.map((it) => `${it.title} ×${it.qty}`).join(', ');
+  }
+
+  function describeOrderItemsChange(prevItemsJson, nextItemsJson) {
+    const prevText = formatOrderItemsForJournal(prevItemsJson);
+    const nextText = formatOrderItemsForJournal(nextItemsJson);
+    if (prevText === nextText) return '';
+    return `товары: ${prevText} → ${nextText}`;
+  }
+
+  function syncLegacyGoodsFieldsFromCart(lines) {
+    const list = Array.isArray(lines) ? lines : [];
+    const first = list[0];
+    if (first) {
+      setModalValue(MODAL_PRODUCT, first.title);
+      setModalValue(MODAL_QTY, String(first.qty));
+      setModalValue(MODAL_UNIT_PRICE, String(first.unit_price));
+    }
+    const total = computeOrderCartTotal(list);
+    setModalValue(MODAL_SUM, `${money(total)} ₽`);
+    if (ORDER_CART_TOTAL instanceof HTMLElement) ORDER_CART_TOTAL.textContent = `${money(total)} ₽`;
+  }
+
+  function defaultOrderCartLine(order) {
+    const title = products[0] || 'Вода';
+    return {
+      title,
+      qty: 2,
+      unit_price: order ? getDefaultPriceForOrder(order, title, 2) : baseUnitPrice(title, 2),
+    };
+  }
+
+  function setOrderModalCartLines(lines, orderForPricing) {
+    const normalized = (Array.isArray(lines) ? lines : [])
+      .map((it) => {
+        const title = normalizeProductName(String(it?.title || '').trim()) || products[0] || 'Вода';
+        const qty = Math.min(50, Math.max(1, Number(it?.qty) || 1));
+        let unit = Math.max(0, Math.round(Number(it?.unit_price) || 0));
+        if (!unit) unit = orderForPricing ? getDefaultPriceForOrder(orderForPricing, title, qty) : baseUnitPrice(title, qty);
+        return { title, qty, unit_price: unit };
+      })
+      .filter((it) => it.title);
+    state.orderModalCartLines = normalized.length ? normalized : [defaultOrderCartLine(orderForPricing)];
+    renderOrderModalCart(orderForPricing);
+  }
+
+  function readOrderModalCartFromDom() {
+    if (!(ORDER_CART_LIST instanceof HTMLElement)) return state.orderModalCartLines || [];
+    const titleMax = opxLimits()?.PRODUCT_TITLE_MAX ?? 180;
+    const priceMax = opxLimits()?.PRICE_MAX ?? 1_000_000;
+    const rows = Array.from(ORDER_CART_LIST.querySelectorAll('[data-opx-cart-line]'));
+    return rows
+      .map((row) => {
+        const productEl = row.querySelector('[data-opx-cart-product]');
+        const qtyEl = row.querySelector('[data-opx-cart-qty]');
+        const priceEl = row.querySelector('[data-opx-cart-price]');
+        const rawTitle =
+          productEl instanceof HTMLSelectElement ? productEl.value : String(productEl?.textContent || '');
+        const title = normalizeProductName(opxLimits()?.clampText(rawTitle, titleMax) ?? rawTitle);
+        const qty = Math.min(50, Math.max(1, Number(qtyEl instanceof HTMLInputElement ? qtyEl.value : 1) || 1));
+        const unit_price = Math.min(
+          priceMax,
+          Math.max(0, Math.round(Number(priceEl instanceof HTMLInputElement ? priceEl.value : 0) || 0))
+        );
+        return { title, qty, unit_price };
+      })
+      .filter((it) => it.title)
+      .slice(0, opxLimits()?.CART_LINES_MAX ?? 30);
+  }
+
+  function renderOrderModalCart(orderForPricing) {
+    if (!(ORDER_CART_LIST instanceof HTMLElement)) return;
+    const lines = state.orderModalCartLines || [];
+    if (ORDER_CART_EMPTY instanceof HTMLElement) ORDER_CART_EMPTY.hidden = lines.length > 0;
+    if (!lines.length) {
+      ORDER_CART_LIST.innerHTML = '';
+      syncLegacyGoodsFieldsFromCart([]);
+      return;
+    }
+    const priceMax = opxLimits()?.PRICE_MAX ?? 1_000_000;
+    ORDER_CART_LIST.innerHTML = lines
+      .map((line, index) => {
+        const lineSum = Math.round(line.qty * line.unit_price);
+        return `
+        <div class="opx-cart-line" data-opx-cart-line="${index}" role="listitem">
+          <label class="opx-cart-line-field opx-cart-line-product">
+            <span class="opx-modal-label">Товар</span>
+            <select class="opx-modal-input" data-opx-cart-product>${productSelectOptionsHtml(line.title)}</select>
+          </label>
+          <label class="opx-cart-line-field">
+            <span class="opx-modal-label">Кол-во</span>
+            <input class="opx-modal-input" type="number" min="1" max="50" step="1" value="${line.qty}" data-opx-cart-qty />
+          </label>
+          <label class="opx-cart-line-field">
+            <span class="opx-modal-label">Цена, ₽</span>
+            <input class="opx-modal-input" type="number" min="0" max="${priceMax}" step="1" value="${line.unit_price}" data-opx-cart-price />
+          </label>
+          <div class="opx-cart-line-sum" data-opx-cart-sum>${money(lineSum)} ₽</div>
+          <button type="button" class="opx-cart-line-remove" data-opx-cart-remove aria-label="Удалить позицию">×</button>
+        </div>`;
+      })
+      .join('');
+    syncLegacyGoodsFieldsFromCart(lines);
+  }
+
+  function refreshOrderCartLineSum(row) {
+    if (!(row instanceof HTMLElement)) return;
+    const qty = Math.min(50, Math.max(1, Number(row.querySelector('[data-opx-cart-qty]')?.value) || 1));
+    const unit = Math.max(0, Math.round(Number(row.querySelector('[data-opx-cart-price]')?.value) || 0));
+    const sumEl = row.querySelector('[data-opx-cart-sum]');
+    if (sumEl instanceof HTMLElement) sumEl.textContent = `${money(Math.round(qty * unit))} ₽`;
   }
 
   function currentGoodsTotal() {
-    const title = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
-    const qty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
-    if (MODAL_QTY instanceof HTMLInputElement) MODAL_QTY.value = String(qty);
-    const unit = Math.max(0, Number(MODAL_UNIT_PRICE instanceof HTMLInputElement ? MODAL_UNIT_PRICE.value : 0) || 0);
-    return Math.round(unit * qty);
+    return computeOrderCartTotal(readOrderModalCartFromDom());
   }
 
   function updateGoodsSumPreview() {
-    const total = currentGoodsTotal();
-    setModalValue(MODAL_SUM, `${money(total)} ₽`);
+    state.orderModalCartLines = readOrderModalCartFromDom();
+    syncLegacyGoodsFieldsFromCart(state.orderModalCartLines);
+  }
+
+  function addOrderModalCartLine(preset, orderForPricing) {
+    const linesNow = readOrderModalCartFromDom();
+    const cartMax = opxLimits()?.CART_LINES_MAX ?? 30;
+    if (linesNow.length >= cartMax) {
+      showToast(`В заказе не более ${cartMax} позиций`, 3200, 'error');
+      return;
+    }
+    const order = orderForPricing || getActiveOrder();
+    const titleMax = opxLimits()?.PRODUCT_TITLE_MAX ?? 180;
+    const priceMax = opxLimits()?.PRICE_MAX ?? 1_000_000;
+    const title = normalizeProductName(
+      opxLimits()?.clampText(preset?.title || products[0] || 'Вода', titleMax) || String(products[0] || 'Вода')
+    );
+    const qty = Math.min(50, Math.max(1, Number(preset?.qty) || 1));
+    let unit_price =
+      Math.max(0, Math.round(Number(preset?.unit_price) || 0)) ||
+      (order ? getDefaultPriceForOrder(order, title, qty) : baseUnitPrice(title, qty));
+    unit_price = Math.min(priceMax, unit_price);
+    state.orderModalCartLines = [...linesNow, { title, qty, unit_price }];
+    renderOrderModalCart(order);
+  }
+
+  function readSiteCartForOperator() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SITE_CART_LS_KEY) || '[]');
+      if (!Array.isArray(raw)) return [];
+      const merged = new Map();
+      raw.forEach((item) => {
+        if (!item || typeof item !== 'object') return;
+        const title = normalizeProductName(String(item.title || 'Товар').trim());
+        const qty = Math.min(50, Math.max(1, Number(item.qty) || 0));
+        if (!qty || item.preorder) return;
+        const unit_price = Math.max(0, Math.round(Number(item.price) || PRODUCT_PRICE_MAP[title] || 0));
+        const key = title.toLowerCase();
+        const prev = merged.get(key);
+        if (prev) prev.qty = Math.min(50, prev.qty + qty);
+        else merged.set(key, { title, qty, unit_price: unit_price || baseUnitPrice(title, qty) });
+      });
+      return Array.from(merged.values());
+    } catch {
+      return [];
+    }
+  }
+
+  function importSiteCartIntoOrderModal() {
+    const fromSite = readSiteCartForOperator();
+    if (!fromSite.length) {
+      showToast('Корзина на сайте пуста — добавьте товары в каталоге');
+      return;
+    }
+    setOrderModalCartLines(fromSite, getActiveOrder());
+    setOrderModalTab('goods');
+    showToast(`Подставлено позиций: ${fromSite.length}`);
+  }
+
+  function formatOrderProductsLabel(itemsJson, fallbackIndex) {
+    const items = parseOrderItemsFromJson(itemsJson);
+    if (!items.length) return parseProduct(itemsJson, fallbackIndex);
+    if (items.length === 1) return items[0].title;
+    return `${items[0].title} +${items.length - 1}`;
   }
 
   function statusLabel(status) {
@@ -1149,15 +1820,29 @@
     return statusLabels[key] || '—';
   }
 
-  /** Значение для выпадающего списка в модалке (new | confirmed | processing | delivered | cancelled). */
-  function statusForModalSelect(raw) {
-    const st = String(raw || 'new').trim();
+  /** Ключи UI: четыре этапа для оператора (отмена — отдельной кнопкой). */
+  function operatorUiStatusFromDb(raw) {
+    const st = String(raw || 'new').trim().toLowerCase();
     if (st === 'delivered') return 'delivered';
     if (st === 'cancelled') return 'cancelled';
     if (st === 'confirmed') return 'confirmed';
-    if (st === 'new') return 'new';
-    if (st === 'pending_operator' || st === 'processing' || st === 'courier' || st === 'on_way') return 'processing';
-    return 'new';
+    if (st === 'on_way' || st === 'processing' || st === 'courier') return 'on_way';
+    return 'in_processing';
+  }
+
+  function operatorDbStatusFromUi(uiValue, previousDb) {
+    const ui = String(uiValue || '').trim().toLowerCase();
+    const prev = String(previousDb || '').trim().toLowerCase();
+    if (ui === 'delivered') return 'delivered';
+    if (ui === 'cancelled') return 'cancelled';
+    if (ui === 'confirmed') return 'confirmed';
+    if (ui === 'on_way') return 'on_way';
+    if (ui === 'in_processing') return prev === 'new' ? 'new' : 'pending_operator';
+    return prev === 'new' ? 'new' : 'pending_operator';
+  }
+
+  function statusForModalSelect(raw) {
+    return operatorUiStatusFromDb(raw);
   }
 
   function normalizeZoneName(value) {
@@ -1167,13 +1852,16 @@
     if (z.includes('доп')) return 'доп.зона';
     if (z.includes('степ')) return 'Степной';
     if (z.includes('центр')) return 'Центр';
+    if (z.includes('окраин')) return 'Окраина';
     if (z.includes('подхват')) return 'Подхват';
-    return 'Подхват';
+    return String(value || '').trim() || 'Подхват';
   }
 
-  /** Кольцо маркера на карте: цвет зоны (Подхват — красный и т.д.) или зелёный только для доставленных. Статус «в работе» на цвет карты не влияет. */
+  /** Кольцо маркера на карте: статус доставки (красный / жёлтый / зелёный) или цвет зоны. */
   function mapMarkerStrokeColor(order) {
-    if (orderShowsDeliveredHighlight(order)) return ZONE_COLORS.delivered;
+    if (orderShowsDeliveredHighlight(order)) return MAP_STATUS_COLORS.delivered;
+    if (orderShowsInWorkHighlight(order)) return MAP_STATUS_COLORS.inWork;
+    if (orderShowsUnassignedHighlight(order)) return MAP_STATUS_COLORS.unassigned;
     const z = normalizeZoneName(order?.zone);
     return ZONE_COLORS[z] || ZONE_COLORS['Подхват'];
   }
@@ -1232,7 +1920,7 @@
 
     try {
       zoneMapCtl = await EM.createOrdersMapHost(ZONE_MAP_CANVAS, [51.78, 55.11], 11, handlePopupAction);
-      return Boolean(zoneMapCtl);
+      return Boolean(zoneMapCtl && zoneMapCtl.engine === 'yandex');
     } catch {
       zoneMapCtl = null;
       return false;
@@ -1325,11 +2013,13 @@
     if (!(ZONE_MAP_OVERLAY instanceof HTMLElement)) return;
     closeOperatorModalsBlockingFullScreenUi();
     closeReportsOverlay();
+    closeSettingsOverlay();
     state.zoneMapOpen = true;
     ZONE_MAP_OVERLAY.hidden = false;
     TAB_MAP?.classList.add('is-active');
     TAB_ORDERS?.classList.remove('is-active');
     TAB_REPORTS?.classList.remove('is-active');
+    TAB_SETTINGS?.classList.remove('is-active');
     const showMap = () => {
       void (async () => {
         const ok = await ensureZoneMap();
@@ -1354,7 +2044,7 @@
     state.zoneMapOpen = false;
     ZONE_MAP_OVERLAY.hidden = true;
     TAB_MAP?.classList.remove('is-active');
-    if (!state.reportsOpen) TAB_ORDERS?.classList.add('is-active');
+    if (!state.reportsOpen && !state.settingsOpen) TAB_ORDERS?.classList.add('is-active');
     if (zoneMapCtl) {
       try {
         zoneMapCtl.destroy();
@@ -1385,7 +2075,7 @@
     state.reportsOpen = false;
     REPORTS_OVERLAY.hidden = true;
     TAB_REPORTS?.classList.remove('is-active');
-    if (!state.zoneMapOpen) TAB_ORDERS?.classList.add('is-active');
+    if (!state.zoneMapOpen && !state.settingsOpen) TAB_ORDERS?.classList.add('is-active');
     refreshBodyBackdropClass();
   }
 
@@ -1411,9 +2101,277 @@
   function switchToOrdersView() {
     closeZoneMapOverlay();
     closeReportsOverlay();
+    closeSettingsOverlay();
     TAB_ORDERS?.classList.add('is-active');
     TAB_MAP?.classList.remove('is-active');
     TAB_REPORTS?.classList.remove('is-active');
+    TAB_SETTINGS?.classList.remove('is-active');
+  }
+
+  const BOOKING_SLOT_UI = [
+    { key: '09:00-14:00', label: '09:00–14:00' },
+    { key: '14:00-17:00', label: '14:00–17:00' },
+    { key: '17:00-21:00', label: '17:00–21:00' },
+    { key: '09:00-17:00', label: 'Для организаций: 09:00–17:00' },
+  ];
+
+  let settingsSlotDefs = BOOKING_SLOT_UI.slice();
+  let settingsDaysList = [];
+  let settingsAvailabilityDraft = { closedDays: [], closedSlots: [] };
+  let settingsLastChangeMeta = null;
+
+  function formatSettingsLastChangeText(meta) {
+    if (!meta || typeof meta !== 'object') return '';
+    const label = String(meta.label || '').trim();
+    const role = String(meta.role || '').trim().toLowerCase();
+    const updatedAt = String(meta.updatedAt || '').trim();
+    if (!label || !updatedAt) return '';
+    const at = new Date(updatedAt);
+    const when = Number.isNaN(at.getTime())
+      ? updatedAt
+      : at.toLocaleString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+    if (role === 'admin') {
+      return `${label} изменил(а) настройки приёма заказов · ${when}`;
+    }
+    return `${label} сохранил(а) изменения · ${when}`;
+  }
+
+  function renderSettingsLastChange(meta) {
+    if (!(SETTINGS_LAST_CHANGE instanceof HTMLElement)) return;
+    const text = formatSettingsLastChangeText(meta);
+    if (!text) {
+      SETTINGS_LAST_CHANGE.hidden = true;
+      SETTINGS_LAST_CHANGE.textContent = '';
+      return;
+    }
+    SETTINGS_LAST_CHANGE.hidden = false;
+    SETTINGS_LAST_CHANGE.textContent = text;
+    SETTINGS_LAST_CHANGE.classList.toggle('is-admin', String(meta?.role || '').toLowerCase() === 'admin');
+  }
+
+  function weekdayLabelRu(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return '';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const names = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+    return names[d.getDay()] || '';
+  }
+
+  function isDayClosedInDraft(iso) {
+    return settingsAvailabilityDraft.closedDays.includes(iso);
+  }
+
+  function isSlotClosedInDraft(iso, slotKey) {
+    if (isDayClosedInDraft(iso)) return true;
+    return settingsAvailabilityDraft.closedSlots.some((r) => r.date === iso && r.slot === slotKey);
+  }
+
+  function renderSettingsDaysList() {
+    if (!(SETTINGS_DAYS_LIST instanceof HTMLElement)) return;
+    const days = settingsDaysList.length ? settingsDaysList : [];
+    if (!days.length) {
+      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">Загрузка…</p>';
+      return;
+    }
+    const slots = settingsSlotDefs.length ? settingsSlotDefs : BOOKING_SLOT_UI;
+    SETTINGS_DAYS_LIST.innerHTML = days
+      .map((iso) => {
+        const dayClosed = isDayClosedInDraft(iso);
+        const wd = weekdayLabelRu(iso);
+        const slotChecks = slots
+          .map((s) => {
+            const checked = isSlotClosedInDraft(iso, s.key);
+            const dis = dayClosed ? ' disabled' : '';
+            const chk = checked ? ' checked' : '';
+            return `<label class="opx-settings-slot${dayClosed ? ' is-muted' : ''}">
+              <input type="checkbox" data-opx-slot-close="${escapeHtml(iso)}" data-slot-key="${escapeHtml(s.key)}"${chk}${dis} />
+              <span>${escapeHtml(s.label)}</span>
+            </label>`;
+          })
+          .join('');
+        return `<article class="opx-settings-day" data-date="${escapeHtml(iso)}">
+          <div class="opx-settings-day-head">
+            <div class="opx-settings-day-date">
+              <strong>${escapeHtml(ruShortDateFromIsoDay(iso))}</strong>
+              <span class="opx-settings-weekday">${escapeHtml(wd)}</span>
+            </div>
+            <label class="opx-settings-day-all">
+              <input type="checkbox" data-opx-close-day="${escapeHtml(iso)}"${dayClosed ? ' checked' : ''} />
+              <span>Закрыть весь день</span>
+            </label>
+          </div>
+          <div class="opx-settings-slots">${slotChecks}</div>
+        </article>`;
+      })
+      .join('');
+  }
+
+  async function loadSettingsAvailability() {
+    if (!(SETTINGS_DAYS_LIST instanceof HTMLElement)) return;
+    SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">Загрузка…</p>';
+    const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
+    if (!api) {
+      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">API недоступен</p>';
+      return;
+    }
+    try {
+      const response = await api.json('/api/orders/operator/delivery-availability', { method: 'GET' });
+      if (!response.ok) throw new Error('load failed');
+      const av = response.data?.availability;
+      settingsAvailabilityDraft = {
+        closedDays: Array.isArray(av?.closedDays) ? av.closedDays.slice() : [],
+        closedSlots: Array.isArray(av?.closedSlots) ? av.closedSlots.map((r) => ({ ...r })) : [],
+      };
+      if (Array.isArray(response.data?.slotDefs) && response.data.slotDefs.length) {
+        settingsSlotDefs = response.data.slotDefs.map((s) => ({
+          key: String(s.key || ''),
+          label: String(s.label || s.key || ''),
+        }));
+      }
+      settingsDaysList = Array.isArray(response.data?.days) ? response.data.days.slice() : [];
+      settingsLastChangeMeta = response.data?.lastChange || null;
+      renderSettingsDaysList();
+      renderSettingsLastChange(settingsLastChangeMeta);
+      if (SETTINGS_STATUS instanceof HTMLElement) SETTINGS_STATUS.textContent = '';
+    } catch (e) {
+      console.error(e);
+      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">Не удалось загрузить настройки</p>';
+    }
+  }
+
+  function collectSettingsAvailabilityFromDom() {
+    const closedDays = [];
+    const closedSlots = [];
+    if (!(SETTINGS_DAYS_LIST instanceof HTMLElement)) {
+      return { closedDays, closedSlots };
+    }
+    SETTINGS_DAYS_LIST.querySelectorAll('[data-opx-close-day]').forEach((el) => {
+      if (!(el instanceof HTMLInputElement) || !el.checked) return;
+      const iso = String(el.getAttribute('data-opx-close-day') || '').trim();
+      if (iso) closedDays.push(iso);
+    });
+    const daySet = new Set(closedDays);
+    SETTINGS_DAYS_LIST.querySelectorAll('[data-opx-slot-close]').forEach((el) => {
+      if (!(el instanceof HTMLInputElement) || !el.checked) return;
+      const iso = String(el.getAttribute('data-opx-slot-close') || '').trim();
+      const slot = String(el.getAttribute('data-slot-key') || '').trim();
+      if (!iso || !slot || daySet.has(iso)) return;
+      closedSlots.push({ date: iso, slot });
+    });
+    closedDays.sort();
+    closedSlots.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
+    return { closedDays, closedSlots };
+  }
+
+  async function saveSettingsAvailability() {
+    const payload = collectSettingsAvailabilityFromDom();
+    const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
+    if (!api) {
+      showToast('API недоступен');
+      return;
+    }
+    if (SETTINGS_SAVE_BTN instanceof HTMLButtonElement) SETTINGS_SAVE_BTN.disabled = true;
+    try {
+      const response = await api.json('/api/orders/operator/delivery-availability', {
+        method: 'PUT',
+        body: payload,
+      });
+      if (!response.ok) {
+        const err = typeof response?.data?.error === 'string' ? response.data.error : 'Сервер отклонил сохранение';
+        showToast(err, 3200, 'error');
+        return;
+      }
+      settingsAvailabilityDraft = response.data?.availability || payload;
+      settingsLastChangeMeta = response.data?.lastChange || settingsLastChangeMeta;
+      renderSettingsDaysList();
+      renderSettingsLastChange(settingsLastChangeMeta);
+      showToast('Настройки приёма заказов сохранены.', 3600, 'success');
+      if (SETTINGS_STATUS instanceof HTMLElement) {
+        const who = formatSettingsLastChangeText(settingsLastChangeMeta);
+        SETTINGS_STATUS.textContent = who
+          ? who
+          : `Обновлено: ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Не удалось сохранить настройки');
+    } finally {
+      if (SETTINGS_SAVE_BTN instanceof HTMLButtonElement) SETTINGS_SAVE_BTN.disabled = false;
+    }
+  }
+
+  function syncSettingsTabsNav(active) {
+    if (!(SETTINGS_OVERLAY instanceof HTMLElement)) return;
+    SETTINGS_OVERLAY.querySelectorAll('[data-opx-settings-switch]').forEach((b) => {
+      if (!(b instanceof HTMLElement) || b.matches(':disabled')) return;
+      const k = String(b.getAttribute('data-opx-settings-switch') || '');
+      b.classList.toggle('is-active', k === active);
+    });
+  }
+
+  function openSettingsOverlay() {
+    if (!(SETTINGS_OVERLAY instanceof HTMLElement)) return;
+    closeOperatorModalsBlockingFullScreenUi();
+    closeZoneMapOverlay();
+    closeReportsOverlay();
+    state.settingsOpen = true;
+    SETTINGS_OVERLAY.hidden = false;
+    TAB_SETTINGS?.classList.add('is-active');
+    TAB_ORDERS?.classList.remove('is-active');
+    TAB_MAP?.classList.remove('is-active');
+    TAB_REPORTS?.classList.remove('is-active');
+    syncSettingsTabsNav('settings');
+    void loadSettingsAvailability();
+    refreshBodyBackdropClass();
+  }
+
+  function closeSettingsOverlay() {
+    if (!(SETTINGS_OVERLAY instanceof HTMLElement)) return;
+    state.settingsOpen = false;
+    SETTINGS_OVERLAY.hidden = true;
+    TAB_SETTINGS?.classList.remove('is-active');
+    if (!state.zoneMapOpen && !state.reportsOpen && !state.settingsOpen) TAB_ORDERS?.classList.add('is-active');
+    refreshBodyBackdropClass();
+  }
+
+  function onSettingsDaysListChange(event) {
+    const t = event.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    const dayIso = t.getAttribute('data-opx-close-day');
+    if (dayIso && t.type === 'checkbox') {
+      const iso = String(dayIso).trim();
+      if (t.checked) {
+        if (!settingsAvailabilityDraft.closedDays.includes(iso)) {
+          settingsAvailabilityDraft.closedDays.push(iso);
+        }
+        settingsAvailabilityDraft.closedSlots = settingsAvailabilityDraft.closedSlots.filter((r) => r.date !== iso);
+      } else {
+        settingsAvailabilityDraft.closedDays = settingsAvailabilityDraft.closedDays.filter((d) => d !== iso);
+      }
+      renderSettingsDaysList();
+      return;
+    }
+    const slotDate = t.getAttribute('data-opx-slot-close');
+    const slotKey = t.getAttribute('data-slot-key');
+    if (slotDate && slotKey && t.type === 'checkbox') {
+      const iso = String(slotDate).trim();
+      const key = String(slotKey).trim();
+      if (t.checked) {
+        if (!settingsAvailabilityDraft.closedSlots.some((r) => r.date === iso && r.slot === key)) {
+          settingsAvailabilityDraft.closedSlots.push({ date: iso, slot: key });
+        }
+      } else {
+        settingsAvailabilityDraft.closedSlots = settingsAvailabilityDraft.closedSlots.filter(
+          (r) => !(r.date === iso && r.slot === key)
+        );
+      }
+    }
   }
 
   function normalizeRuPaymentComparable(s) {
@@ -1444,6 +2402,9 @@
   function paymentRawToModalSelectValue(raw) {
     const p = String(raw ?? '').trim();
     if (!p) return PAYMENT_MODAL_CASH;
+    const low = p.toLowerCase().replace(/ё/g, 'е');
+    if (low === 'cash') return PAYMENT_MODAL_CASH;
+    if (low === 'noncash' || low === 'card' || low === 'карта') return PAYMENT_MODAL_NONCASH;
     if (orderLooksLikeSettlementInvoicePayment(p)) return PAYMENT_SETTLEMENT_INVOICE_VALUE;
     const v = normalizeRuPaymentComparable(p);
     if (v.includes('безнал')) return PAYMENT_MODAL_NONCASH;
@@ -1458,8 +2419,9 @@
     if (!p) return 'cash';
     if (orderLooksLikeSettlementInvoicePayment(p)) return 'settlement';
     const low = String(p).toLowerCase().replace(/ё/g, 'е').replace(/\u00a0/g, ' ');
-    if (/карт|visa|mir|терминал/i.test(low)) return 'card';
-    if (/безнал/i.test(low)) return 'noncash';
+    if (low === 'cash' || /налич/i.test(low)) return 'cash';
+    if (low === 'card' || low === 'карта' || /карт|visa|mir|терминал/i.test(low)) return 'card';
+    if (low === 'noncash' || /безнал/i.test(low)) return 'noncash';
     return 'cash';
   }
 
@@ -1519,8 +2481,8 @@
   function mergeAuditEventsForReport(serverRows, from, to) {
     const localRaw = readStore(OPERATOR_AUDIT_LOCAL_KEY, []);
     const localArr = Array.isArray(localRaw) ? localRaw : [];
-    const normLocal = localArr.filter((e) => eventInReportRange(e, from, to));
-    const srv = Array.isArray(serverRows) ? serverRows : [];
+    const normLocal = localArr.filter((e) => eventInReportRange(e, from, to) && auditEventVisibleInOperatorReport(e));
+    const srv = (Array.isArray(serverRows) ? serverRows : []).filter(auditEventVisibleInOperatorReport);
     return [...srv, ...normLocal].sort(
       (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
     );
@@ -1549,10 +2511,28 @@
       order_cancel: 'Отмена (личный кабинет)',
       order_status_cancelled: 'Отмена оператором',
       operator_patch: 'Изменение оператором',
+      order_operator_create: 'Создан оператором',
       order_reschedule: 'Перенос доставки',
+      driver_mark_delivered: 'Доставлен водителем',
       client_patch: 'Изменение клиентом',
+      delivery_availability: 'Закрыты дни/интервалы приёма',
+      admin_delivery_availability: 'Закрыты дни/интервалы (админ)',
     };
     return m[String(action || '')] || String(action || 'Событие');
+  }
+
+  function setReportsPeriodDays(days) {
+    const span = Math.max(1, Number(days) || 30);
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - (span - 1));
+    if (REPORTS_DATE_FROM instanceof HTMLInputElement) REPORTS_DATE_FROM.value = isoDate(from);
+    if (REPORTS_DATE_TO instanceof HTMLInputElement) REPORTS_DATE_TO.value = isoDate(to);
+    REPORTS_OVERLAY?.querySelectorAll('[data-opx-report-period]').forEach((btn) => {
+      if (!(btn instanceof HTMLButtonElement)) return;
+      btn.classList.toggle('is-active', Number(btn.getAttribute('data-opx-report-period')) === span);
+    });
+    renderReports();
   }
 
   function productCategoryBucketKey(rawTitle) {
@@ -1563,6 +2543,23 @@
     if (/кулер/i.test(s)) return 'coolers';
     if (/помп/i.test(s)) return 'pumps';
     return 'other';
+  }
+
+  function categoryReportColgroupHtml() {
+    return `<colgroup class="opx-reports-cat-cols">
+        <col class="opx-cat-col-category" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-pay" />
+        <col class="opx-cat-col-total" />
+        <col class="opx-cat-col-total" />
+      </colgroup>`;
   }
 
   function productSummaryHeaderRows() {
@@ -1600,7 +2597,6 @@
       other: { cash: emptyReportLane(), noncash: emptyReportLane(), settlement: emptyReportLane() },
     };
     filtered.forEach((o) => {
-      if (String(o.status || '').toLowerCase() === 'cancelled') return;
       const lane = reportPaymentLaneForFinancial(o.payment_method);
       let items = orderItems(o);
       if (!items.length) {
@@ -1642,7 +2638,7 @@
       ${formatReportLaneTriple(grandTotal.settlement)}
       ${lanesTotalTwoCols(grandTotal.cash, grandTotal.noncash, grandTotal.settlement)}
     </tr>`;
-    return `<table class="opx-reports-table opx-reports-table--dense opx-reports-table--category"><thead>${productSummaryHeaderRows()}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>`;
+    return `<div class="opx-reports-table-wrap opx-reports-table-wrap--modern opx-reports-table-wrap--category"><table class="opx-reports-table opx-reports-table--dense opx-reports-table--category">${categoryReportColgroupHtml()}<thead>${productSummaryHeaderRows()}</thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
   }
 
   function auditEventIsCancellation(e) {
@@ -1654,7 +2650,10 @@
       REPORTS_JOURNAL_META.textContent = `События с датой записи в периоде ${fromRu} — ${toRu}. Дата доставки заказа может быть другой.`;
     }
     if (REPORTS_CATEGORIES_META instanceof HTMLElement) {
-      REPORTS_CATEGORIES_META.textContent = `По заказам с датой доставки в периоде ${fromRu} — ${toRu}, без статуса «Отменён».`;
+      const multi = enumerateIsoDatesInclusive(from, to).length > 1;
+      REPORTS_CATEGORIES_META.textContent = multi
+        ? `По заказам с датой доставки в периоде ${fromRu} — ${toRu}, по одному блоку на каждый день; отменённые включены.`
+        : `По заказам с датой доставки в периоде ${fromRu} — ${toRu}; отменённые включены.`;
     }
     if (REPORTS_CANCEL_META instanceof HTMLElement) {
       REPORTS_CANCEL_META.textContent = `Отмены с датой записи события в периоде ${fromRu} — ${toRu}.`;
@@ -1670,12 +2669,11 @@
           .map((e) => {
             const dt = ruDateTime(e.created_at);
             const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(e.created_at || '');
-            const who = `${e.actor_name || '—'}${e.actor_role ? ` · ${e.actor_role}` : ''}`;
             return `<tr>
               <td>${escapeHtml(dtText)}</td>
               <td class="opx-num">${escapeHtml(displayOrderId(e.order_id))}</td>
-              <td>${escapeHtml(reportAuditActionLabel(e.action))}</td>
-              <td>${escapeHtml(who)}</td>
+              <td><span class="opx-reports-event">${escapeHtml(reportAuditActionLabel(e.action))}</span></td>
+              <td>${journalWhoCellHtml(e)}</td>
               <td>${escapeHtml(String(e.reason || '—'))}</td>
             </tr>`;
           })
@@ -1692,14 +2690,34 @@
             return `<tr>
               <td>${escapeHtml(dtText)}</td>
               <td class="opx-num">${escapeHtml(displayOrderId(e.order_id))}</td>
-              <td>${escapeHtml(String(e.actor_name || '—'))}</td>
+              <td>${journalWhoCellHtml(e)}</td>
               <td>${escapeHtml(String(e.reason || '—'))}</td>
             </tr>`;
           })
           .join('')
       : `<tr><td colspan="4" class="opx-reports-empty">Нет отмен за выбранный период.</td></tr>`;
     REPORTS_CANCEL_BODY.innerHTML = cancelBody;
-    REPORTS_CATEGORIES_MOUNT.innerHTML = `<div class="opx-reports-table-wrap opx-reports-table-wrap--modern">${renderProductSummaryTableHtml(filtered)}</div>`;
+    const buildCategoriesSectionsHtml = () => {
+      const daysRange = enumerateIsoDatesInclusive(from, to);
+      if (!daysRange.length) {
+        return renderProductSummaryTableHtml(filtered);
+      }
+      return daysRange
+        .map((dayIso) => {
+          const dayRu = ruShortDateFromIsoDay(dayIso);
+          const dayOrders = filterOrdersDeliveryOnDay(filtered, dayIso);
+          const tableBlock = dayOrders.length
+            ? renderProductSummaryTableHtml(dayOrders)
+            : `<p class="opx-reports-empty-day">Нет заказов на доставку за ${escapeHtml(dayRu)}.</p>`;
+          return `<section class="opx-reports-categories-day" aria-label="Дата доставки ${escapeHtml(dayRu)}">
+              <h3 class="opx-reports-categories-day-title">Дата доставки: ${escapeHtml(dayRu)}</h3>
+              ${tableBlock}
+            </section>`;
+        })
+        .join('');
+    };
+
+    REPORTS_CATEGORIES_MOUNT.innerHTML = buildCategoriesSectionsHtml();
   }
 
   function syncReportsPaneNavAndPanes() {
@@ -1779,6 +2797,80 @@
     ws['!cols'] = cols;
   }
 
+  function applyExcelSheetPageSetup(ws, landscape) {
+    if (!ws || typeof ws !== 'object') return;
+    ws['!pageSetup'] = {
+      orientation: landscape ? 'landscape' : 'portrait',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      paperSize: 9,
+    };
+    ws['!margins'] = { left: 0.25, right: 0.25, top: 0.35, bottom: 0.35, header: 0.2, footer: 0.2 };
+  }
+
+  /** Содержимое активной вкладки отчёта — в отдельный лист для PDF (без пустого flex-оверлея). */
+  function mountReportsPdfSheet(pane) {
+    let sheet = REPORTS_PDF_SHEET;
+    if (!(sheet instanceof HTMLElement)) {
+      sheet = document.createElement('div');
+      sheet.id = 'opxReportsPdfSheet';
+      sheet.className = 'opx-reports-pdf-sheet';
+      sheet.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(sheet);
+    }
+    sheet.innerHTML = '';
+    const head = pane.querySelector('.opx-reports-pane-head');
+    if (head instanceof HTMLElement) sheet.appendChild(head.cloneNode(true));
+    const wrap = pane.querySelector('.opx-reports-table-wrap');
+    const mount = pane.querySelector('.opx-reports-categories-mount');
+    if (wrap instanceof HTMLElement) {
+      sheet.appendChild(wrap.cloneNode(true));
+    } else if (mount instanceof HTMLElement) {
+      sheet.appendChild(mount.cloneNode(true));
+    } else {
+      pane.querySelectorAll('table').forEach((table) => {
+        if (!(table instanceof HTMLTableElement)) return;
+        const box = document.createElement('div');
+        box.className = 'opx-reports-table-wrap opx-reports-table-wrap--modern';
+        box.appendChild(table.cloneNode(true));
+        sheet.appendChild(box);
+      });
+    }
+    sheet.removeAttribute('hidden');
+    return sheet;
+  }
+
+  function clearReportsPdfSheet() {
+    if (REPORTS_PDF_SHEET instanceof HTMLElement) {
+      REPORTS_PDF_SHEET.innerHTML = '';
+      REPORTS_PDF_SHEET.setAttribute('hidden', '');
+    }
+  }
+
+  function reportsPdfUsesLandscape(sheet) {
+    if (!(sheet instanceof HTMLElement)) return false;
+    if (sheet.querySelector('.opx-reports-table--financial, .opx-reports-table--category')) return true;
+    const table = sheet.querySelector('table');
+    if (table instanceof HTMLTableElement) {
+      const cols = table.querySelectorAll('colgroup col').length;
+      if (cols >= 10 || table.rows[0]?.cells?.length >= 10) return true;
+    }
+    return (sheet.scrollWidth || 0) > 900;
+  }
+
+  function waitNextPaintFrames(n = 2) {
+    return new Promise((resolve) => {
+      let left = n;
+      const tick = () => {
+        left -= 1;
+        if (left <= 0) resolve();
+        else window.requestAnimationFrame(tick);
+      };
+      window.requestAnimationFrame(tick);
+    });
+  }
+
   function exportedPaneTitle(pane) {
     if (!(pane instanceof HTMLElement)) return 'Отчёт';
     const h2 = pane.querySelector('.opx-reports-pane-title');
@@ -1817,9 +2909,16 @@
     const { base } = exportReportsFilenameBase();
     const wb = XLSX.utils.book_new();
     const tabBase = exportedPaneTitle(pane);
+    const landscape = Boolean(
+      pane.querySelector('.opx-reports-table--financial, .opx-reports-table--category')
+    );
     tables.forEach((table, idx) => {
       const ws = XLSX.utils.table_to_sheet(table, { raw: false });
       applyExcelColWidths(ws);
+      applyExcelSheetPageSetup(
+        ws,
+        landscape || table.classList.contains('opx-reports-table--financial') || table.classList.contains('opx-reports-table--category')
+      );
       const wantName = tables.length === 1 ? tabBase : `${tabBase} ${idx + 1}`;
       XLSX.utils.book_append_sheet(wb, ws, uniqueExcelSheetName(wb, wantName));
     });
@@ -1841,37 +2940,54 @@
       return;
     }
     const { base } = exportReportsFilenameBase();
-    const landscape = pane.scrollWidth > 900;
+    document.body.classList.add('opx-printing-reports', 'opx-exporting-pdf');
+    const sheet = mountReportsPdfSheet(pane);
+    await waitNextPaintFrames(2);
+    const landscape = reportsPdfUsesLandscape(sheet);
+    const contentW = Math.max(sheet.scrollWidth || 0, sheet.offsetWidth || 0, landscape ? 1060 : 780);
+    const contentH = Math.max(sheet.scrollHeight || 0, sheet.offsetHeight || 0, 120);
     const opt = {
-      margin: [8, 8, 8, 8],
+      margin: [4, 4, 4, 4],
       filename: `${base}.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
+      image: { type: 'jpeg', quality: 0.96 },
       html2canvas: {
         scale: Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.5),
         useCORS: true,
         logging: false,
         scrollX: 0,
         scrollY: 0,
-        width: pane.scrollWidth,
-        windowWidth: pane.scrollWidth,
+        x: 0,
+        y: 0,
+        width: contentW,
+        height: contentH,
+        windowWidth: contentW,
+        windowHeight: contentH,
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['.opx-reports-driver-subtotal'] },
     };
     try {
       if (REPORTS_PDF_BTN instanceof HTMLButtonElement) REPORTS_PDF_BTN.disabled = true;
       showToast('Готовим PDF…');
-      await h2p().set(opt).from(pane).save();
+      await h2p().set(opt).from(sheet).save();
       showToast('PDF сохранён');
     } catch (e) {
       console.error(e);
       showToast('Не удалось сформировать PDF');
     } finally {
+      clearReportsPdfSheet();
+      document.body.classList.remove('opx-printing-reports', 'opx-exporting-pdf');
       if (REPORTS_PDF_BTN instanceof HTMLButtonElement) REPORTS_PDF_BTN.disabled = false;
     }
   }
 
   function printReportsArea() {
+    document.body.classList.add('opx-printing-reports');
+    const cleanup = () => {
+      document.body.classList.remove('opx-printing-reports');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
     window.print();
   }
 
@@ -1879,10 +2995,13 @@
     const f = String(state.status || 'all');
     const map = {
       all: 'все статусы',
-      new: 'новый',
+      in_processing: 'в обработке',
+      new: 'в обработке',
       confirmed: 'подтверждён',
-      work: 'в работе',
+      on_way: 'в пути',
+      work: 'в пути',
       delivered: 'доставлен',
+      cancelled: 'отменён',
     };
     return map[f] || f;
   }
@@ -1921,10 +3040,10 @@
         <td class="opx-orders-print-clip">${escapeHtml(product)}</td>
         <td>${escapeHtml(String(qty))}</td>
         <td class="opx-orders-print-num">${escapeHtml(money(o.total_sum))}</td>
-        <td>${escapeHtml(String(o.payment_method || ''))}</td>
+        <td>${escapeHtml(paymentLabelDisplay(o.payment_method))}</td>
         <td>${escapeHtml(zoneName)}</td>
         <td class="opx-orders-print-clip">${escapeHtml(exp || 'Не назначен')}</td>
-        <td class="opx-orders-print-note">${escapeHtml(String(o.courier_note || ''))}</td>
+        <td class="opx-orders-print-note">${escapeHtml(formatCourierNote(o.courier_note))}</td>
       </tr>`;
   }
 
@@ -2035,17 +3154,54 @@
     });
   }
 
+  /** Список календарных дней YYYY-MM-DD от from до to включительно (только если обе границы валидны). */
+  function enumerateIsoDatesInclusive(fromIso, toIso) {
+    const a = String(fromIso || '').trim();
+    const b = String(toIso || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return [];
+    let start = a;
+    let end = b;
+    if (start > end) {
+      const t = start;
+      start = end;
+      end = t;
+    }
+    const out = [];
+    let cur = start;
+    while (cur && cur <= end) {
+      out.push(cur);
+      cur = shiftIsoCalendarDay(cur, 1);
+    }
+    return out;
+  }
+
+  /** Подмножество заказов с датой доставки (или датой создания) = dayIso. */
+  function filterOrdersDeliveryOnDay(filteredOrders, dayIso) {
+    const d = String(dayIso || '').trim();
+    return filteredOrders.filter((o) => isoDate(o.delivery_date || o.created_at) === d);
+  }
+
+  /** Короткая подпись dd.mm.yy без сдвига часового пояса. */
+  function ruShortDateFromIsoDay(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return String(iso || '—');
+    return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
+  }
+
   function summarizeReportTotals(filtered) {
     let ordersCount = filtered.length;
     let itemsCount = 0;
     let totalSum = 0;
     let delivered = 0;
+    let cancelled = 0;
     filtered.forEach((o) => {
-      if (String(o.status || '').toLowerCase() === 'delivered') delivered += 1;
+      const st = String(o.status || '').trim().toLowerCase();
+      if (st === 'delivered') delivered += 1;
+      if (st === 'cancelled') cancelled += 1;
       totalSum += Number(o.total_sum) || 0;
       itemsCount += parseQty(o.items_json);
     });
-    return { ordersCount, itemsCount, totalSum, delivered };
+    return { ordersCount, itemsCount, totalSum, delivered, cancelled };
   }
 
   function addReportLanes(acc, cash, noncash, settlement) {
@@ -2094,6 +3250,53 @@
     return byDriver;
   }
 
+  /**
+   * Строки финансового отчёта по водителям/продукции для подмножества заказов.
+   * @param {{ n: number }} serialRef счётчик «№ п.п.» (передаётся по ссылке)
+   * @returns {boolean} true, если добавлены строки с продукцией
+   */
+  function appendFinancialReportDriverRows(bodyRows, grandTotal, subsetOrders, serialRef) {
+    const byDriver = buildFinancialByDriverStructured(subsetOrders);
+    const driversSorted = [...byDriver.keys()].sort((a, b) => a.localeCompare(b, 'ru'));
+    if (!driversSorted.length) return false;
+    driversSorted.forEach((driver) => {
+      const pmap = byDriver.get(driver);
+      const productsSorted = [...pmap.keys()].sort((a, b) => a.localeCompare(b, 'ru'));
+      const rowSpan = productsSorted.length + 1;
+      const driverTot = {
+        cash: emptyReportLane(),
+        noncash: emptyReportLane(),
+        settlement: emptyReportLane(),
+      };
+
+      productsSorted.forEach((productKey, pi) => {
+        const { cash, noncash, settlement } = pmap.get(productKey);
+        addReportLanes(driverTot, cash, noncash, settlement);
+        addReportLanes(grandTotal, cash, noncash, settlement);
+        serialRef.n += 1;
+        bodyRows.push(`<tr>
+            <td class="opx-num">${serialRef.n}</td>
+            ${pi === 0 ? `<td rowspan="${rowSpan}" class="opx-reports-driver-cell">${escapeHtml(driver)}</td>` : ''}
+            <td>${escapeHtml(productKey)}</td>
+            ${formatReportLaneTriple(cash)}
+            ${formatReportLaneTriple(noncash)}
+            ${formatReportLaneTriple(settlement)}
+            ${lanesTotalTwoCols(cash, noncash, settlement)}
+          </tr>`);
+      });
+
+      bodyRows.push(`<tr class="opx-reports-driver-subtotal">
+          <td></td>
+          <td class="opx-reports-subtotal-label"><strong>Итого:</strong></td>
+          ${formatReportLaneTriple(driverTot.cash)}
+          ${formatReportLaneTriple(driverTot.noncash)}
+          ${formatReportLaneTriple(driverTot.settlement)}
+          ${lanesTotalTwoCols(driverTot.cash, driverTot.noncash, driverTot.settlement)}
+        </tr>`);
+    });
+    return true;
+  }
+
   function formatReportLaneTriple(lane) {
     const qty = lane.qty;
     const sum = lane.sum;
@@ -2140,12 +3343,16 @@
     const to = REPORTS_DATE_TO instanceof HTMLInputElement ? REPORTS_DATE_TO.value : '';
     const filtered = filterOrdersForReports(from, to);
     const totals = summarizeReportTotals(filtered);
-    const byDriver = buildFinancialByDriverStructured(filtered);
+    const reportDays = enumerateIsoDatesInclusive(from, to);
 
     const fromRu = from ? ruDate(from) : '—';
     const toRu = to ? ruDate(to) : '—';
     if (REPORTS_HEADING instanceof HTMLElement) {
-      REPORTS_HEADING.innerHTML = `<strong class="opx-reports-kicker">Отчёт:</strong> <span class="opx-reports-name">Финансовый по экспедиторам</span> <span class="opx-reports-dates">(доставка ${fromRu} — ${toRu})</span>`;
+      const dayNote =
+        reportDays.length > 1
+          ? ' <span class="opx-reports-dates-notes">— по каждому дню доставки отдельно</span>'
+          : '';
+      REPORTS_HEADING.innerHTML = `<strong class="opx-reports-kicker">Отчёт:</strong> <span class="opx-reports-name">Финансовый по экспедиторам</span> <span class="opx-reports-dates">(доставка ${fromRu} — ${toRu})</span>${dayNote}`;
     }
 
     if (REPORTS_THEAD instanceof HTMLElement) REPORTS_THEAD.innerHTML = financialReportHeaderRows();
@@ -2156,60 +3363,53 @@
       settlement: emptyReportLane(),
     };
 
-    let serial = 0;
+    let serialRef = { n: 0 };
     const bodyRows = [];
-    const driversSorted = [...byDriver.keys()].sort((a, b) => a.localeCompare(b, 'ru'));
 
-    if (!driversSorted.length) {
-      REPORTS_BODY.innerHTML = `<tr><td colspan="14" class="opx-reports-empty">Нет данных за выбранный период.</td></tr>`;
-      if (REPORTS_TFOOT instanceof HTMLElement) REPORTS_TFOOT.innerHTML = '';
-    } else {
-      driversSorted.forEach((driver) => {
-        const pmap = byDriver.get(driver);
-        const productsSorted = [...pmap.keys()].sort((a, b) => a.localeCompare(b, 'ru'));
-        const rowSpan = productsSorted.length + 1;
-        const driverTot = {
-          cash: emptyReportLane(),
-          noncash: emptyReportLane(),
-          settlement: emptyReportLane(),
-        };
-
-        productsSorted.forEach((productKey, pi) => {
-          const { cash, noncash, settlement } = pmap.get(productKey);
-          addReportLanes(driverTot, cash, noncash, settlement);
-          addReportLanes(grandTotal, cash, noncash, settlement);
-          serial += 1;
-          bodyRows.push(`<tr>
-            <td class="opx-num">${serial}</td>
-            ${pi === 0 ? `<td rowspan="${rowSpan}" class="opx-reports-driver-cell">${escapeHtml(driver)}</td>` : ''}
-            <td>${escapeHtml(productKey)}</td>
-            ${formatReportLaneTriple(cash)}
-            ${formatReportLaneTriple(noncash)}
-            ${formatReportLaneTriple(settlement)}
-            ${lanesTotalTwoCols(cash, noncash, settlement)}
+    if (reportDays.length) {
+      reportDays.forEach((dayIso) => {
+        const dayRu = ruShortDateFromIsoDay(dayIso);
+        const dayOrders = filterOrdersDeliveryOnDay(filtered, dayIso);
+        bodyRows.push(`<tr class="opx-reports-day-head">
+            <td colspan="14" class="opx-reports-day-head-cell"><strong>Дата доставки: ${escapeHtml(dayRu)}</strong></td>
           </tr>`);
-        });
-
-        bodyRows.push(`<tr class="opx-reports-driver-subtotal">
-          <td></td>
-          <td class="opx-reports-subtotal-label"><strong>Итого:</strong></td>
-          ${formatReportLaneTriple(driverTot.cash)}
-          ${formatReportLaneTriple(driverTot.noncash)}
-          ${formatReportLaneTriple(driverTot.settlement)}
-          ${lanesTotalTwoCols(driverTot.cash, driverTot.noncash, driverTot.settlement)}
-        </tr>`);
+        const hadRows = appendFinancialReportDriverRows(bodyRows, grandTotal, dayOrders, serialRef);
+        if (!hadRows) {
+          bodyRows.push(`<tr class="opx-reports-day-empty">
+            <td colspan="14" class="opx-reports-empty">Нет заказов на доставку за ${escapeHtml(dayRu)}.</td>
+          </tr>`);
+        }
       });
 
       REPORTS_BODY.innerHTML = bodyRows.join('');
 
       if (REPORTS_TFOOT instanceof HTMLElement) {
         REPORTS_TFOOT.innerHTML = `<tr class="opx-reports-grand-total">
+          <td colspan="3"><strong>Всего за период</strong></td>
+          ${formatReportLaneTriple(grandTotal.cash)}
+          ${formatReportLaneTriple(grandTotal.noncash)}
+          ${formatReportLaneTriple(grandTotal.settlement)}
+          ${lanesTotalTwoCols(grandTotal.cash, grandTotal.noncash, grandTotal.settlement)}
+        </tr>`;
+      }
+    } else {
+      const serialRefFallback = { n: 0 };
+      const added = appendFinancialReportDriverRows(bodyRows, grandTotal, filtered, serialRefFallback);
+
+      if (!added) {
+        REPORTS_BODY.innerHTML = `<tr><td colspan="14" class="opx-reports-empty">Нет данных за выбранный период.</td></tr>`;
+        if (REPORTS_TFOOT instanceof HTMLElement) REPORTS_TFOOT.innerHTML = '';
+      } else {
+        REPORTS_BODY.innerHTML = bodyRows.join('');
+        if (REPORTS_TFOOT instanceof HTMLElement) {
+          REPORTS_TFOOT.innerHTML = `<tr class="opx-reports-grand-total">
           <td colspan="3"><strong>Всего</strong></td>
           ${formatReportLaneTriple(grandTotal.cash)}
           ${formatReportLaneTriple(grandTotal.noncash)}
           ${formatReportLaneTriple(grandTotal.settlement)}
           ${lanesTotalTwoCols(grandTotal.cash, grandTotal.noncash, grandTotal.settlement)}
         </tr>`;
+        }
       }
     }
 
@@ -2217,6 +3417,7 @@
     if (REPORTS_ITEMS) REPORTS_ITEMS.textContent = String(totals.itemsCount);
     if (REPORTS_SUM) REPORTS_SUM.textContent = `${money(totals.totalSum)} ₽`;
     if (REPORTS_DELIVERED) REPORTS_DELIVERED.textContent = String(totals.delivered);
+    if (REPORTS_CANCELLED) REPORTS_CANCELLED.textContent = String(totals.cancelled || 0);
     syncReportsPaneNavAndPanes();
     void populateReportsSupportingSections(from, to, filtered, fromRu, toRu);
   }
@@ -2225,20 +3426,14 @@
     if (!(REPORTS_OVERLAY instanceof HTMLElement)) return;
     closeOperatorModalsBlockingFullScreenUi();
     closeZoneMapOverlay();
+    closeSettingsOverlay();
     TAB_MAP?.classList.remove('is-active');
+    TAB_SETTINGS?.classList.remove('is-active');
     state.reportsOpen = true;
     REPORTS_OVERLAY.hidden = false;
     TAB_REPORTS?.classList.add('is-active');
     TAB_ORDERS?.classList.remove('is-active');
-    if (REPORTS_DATE_FROM instanceof HTMLInputElement && !REPORTS_DATE_FROM.value) {
-      const d = new Date();
-      d.setDate(d.getDate() - 7);
-      REPORTS_DATE_FROM.value = isoDate(d);
-    }
-    if (REPORTS_DATE_TO instanceof HTMLInputElement && !REPORTS_DATE_TO.value) {
-      REPORTS_DATE_TO.value = isoDate(new Date());
-    }
-    renderReports();
+    setReportsPeriodDays(30);
     syncEmbeddedReportsNav('reports');
   }
 
@@ -2255,30 +3450,34 @@
     el.textContent = prepared;
   }
 
+  const SLOT_FILTER_MODE_BY_KEY = {
+    '09:00-14:00': 'morning',
+    '14:00-17:00': 'day',
+    '17:00-21:00': 'evening',
+    '09:00-17:00': 'work',
+  };
+
   /** delivery_slot строки клиента ↔ ключ кнопок расширенного фильтра по интервалу */
   function deliverySlotToFilterMode(ds) {
-    const map = {
-      '09:00-14:00': 'morning',
-      '14:00-17:00': 'day',
-      '17:00-21:00': 'evening',
-      '09:00-17:00': 'work',
-    };
-    const s = String(ds ?? '').trim();
-    return map[s] || 'unset';
+    const raw = String(ds ?? '').trim();
+    if (!raw) return 'unset';
+    const key = normalizeDeliverySlotStored(raw);
+    return SLOT_FILTER_MODE_BY_KEY[key] || 'unset';
   }
 
   /** Подпись колонки «Период» — интервал доставки (без слова «рабочее», чтобы не путать со статусом «В работе»). */
   function periodBySlot(ds) {
     const label = {
-      '09:00-14:00': 'утро',
-      '14:00-17:00': 'день',
-      '17:00-21:00': 'вечер',
-      '09:00-17:00': '9–17',
+      morning: 'утро',
+      day: 'день',
+      evening: 'вечер',
+      work: '9–17',
+      unset: 'не задано',
     };
+    const mode = deliverySlotToFilterMode(ds);
+    if (label[mode]) return label[mode];
     const s = String(ds ?? '').trim();
-    if (label[s]) return label[s];
-    if (!s) return 'не задано';
-    return s;
+    return s || 'не задано';
   }
 
   function parseQty(itemsJson) {
@@ -2356,9 +3555,11 @@
       const sel = tr.querySelector('select[data-opx-note-type]');
       const ta = tr.querySelector('textarea[data-opx-note-info]');
       const noteType = sel instanceof HTMLSelectElement ? String(sel.value || 'simple') : 'simple';
-      const text = ta instanceof HTMLTextAreaElement ? ta.value : '';
+      const rawText = ta instanceof HTMLTextAreaElement ? ta.value : '';
+      const noteMax = opxLimits()?.ORDER_NOTE_TEXT_MAX ?? 2000;
+      const text = opxLimits()?.clampText(rawText, noteMax) ?? String(rawText ?? '').slice(0, noteMax);
       if (!id) return;
-      out.push({ id, noteType, text: String(text ?? '') });
+      out.push({ id, noteType, text });
     });
     return out;
   }
@@ -2510,7 +3711,7 @@
     return `<tr data-note-id="${id}">
         <td class="opx-order-notes-num">${index}</td>
         <td><select class="opx-modal-input" data-opx-note-type>${sel}</select></td>
-        <td><textarea class="opx-modal-input opx-order-notes-area" rows="3" data-opx-note-info placeholder="${escapeHtml(
+        <td><textarea class="opx-modal-input opx-order-notes-area" rows="3" maxlength="${opxLimits()?.ORDER_NOTE_TEXT_MAX ?? 2000}" data-opx-note-info placeholder="${escapeHtml(
           `${operatorNoteTypeLabel(noteTypeVal)}: `
         )}"></textarea></td>
       </tr>`;
@@ -2584,10 +3785,12 @@
   }
 
   function tryFinalizeOrderNotesOnSave() {
-    if (!(ORDER_NOTES_TBODY instanceof HTMLElement)) return;
-    if (!orderNotesVisitedThisOpen) return;
+    if (!(ORDER_NOTES_TBODY instanceof HTMLElement)) return false;
+    if (!orderNotesVisitedThisOpen) return false;
     const bucket = operatorClientNotesBucketKey();
-    if (bucket === '__none') return;
+    if (bucket === '__none') return false;
+    const allBefore = readAllOperatorClientNotes();
+    const snapBefore = JSON.stringify(allBefore[bucket] || allBefore[orderNotesActiveBucket] || []);
     if (orderNotesActiveBucket && orderNotesActiveBucket !== bucket && orderNotesActiveBucket !== '__none') {
       persistOrderNotesToDisk(orderNotesActiveBucket);
       const all = readAllOperatorClientNotes();
@@ -2597,6 +3800,9 @@
     orderNotesActiveBucket = bucket;
     persistOrderNotesToDisk(bucket);
     refreshOrderNotesPreviews();
+    const allAfter = readAllOperatorClientNotes();
+    const snapAfter = JSON.stringify(allAfter[bucket] || []);
+    return snapBefore !== snapAfter;
   }
 
   function migrateOperatorDraftNotes(orderRowLike) {
@@ -3001,6 +4207,18 @@
     return '';
   }
 
+  function stripDemoNoteTags(note) {
+    return String(note || '')
+      .replace(/\s*§demo_(mo|op)\b/gi, '')
+      .replace(/\s*§ekva_seed\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function formatCourierNote(note) {
+    return stripDemoNoteTags(note);
+  }
+
   function resolveClientName(order, fallbackUser) {
     const orgName = pickFirstFilled([
       order?.organization_name,
@@ -3012,8 +4230,8 @@
     if (orgName) return orgName;
 
     const fullName = pickFirstFilled([
-      [order?.last_name, order?.first_name, order?.patronymic].filter(Boolean).join(' ').trim(),
-      [order?.first_name, order?.last_name].filter(Boolean).join(' ').trim(),
+      [order?.first_name, order?.last_name, order?.patronymic].filter(Boolean).join(' ').trim(),
+      [order?.last_name, order?.first_name].filter(Boolean).join(' ').trim(),
       order?.customer_name,
       order?.client_name,
       order?.recipient_name,
@@ -3026,6 +4244,7 @@
       fallbackUser?.organization,
       fallbackUser?.company_name,
       fallbackUser?.name,
+      [fallbackUser?.first_name, fallbackUser?.last_name].filter(Boolean).join(' ').trim(),
       [fallbackUser?.last_name, fallbackUser?.first_name].filter(Boolean).join(' ').trim(),
     ]);
     return fallbackName || 'КЛИЕНТ';
@@ -3094,7 +4313,16 @@
       base.push({
         id: `ЛС-${String(maxOrderNumber).padStart(6, '0')}`,
         status: ['new', 'confirmed', 'pending_operator', 'processing', 'delivered'][i % 5],
-        client: ['ДИРЕКСКИЙ ЦЕНТР', 'ООО "ФЕРРОНФОРГИК МАШИНЫ"', 'Юлия', 'ЕЛЕНА Петренко', 'ВАЛЕРИЙ'][i % 5],
+        client: [
+          'ДИРЕКСКИЙ ЦЕНТР',
+          'ООО «Ферронфоргик Машины»',
+          'Юлия Соколова',
+          'Елена Петренко',
+          'Валерий Киселёв',
+          'Александр Морозов',
+          'Наталья Кузнецова',
+          'Игорь Смирнов',
+        ][i % 8],
         phone: `+7 900 100-${String(10 + i).padStart(2, '0')}-${String(20 + i).padStart(2, '0')}`,
         address: ['г. Оренбург, ул. Нежинское, 9', 'г. Оренбург, ул. Карпова, 3', 'г. Оренбург, ул. Красносельная, 66', 'г. Оренбург, ул. Монтажников, 8/2'][i % 4],
         delivery_date: isoDate(delivery),
@@ -3118,6 +4346,43 @@
   }
 
   const LOAD_ORDERS_TIMEOUT_MS = 28000;
+  /** Фоновое обновление списка — статус «доставлен» от водителя без перезагрузки страницы. */
+  const ORDERS_AUTO_REFRESH_MS = 10000;
+  let ordersPollTimer = null;
+
+  function ordersListSignature(orders) {
+    if (!Array.isArray(orders) || !orders.length) return '';
+    return orders
+      .map(
+        (o) =>
+          `${o.id}:${String(o.status || '')}:${String(o.driver || '').trim()}:${String(o.updated_at || '')}`
+      )
+      .join('|');
+  }
+
+  function stopOrdersAutoRefresh() {
+    if (ordersPollTimer) {
+      window.clearInterval(ordersPollTimer);
+      ordersPollTimer = null;
+    }
+  }
+
+  function startOrdersAutoRefresh() {
+    stopOrdersAutoRefresh();
+    ordersPollTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      void pollOrdersForRealtime();
+    }, ORDERS_AUTO_REFRESH_MS);
+  }
+
+  async function pollOrdersForRealtime() {
+    const before = ordersListSignature(state.orders);
+    await loadOrders();
+    const after = ordersListSignature(state.orders);
+    if (before === after) return;
+    applyFilters();
+    render();
+  }
 
   /** Локальная разработка: пустая БД не должна «вешать» панель на пустом экране. */
   function isOperatorUiDevHost() {
@@ -3185,6 +4450,7 @@
     } finally {
       if (seq === loadOrdersSeq) {
         await refreshOperatorDriverChoices();
+        rebuildFilterSelectsFromOrders();
       }
     }
   }
@@ -3260,20 +4526,17 @@
     });
   }
 
-  /** Соответствие заказа фильтру: новый | подтверждён | в работе | доставлен (+ все). */
+  /** Соответствие заказа фильтру: в обработке | подтверждён | в пути | доставлен (+ все). */
   function orderMatchesStatusFilter(order, filterValue) {
     if (!filterValue || filterValue === 'all') return true;
-    const st = String(order?.status || '').trim();
+    const st = String(order?.status || '').trim().toLowerCase();
     const f = String(filterValue);
-    if (f === 'new') return st === 'new';
+    if (f === 'in_processing' || f === 'new') return st === 'new' || st === 'pending_operator';
     if (f === 'confirmed') return st === 'confirmed';
-
-    /** «В работе» — промежуточные этапы; «Подтверждён» вынесен отдельным фильтром. */
-    if (f === 'work')
-      return st === 'pending_operator' || st === 'processing' || st === 'courier' || st === 'on_way';
-
+    if (f === 'on_way' || f === 'work')
+      return st === 'on_way' || st === 'processing' || st === 'courier';
     if (f === 'delivered') return st === 'delivered';
-
+    if (f === 'cancelled') return st === 'cancelled';
     return st === f;
   }
 
@@ -3299,22 +4562,40 @@
 
   function orderMatchesAdvZone(order, zoneSel) {
     if (!zoneSel || zoneSel === 'all') return true;
-    return districtKeyForFilter(order) === String(zoneSel).trim();
+    return normalizeZoneName(order.zone) === normalizeZoneName(zoneSel);
+  }
+
+  /** Ключ оплаты для сравнения в фильтре (cash | noncash | расчётный счёт). */
+  function paymentCanonForFilter(raw) {
+    const p = String(raw ?? '').trim();
+    if (!p) return 'cash';
+    if (orderLooksLikeSettlementInvoicePayment(p)) return PAYMENT_SETTLEMENT_INVOICE_VALUE;
+    const low = p.toLowerCase().replace(/ё/g, 'е');
+    if (low === 'cash' || low.includes('налич')) return 'cash';
+    if (low === 'noncash' || low === 'card' || low.includes('безнал') || low.includes('карт')) return 'noncash';
+    const modal = paymentRawToModalSelectValue(p);
+    if (modal === PAYMENT_MODAL_NONCASH) return 'noncash';
+    if (modal === PAYMENT_SETTLEMENT_INVOICE_VALUE) return PAYMENT_SETTLEMENT_INVOICE_VALUE;
+    return 'cash';
+  }
+
+  function paymentLabelForFilterKey(key) {
+    const k = String(key || '').trim();
+    if (k === 'cash') return 'Наличная';
+    if (k === 'noncash') return 'Безналичная';
+    if (advancedFilterSelectionMeansSettlementInvoice(k) || k === PAYMENT_SETTLEMENT_INVOICE_VALUE) {
+      return 'Расчётный счёт';
+    }
+    return k || '—';
   }
 
   function paymentMethodMatchesAdv(order, filt) {
     if (!filt || filt === 'all') return true;
     const fv = String(filt).trim();
-    const pv = String(order.payment_method ?? '').trim();
-
-    /** Значение option = PAYMENT_SETTLEMENT_INVOICE_VALUE (как в модалке); матчится с колонкой по канону или явным текстам счёта */
     if (advancedFilterSelectionMeansSettlementInvoice(fv)) {
-      if (normalizeRuPaymentComparable(pv) === normalizeRuPaymentComparable(PAYMENT_SETTLEMENT_INVOICE_VALUE))
-        return true;
-      return orderLooksLikeSettlementInvoicePayment(pv);
+      return paymentCanonForFilter(order.payment_method) === PAYMENT_SETTLEMENT_INVOICE_VALUE;
     }
-
-    return pv.toLowerCase() === fv.toLowerCase();
+    return paymentCanonForFilter(order.payment_method) === paymentCanonForFilter(fv);
   }
 
   function orderMatchesAdvDriver(order, driverSel) {
@@ -3333,8 +4614,12 @@
 
   function orderMatchesAdvProductFilter(order, prodSel, orderIndexHint) {
     if (!prodSel || prodSel === 'all') return true;
-    const fromOrder = normalizeProductName(parseProduct(order.items_json, orderIndexHint));
-    return fromOrder === normalizeProductName(prodSel);
+    const want = normalizeProductName(prodSel);
+    const items = orderItems(order);
+    if (items.length) {
+      return items.some((it) => normalizeProductName(it.title) === want);
+    }
+    return normalizeProductName(parseProduct(order.items_json, orderIndexHint)) === want;
   }
 
   function orderMatchesAdvSum(order, sumKind) {
@@ -3433,9 +4718,9 @@
     chunks.push(
       'Сейчас нет строк: выбраны день доставки и фильтры, под которые не попадает ни один заказ. Адреса показываются только в строках таблицы, в колонке «Адрес».'
     );
-    if (state.status === 'work') {
+    if (state.status === 'on_way' || state.status === 'work') {
       chunks.push(
-        ' Фильтр «В работе» не включает новые заказы (статус «Новый»): в окне «Фильтры» выберите «Все статусы» или «Новый», либо нажмите «Отключить фильтр».'
+        ' Фильтр «В пути» не включает заказы «В обработке» и «Подтверждён»: выберите «Все статусы» или другой этап, либо отключите фильтр.'
       );
     } else if (String(state.status || 'all') !== 'all') {
       chunks.push(' Смягчите «Состояние заказа» или отключите фильтры.');
@@ -3491,14 +4776,17 @@
     if (!(FILTERS_ADV_STATUS instanceof HTMLSelectElement)) return;
     const rows = [
       ['all', 'Все статусы'],
-      ['new', 'Новый'],
+      ['in_processing', 'В обработке'],
       ['confirmed', 'Подтверждён'],
-      ['work', 'В работе'],
+      ['on_way', 'В пути'],
       ['delivered', 'Доставлен'],
+      ['cancelled', 'Отменён'],
     ];
     FILTERS_ADV_STATUS.innerHTML = rows
       .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
       .join('');
+    if (state.status === 'work') state.status = 'on_way';
+    if (state.status === 'new') state.status = 'in_processing';
     const sv = String(state.status || 'all');
     if (!selectHasValue(FILTERS_ADV_STATUS, sv)) {
       FILTERS_ADV_STATUS.value = 'all';
@@ -3506,23 +4794,52 @@
     } else FILTERS_ADV_STATUS.value = sv;
   }
 
+  function rebuildAdvZoneSelect() {
+    ensureFiltersModalStaticSelects();
+    if (!(FILTERS_ADV_ZONE instanceof HTMLSelectElement)) return;
+    const zones = new Set(districts.map((z) => normalizeZoneName(z)));
+    state.orders.forEach((o) => {
+      const z = String(o.zone || '').trim();
+      if (z) zones.add(normalizeZoneName(z));
+    });
+    const sorted = [...zones].sort((a, b) => a.localeCompare(b, 'ru'));
+    FILTERS_ADV_ZONE.innerHTML = `<option value="all">Все</option>${sorted
+      .map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)
+      .join('')}`;
+    const zv = state.advanced.zone || 'all';
+    if (zv !== 'all' && !selectHasValue(FILTERS_ADV_ZONE, zv)) {
+      FILTERS_ADV_ZONE.value = 'all';
+      state.advanced.zone = 'all';
+    } else FILTERS_ADV_ZONE.value = zv;
+  }
+
   function rebuildAdvPaymentSelect() {
     ensureFiltersModalStaticSelects();
     if (!(FILTERS_ADV_PAYMENT instanceof HTMLSelectElement)) return;
-    const uniqBase = [...new Set(state.orders.map((o) => String(o.payment_method || '').trim()).filter(Boolean))].sort(
-      (a, b) => a.localeCompare(b, 'ru')
-    );
-    /** Одна строка «Расчётный счёт» в выпадающем списке; варианты «расч. счёт» и др. исключаются, но фильтром всё ещё ловятся через orderLooksLikeSettlementInvoicePayment */
-    const uniqRest = uniqBase.filter((p) => !orderLooksLikeSettlementInvoicePayment(p));
-    const settlementOpt = `<option value="${escapeHtml(PAYMENT_SETTLEMENT_INVOICE_VALUE)}">Расчётный счёт</option>`;
-    const restOpts = uniqRest.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
-    FILTERS_ADV_PAYMENT.innerHTML = `<option value="all">Все</option>${settlementOpt}${restOpts}`;
+    const keys = new Set();
+    state.orders.forEach((o) => keys.add(paymentCanonForFilter(o.payment_method)));
+    const ordered = ['cash', 'noncash', PAYMENT_SETTLEMENT_INVOICE_VALUE].filter((k) => keys.has(k));
+    const rest = [...keys].filter((k) => !ordered.includes(k));
+    const opts = [...ordered, ...rest]
+      .map(
+        (k) =>
+          `<option value="${escapeHtml(k)}">${escapeHtml(paymentLabelForFilterKey(k))}</option>`
+      )
+      .join('');
+    FILTERS_ADV_PAYMENT.innerHTML = `<option value="all">Все</option>${opts}`;
 
     const pv = state.advanced.payment || 'all';
-    if (pv !== 'all' && !selectHasValue(FILTERS_ADV_PAYMENT, pv)) {
+    const canonPv = pv === 'all' ? 'all' : paymentCanonForFilter(pv);
+    if (canonPv !== pv) state.advanced.payment = canonPv;
+    if (canonPv !== 'all' && !selectHasValue(FILTERS_ADV_PAYMENT, canonPv)) {
       FILTERS_ADV_PAYMENT.value = 'all';
       state.advanced.payment = 'all';
-    } else FILTERS_ADV_PAYMENT.value = pv;
+    } else FILTERS_ADV_PAYMENT.value = canonPv;
+  }
+
+  function rebuildFilterSelectsFromOrders() {
+    rebuildAdvPaymentSelect();
+    rebuildAdvZoneSelect();
   }
 
   function selectHasValue(sel, wanted) {
@@ -3567,8 +4884,12 @@
         (NEW_ORDERS_MODAL instanceof HTMLElement &&
           NEW_ORDERS_MODAL.classList.contains('is-open') &&
           !NEW_ORDERS_MODAL.hidden) ||
+        (CONFIRM_MODAL instanceof HTMLElement &&
+          CONFIRM_MODAL.classList.contains('is-open') &&
+          !CONFIRM_MODAL.hidden) ||
         (ZONE_MAP_OVERLAY instanceof HTMLElement && !ZONE_MAP_OVERLAY.hidden) ||
-        (REPORTS_OVERLAY instanceof HTMLElement && !REPORTS_OVERLAY.hidden)
+        (REPORTS_OVERLAY instanceof HTMLElement && !REPORTS_OVERLAY.hidden) ||
+        (SETTINGS_OVERLAY instanceof HTMLElement && !SETTINGS_OVERLAY.hidden)
     );
   }
 
@@ -3587,7 +4908,7 @@
 
   function syncFiltersModalUiFromState() {
     rebuildAdvStatusSelectFromToolbar();
-    rebuildAdvPaymentSelect();
+    rebuildFilterSelectsFromOrders();
     syncAdvSlotButtonsFromState();
 
     if (FILTERS_ADV_STATUS instanceof HTMLSelectElement && selectHasValue(FILTERS_ADV_STATUS, state.status)) {
@@ -3660,16 +4981,12 @@
     });
   }
 
-  /** Заказы «Новый» и «очередь оператора» на выбранную дату доставки (как у счётчика в шапке). */
+  /** Входящие от клиентов: «Новый» и ожидание оператора (без фильтра по дню в шапке). */
   function incomingNewOrdersList() {
-    const dayF = String(state.date || '').trim();
-    const dayOk = /^\d{4}-\d{2}-\d{2}$/.test(dayF);
     return state.orders
       .filter((o) => {
         const st = String(o.status ?? '');
-        if (st !== 'new' && st !== 'pending_operator') return false;
-        if (dayOk && isoDate(o.delivery_date || o.created_at) !== dayF) return false;
-        return true;
+        return st === 'new' || st === 'pending_operator';
       })
       .sort((a, b) => {
         const tb = new Date(b.created_at || 0).getTime();
@@ -3685,7 +5002,7 @@
         dayF && /^\d{4}-\d{2}-\d{2}$/.test(dayF)
           ? ruDate(dayF)
           : 'дата в панели не задана — учитываются все загруженные заказы';
-      NEW_ORDERS_MODAL_HINT.textContent = `Статусы «Новый» и «В работе (ожидание оператора)» для даты доставки: ${dayTxt}. Выберите строку — откроется карточка; проверьте данные, переключите статус на «Подтверждён» и сохраните.`;
+      NEW_ORDERS_MODAL_HINT.textContent = `Заказы от клиентов со статусом «Новый» / ожидание оператора (${dayTxt}). Откройте строку, проверьте данные, поставьте «Подтверждён» и сохраните — у клиента в кабинете появится «Подтверждён». Утром в день доставки переведите в «В работе» / «В пути» — у клиента будет «В пути» с выбранным интервалом.`;
     }
     if (!(NEW_ORDERS_MODAL_LIST instanceof HTMLElement)) return;
     const list = incomingNewOrdersList();
@@ -3772,30 +5089,44 @@
     hideModalClientSuggest();
     configureOrderModalClientFields(false);
     const orderId = displayOrderId(order.id);
-    const product = parseProduct(order.items_json, fallbackIndex);
-    const qty = parseQty(order.items_json);
-    const unitPrice = parseUnitPrice(order.items_json);
+    const cartItems = parseOrderItemsFromJson(order.items_json);
     const dateParts = ruDateTime(order.created_at);
     const createdAt =
       typeof dateParts === 'object' ? `${dateParts.datePart} ${dateParts.timePart}` : String(dateParts || '—');
     if (ORDER_MODAL_TITLE instanceof HTMLElement) ORDER_MODAL_TITLE.textContent = `Заказ ${orderId}`;
     setModalValue(MODAL_ORDER_ID, orderId);
-    setModalValue(MODAL_STATUS, statusForModalSelect(order.status || 'new'));
+    const uiSt = statusForModalSelect(order.status || 'new');
+    setModalValue(MODAL_STATUS, uiSt);
+    if (MODAL_STATUS instanceof HTMLSelectElement) {
+      MODAL_STATUS.disabled = orderIsCancelled(order);
+      if (orderIsCancelled(order)) MODAL_STATUS.value = 'cancelled';
+    }
     setModalValue(MODAL_CLIENT, String(order.client || '—'));
     setModalValue(MODAL_PHONE, String(order.phone || 'Телефон не указан'));
     setModalValue(MODAL_ADDRESS, String(order.address || '—'));
     setModalValue(MODAL_ZONE, normalizeZoneName(order.zone));
-    setModalValue(MODAL_DELIVERY_DATE, isoDate(order.delivery_date || order.created_at));
+    setModalValue(MODAL_DELIVERY_DATE, effectiveDeliveryDateIsoForOrder(order));
+    applyModalDeliveryDateConstraints();
     updateQuickDateButtons();
-    setModalSlot(String(order.delivery_slot || '09:00-14:00'));
+    setModalSlot(String(order.delivery_slot || '09:00-14:00'), { silent: true });
     setModalValue(MODAL_PAYMENT, paymentRawToModalSelectValue(String(order.payment_method || '')));
     if (MODAL_PICKUP instanceof HTMLInputElement) MODAL_PICKUP.checked = Boolean(order.pickup);
-    setModalValue(MODAL_PRODUCT, normalizeProductName(product));
-    setModalValue(MODAL_QTY, String(Math.max(1, qty || 1)));
-    setModalValue(MODAL_UNIT_PRICE, String(unitPrice != null ? unitPrice : getDefaultPriceForOrder(order, product)));
-    setModalValue(MODAL_SUM, `${money(order.total_sum)} ₽`);
+    setOrderModalCartLines(
+      cartItems.length
+        ? cartItems
+        : [
+            {
+              title: parseProduct(order.items_json, fallbackIndex),
+              qty: Math.max(1, parseQty(order.items_json) || 1),
+              unit_price:
+                parseUnitPrice(order.items_json) ??
+                getDefaultPriceForOrder(order, parseProduct(order.items_json, fallbackIndex)),
+            },
+          ],
+      order
+    );
     setModalValue(MODAL_DRIVER, String(order.driver || ''));
-    setModalValue(MODAL_NOTE, String(order.courier_note || ''));
+    setModalValue(MODAL_NOTE, formatCourierNote(order.courier_note));
     updateGoodsSumPreview();
     setOrderModalTab(state.orderModalTab || 'basic');
     refreshOrderNotesPreviews();
@@ -3822,11 +5153,8 @@
     );
     if (MODAL_SLOT instanceof HTMLInputElement) MODAL_SLOT.value = slot;
     if (!deliveryDate || !slot) return { ok: false, rescheduleOrSlot: false };
-    const prevIso = isoDate(order.delivery_date);
-    const deliveryIso = isoDate(deliveryDate);
-    const prevSlotNorm = normalizeDeliverySlotStored(String(order.delivery_slot ?? ''));
-    const rescheduleOrSlot = prevIso !== deliveryIso || prevSlotNorm !== slot;
-    return { ok: true, rescheduleOrSlot, deliveryIso, prevIso };
+    const rescheduleOrSlot = orderDeliveryRescheduleChanged(order, deliveryDate, slot);
+    return { ok: true, rescheduleOrSlot, deliveryIso: isoDate(deliveryDate), prevIso: isoDate(order.delivery_date) };
   }
 
   function openOrderReasonOverlay(intent) {
@@ -3903,6 +5231,7 @@
     const prevDriver = order.driver;
     const prevTotal = Number(order.total_sum) || 0;
     const prevNote = order.courier_note;
+    const prevItemsJson = String(order.items_json || '');
     const zone = String(MODAL_ZONE instanceof HTMLSelectElement ? MODAL_ZONE.value : '').trim();
     const deliveryDate = String(MODAL_DELIVERY_DATE instanceof HTMLInputElement ? MODAL_DELIVERY_DATE.value : '').trim();
     const slot = normalizeDeliverySlotStored(
@@ -3916,26 +5245,29 @@
     const pickup = MODAL_PICKUP instanceof HTMLInputElement ? MODAL_PICKUP.checked : false;
     const driver = String(MODAL_DRIVER instanceof HTMLSelectElement ? MODAL_DRIVER.value : '').trim();
     const note = String(MODAL_NOTE instanceof HTMLTextAreaElement ? MODAL_NOTE.value : '').trim();
-    let status = String(MODAL_STATUS instanceof HTMLSelectElement ? MODAL_STATUS.value || order.status : order.status);
-    if (forceCancelled) status = 'cancelled';
-    const goodsTitle = String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : '').trim();
-    const goodsQty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
-    if (MODAL_QTY instanceof HTMLInputElement) MODAL_QTY.value = String(goodsQty);
+    let statusUi = String(
+      MODAL_STATUS instanceof HTMLSelectElement ? MODAL_STATUS.value || order.status : order.status
+    );
+    let status = forceCancelled ? 'cancelled' : operatorDbStatusFromUi(statusUi, order.status);
+    const cartLines = readOrderModalCartFromDom();
     if (!deliveryDate || !slot || !payment || !zone) {
       showToast('Заполните дату доставки, интервал и форму оплаты');
       return;
     }
-    const goodsUnitPrice = Math.max(
-      0,
-      Number(MODAL_UNIT_PRICE instanceof HTMLInputElement ? MODAL_UNIT_PRICE.value : 0) || 0
-    );
-    const itemsJson = goodsTitle
-      ? JSON.stringify([{ title: goodsTitle, qty: goodsQty, unit_price: goodsUnitPrice }])
-      : order.items_json;
-    const prevDateIso = isoDate(prevDate);
-    const deliveryIso = isoDate(deliveryDate);
+    if (!deliveryDateAllowed(deliveryDate)) {
+      showToast('Дата доставки — не раньше завтрашнего дня', 3200, 'error');
+      applyModalDeliveryDateConstraints();
+      return;
+    }
+    if (isSlotExpiredForDate(slot, deliveryDate)) {
+      showToast('Выбранный интервал доставки уже недоступен на эту дату');
+      syncModalSlotAvailability();
+      return;
+    }
+    const itemsJson = buildOrderItemsJson(cartLines);
+    const goodsTotal = computeOrderCartTotal(cartLines);
+    const rescheduleOrSlot = orderDeliveryRescheduleChanged(order, deliveryDate, slot);
     const prevSlotNorm = normalizeDeliverySlotStored(String(prevSlot ?? ''));
-    const rescheduleOrSlot = prevDateIso !== deliveryIso || prevSlotNorm !== slot;
     const prevStatusNorm = String(prevStatus || '').trim().toLowerCase();
     const toCancelled =
       String(status || '').trim().toLowerCase() === 'cancelled' && prevStatusNorm !== 'cancelled';
@@ -3944,17 +5276,36 @@
     if (needsReasonBecause) {
       if (injectedReason !== undefined) {
         changeReasonOp = String(injectedReason ?? '').trim();
+      } else if (toCancelled) {
+        openOrderReasonOverlay('cancel');
+        return;
+      } else if (rescheduleOrSlot) {
+        openOrderReasonOverlay('reschedule');
+        return;
       } else {
-        showToast(
-          'Перенос или отмену сохраните кнопками «Перенести» или «Отменить заказ» и укажите причину в окне.'
-        );
+        showToast('Укажите причину в окне «Перенести» или «Отменить заказ».', 3200, 'info');
         return;
       }
-      if (changeReasonOp.length < 3) {
-        showToast('Причина должна быть не короче 3 символов.');
+      const reasonCheck = opxLimits()?.validateChangeReason?.(changeReasonOp, true);
+      if (reasonCheck && !reasonCheck.ok) {
+        showToast(reasonCheck.message, 3200, 'error');
         return;
       }
+      if (reasonCheck?.value) changeReasonOp = reasonCheck.value;
     }
+
+    const patchCheck = opxLimits()?.validateOperatorOrderPatch?.({
+      note,
+      cartLines,
+      itemsJson,
+      changeReason: changeReasonOp,
+      requireReason: false,
+    });
+    if (patchCheck && !patchCheck.ok) {
+      showToast(patchCheck.message, 3200, 'error');
+      return;
+    }
+    const noteToSave = patchCheck?.note ?? note;
 
     orderModalSaveBusy = true;
     setOrderModalSaveBusy(true, 'Сохранение…');
@@ -3970,7 +5321,7 @@
         pickup: pickup ? 1 : 0,
         items_json: itemsJson,
         total_sum: nextTotal,
-        courier_note: note,
+        courier_note: noteToSave,
         change_reason: changeReasonOp,
       };
 
@@ -4007,6 +5358,12 @@
         }
       }
 
+      const mustPersistOnServer = Boolean(api && restOrderId && /^\d+$/.test(restOrderId));
+      if (mustPersistOnServer && !serverSaved && !isOperatorUiDevHost()) {
+        showToast('Изменения не сохранены в базе. Обновите страницу и повторите.', 3600, 'error');
+        return;
+      }
+
       order.zone = zone;
       order.status = status;
       order.delivery_date = deliveryDate;
@@ -4016,21 +5373,35 @@
       order.driver = driver;
       order.items_json = itemsJson;
       order.total_sum = nextTotal;
-      order.courier_note = note;
+      order.courier_note = noteToSave;
       const changes = [];
-      if (prevStatus !== order.status) changes.push(`статус: ${statusLabel(prevStatus)} -> ${statusLabel(order.status)}`);
-      if (prevZone !== order.zone) changes.push(`зона: ${prevZone || '—'} -> ${order.zone}`);
-      if (prevDate !== order.delivery_date) changes.push(`дата доставки: ${ruDate(prevDate)} -> ${ruDate(order.delivery_date)}`);
-      if (prevSlotNorm !== slot) changes.push(`интервал: ${prevSlot || '—'} -> ${order.delivery_slot}`);
-      if (prevPayment !== order.payment_method) changes.push(`оплата: ${prevPayment || '—'} -> ${order.payment_method}`);
+      const statusCh = journalFieldChange('статус', prevStatus, order.status, (s) => statusLabel(s));
+      if (statusCh && !toCancelled) changes.push(statusCh);
+      const zoneCh = journalFieldChange('зона', prevZone, order.zone);
+      if (zoneCh) changes.push(zoneCh);
+      const dateCh = journalFieldChange('дата доставки', prevDate, order.delivery_date, (d) => ruDate(d));
+      if (dateCh) changes.push(dateCh);
+      const slotCh = journalFieldChange('интервал', prevSlotNorm, slot, slotLabelDisplay);
+      if (slotCh) changes.push(slotCh);
+      const payCh = journalFieldChange('оплата', prevPayment, order.payment_method, paymentLabelDisplay);
+      if (payCh) changes.push(payCh);
       if (prevPickup !== Boolean(order.pickup)) changes.push(`самовывоз: ${order.pickup ? 'да' : 'нет'}`);
-      if (prevDriver !== order.driver) changes.push(`водитель: ${prevDriver || '—'} -> ${order.driver || '—'}`);
-      if (prevTotal !== (Number(order.total_sum) || 0)) changes.push(`сумма: ${money(prevTotal)} -> ${money(order.total_sum)}`);
+      const driverCh = journalFieldChange('водитель', prevDriver, order.driver);
+      if (driverCh) changes.push(driverCh);
+      const itemsChange = describeOrderItemsChange(prevItemsJson, itemsJson);
+      if (itemsChange) changes.push(itemsChange);
+      else if (prevTotal !== (Number(order.total_sum) || 0)) {
+        changes.push(`сумма: ${money(prevTotal)} → ${money(order.total_sum)}`);
+      }
       if (prevNote !== order.courier_note) changes.push('примечание изменено');
-      if (changes.length) {
-        const suffix =
-          changeReasonOp && (toCancelled || rescheduleOrSlot) ? ` · причина: ${changeReasonOp}` : '';
+      if (toCancelled) {
+        const extra = changes.length ? ` (${changes.join('; ')})` : '';
+        appendOrderJournal(order.id, `Заказ отменён. Причина: ${changeReasonOp}${extra}`);
+      } else if (changes.length) {
+        const suffix = changeReasonOp && rescheduleOrSlot ? ` · причина: ${changeReasonOp}` : '';
         appendOrderJournal(order.id, `Изменены поля заказа (${changes.join('; ')}${suffix})`);
+      } else if (itemsChange) {
+        appendOrderJournal(order.id, itemsChange);
       }
       const nid = Number(restOrderId);
       if (!serverSaved && (toCancelled || rescheduleOrSlot) && Number.isFinite(nid) && nid > 0) {
@@ -4039,18 +5410,29 @@
           order_id: nid,
           action: toCancelled ? 'order_status_cancelled' : 'order_reschedule',
           reason: changeReasonOp,
-          actor_name: getActorLabel(),
+          actor_name: getOperatorActorLabel(),
           actor_role: 'operator',
           detail: JSON.stringify({ localOnly: true }),
         });
       }
-      tryFinalizeOrderNotesOnSave();
+      const notesSaved = tryFinalizeOrderNotesOnSave();
       applyFilters();
       render();
       const idx = state.filtered.findIndex((o) => String(o.id).trim() === state.activeOrderId);
       fillOrderModal(order, idx >= 0 ? idx : 0);
       renderOrderJournal(order);
-      showToast(serverSaved ? 'Сохранено' : 'Сохранено без ответа сервера');
+      const savedSuffix = serverSaved ? '' : ' (локально)';
+      let toastMsg = '';
+      if (toCancelled) {
+        toastMsg = serverSaved ? 'Заказ отменён. Изменения сохранены.' : 'Заказ отменён. Сохранено локально.';
+      } else if (rescheduleOrSlot && changeReasonOp) {
+        toastMsg = serverSaved ? 'Перенос сохранён.' : 'Перенос сохранён локально.';
+      } else if (notesSaved) {
+        toastMsg = `Заказ и заметки сохранены${savedSuffix}.`;
+      } else {
+        toastMsg = serverSaved ? 'Заказ сохранён.' : `Заказ сохранён${savedSuffix}.`;
+      }
+      window.requestAnimationFrame(() => showToast(toastMsg, 3600, 'success'));
     } finally {
       orderModalSaveBusy = false;
       setOrderModalSaveBusy(false);
@@ -4081,11 +5463,10 @@
     const index = Math.max(0, state.filtered.findIndex((o) => String(o.id).trim() === key));
     state.activeOrderIndex = index;
     if (!getOrderJournal(order.id).length) {
-      const initialMessage = 'Оператор создал заказ';
       const dt = ruDateTime(order.created_at);
       appendOrderJournal(
         order.id,
-        `${initialMessage} (${ruDate(order.created_at)} ${typeof dt === 'object' ? dt.timePart : ''})`.trim()
+        `Создан заказ (${ruDate(order.created_at)} ${typeof dt === 'object' ? dt.timePart : ''})`.trim()
       );
     }
     ORDER_MODAL.classList.add('is-open');
@@ -4112,25 +5493,20 @@
     configureOrderModalClientFields(true);
     if (ORDER_MODAL_TITLE instanceof HTMLElement) ORDER_MODAL_TITLE.textContent = 'Новый заказ';
     setModalValue(MODAL_ORDER_ID, '');
-    setModalValue(MODAL_STATUS, 'new');
+    setModalValue(MODAL_STATUS, 'in_processing');
     if (MODAL_CLIENT instanceof HTMLInputElement) MODAL_CLIENT.value = '';
     if (MODAL_PHONE instanceof HTMLInputElement) MODAL_PHONE.value = '';
     if (MODAL_ADDRESS instanceof HTMLInputElement) MODAL_ADDRESS.value = '';
     if (MODAL_NOTE instanceof HTMLTextAreaElement) MODAL_NOTE.value = '';
     setModalValue(MODAL_ZONE, 'Подхват');
-    setModalValue(MODAL_DELIVERY_DATE, isoDate(new Date()));
+    setModalValue(MODAL_DELIVERY_DATE, earliestDeliveryDateIso());
+    applyModalDeliveryDateConstraints();
     updateQuickDateButtons();
     if (MODAL_DRIVER instanceof HTMLSelectElement) MODAL_DRIVER.value = '';
     setModalValue(MODAL_PAYMENT, 'Наличная');
     if (MODAL_PICKUP instanceof HTMLInputElement) MODAL_PICKUP.checked = false;
-    setModalValue(MODAL_PRODUCT, products[0] || 'Вода');
-    setModalValue(MODAL_QTY, '2');
-    const draftProduct = normalizeProductName(
-      String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : '')
-    );
-    setModalValue(MODAL_UNIT_PRICE, String(baseUnitPrice(draftProduct, 2)));
-    updateGoodsSumPreview();
-    setModalSlot('09:00-14:00');
+    setOrderModalCartLines([defaultOrderCartLine(null)], null);
+    setModalSlot('09:00-14:00', { silent: true });
     renderCreateOrderJournalPlaceholder();
     setOrderModalTab('basic');
     ORDER_MODAL.classList.add('is-open');
@@ -4146,16 +5522,17 @@
     const client = normalizeAddressPart(MODAL_CLIENT instanceof HTMLInputElement ? MODAL_CLIENT.value : '').trim();
     const phoneDig = normalizePhoneRuDigits(MODAL_PHONE instanceof HTMLInputElement ? MODAL_PHONE.value : '');
     const address = String(MODAL_ADDRESS instanceof HTMLInputElement ? MODAL_ADDRESS.value : '').trim();
-    if (!client || client.length < 2) {
-      showToast('Укажите имя или организацию клиента');
-      return;
-    }
-    if (!phoneDig) {
-      showToast('Телефон: от 10 цифр, можно с +7 или 8');
-      return;
-    }
-    if (address.length < 8) {
-      showToast('Укажите адрес или выберите на карте');
+    const noteDraft = String(MODAL_NOTE instanceof HTMLTextAreaElement ? MODAL_NOTE.value : '').trim();
+    const cartLinesDraft = readOrderModalCartFromDom();
+    const fieldCheck = opxLimits()?.validateOperatorOrderCreate?.({
+      client,
+      phoneDigits: phoneDig,
+      address,
+      note: noteDraft,
+      cartLines: cartLinesDraft,
+    });
+    if (fieldCheck && !fieldCheck.ok) {
+      showToast(fieldCheck.message, 3200, 'error');
       return;
     }
     const zone = String(MODAL_ZONE instanceof HTMLSelectElement ? MODAL_ZONE.value : '').trim();
@@ -4169,16 +5546,28 @@
     );
     if (MODAL_PAYMENT instanceof HTMLSelectElement) MODAL_PAYMENT.value = payment;
     const driver = String(MODAL_DRIVER instanceof HTMLSelectElement ? MODAL_DRIVER.value : '').trim();
-    const note = String(MODAL_NOTE instanceof HTMLTextAreaElement ? MODAL_NOTE.value : '').trim();
-    const goodsTitle = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : '').trim());
-    const goodsQty = Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1));
-    const goodsUnit = Math.max(0, Number(MODAL_UNIT_PRICE instanceof HTMLInputElement ? MODAL_UNIT_PRICE.value : 0) || 0);
+    const note = fieldCheck?.note ?? String(MODAL_NOTE instanceof HTMLTextAreaElement ? MODAL_NOTE.value : '').trim();
+    const cartLines = cartLinesDraft;
     if (!deliveryDate || !slot || !payment || !zone) {
       showToast('Заполните дату доставки, интервал и оплату');
       return;
     }
-    const total = Math.round(goodsQty * goodsUnit);
-    const itemsJson = JSON.stringify([{ title: goodsTitle, qty: goodsQty, unit_price: goodsUnit }]);
+    if (!deliveryDateAllowed(deliveryDate)) {
+      showToast('Дата доставки — не раньше завтрашнего дня', 3200, 'error');
+      applyModalDeliveryDateConstraints();
+      return;
+    }
+    if (isSlotExpiredForDate(slot, deliveryDate)) {
+      showToast('Выбранный интервал доставки уже недоступен на эту дату');
+      syncModalSlotAvailability();
+      return;
+    }
+    const total = computeOrderCartTotal(cartLines);
+    const itemsJson = buildOrderItemsJson(cartLines);
+    const firstLine = cartLines[0];
+    const goodsTitle = firstLine.title;
+    const goodsQty = firstLine.qty;
+    const goodsUnit = firstLine.unit_price;
     const nowIso = new Date().toISOString();
     const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
     let newIdStr = '';
@@ -4201,6 +5590,7 @@
             product_title: goodsTitle,
             qty: goodsQty,
             unit_price: goodsUnit,
+            items: cartLines,
           },
         });
         if (!response.ok) {
@@ -4324,7 +5714,7 @@
       }
       if (CLIENT_JOURNAL_LIST instanceof HTMLElement) {
         CLIENT_JOURNAL_LIST.innerHTML =
-          '<p class="opx-cc-empty">После сохранения заказа здесь будет история изменений клиента.</p>';
+          '<p class="opx-cc-empty">После сохранения заказа здесь появятся даты оформления заказов клиента.</p>';
       }
       if (CLIENT_PRICE_MODE instanceof HTMLSelectElement) CLIENT_PRICE_MODE.value = 'none';
       if (CLIENT_PRICE_VALUE instanceof HTMLInputElement) CLIENT_PRICE_VALUE.value = '';
@@ -4371,9 +5761,31 @@
     });
     CLIENT_CARD_PANELS.forEach((panel) => {
       const panelId = panel.getAttribute('data-opx-cc-panel');
-      const shouldShow = panelId === 'client' || panelId === tabId;
-      panel.hidden = !shouldShow;
+      panel.hidden = panelId !== tabId;
     });
+    if (tabId === 'journal' && !state.creatingOrder) {
+      const order = getActiveOrder();
+      if (order) void renderClientJournal(order);
+    }
+  }
+
+  function clientOrdersForKey(order) {
+    const key = normalizeClientKey(order);
+    if (!key) return [];
+    return state.orders
+      .filter((o) => normalizeClientKey(o) === key)
+      .sort((a, b) => {
+        const tb = new Date(b.created_at || b.delivery_date || 0).getTime();
+        const ta = new Date(a.created_at || a.delivery_date || 0).getTime();
+        return tb - ta;
+      });
+  }
+
+  function formatClientJournalDateTime(raw) {
+    const dt = ruDateTime(raw);
+    if (dt && typeof dt === 'object') return `${dt.datePart} ${dt.timePart}`;
+    if (raw) return ruDate(raw);
+    return '—';
   }
 
   function renderClientOrdersHistory(order) {
@@ -4398,41 +5810,63 @@
 
   async function renderClientJournal(order) {
     if (!(CLIENT_JOURNAL_LIST instanceof HTMLElement)) return;
-    const api = window.EkvalineAPI;
-    if (!api || !order?.id) {
-      const localEntries = getOrderJournal(order?.id);
-      if (!localEntries.length) {
-        CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Изменений пока нет.</p>';
-        return;
-      }
-      CLIENT_JOURNAL_LIST.innerHTML = localEntries
-        .map((entry) => {
-          const dt = ruDateTime(entry.at);
-          const dtText = typeof dt === 'object' ? `${dt.datePart} ${dt.timePart}` : String(entry.at || '');
-          return `<div class="opx-cc-item"><strong>${dtText}</strong><span>${escapeHtml(entry.actor)}: ${escapeHtml(
-            entry.message
-          )}</span></div>`;
-        })
-        .join('');
+    const list = clientOrdersForKey(order);
+    if (!list.length) {
+      CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Клиент ещё не оформлял заказов.</p>';
       return;
     }
-    try {
-      const rid = orderRestIdForApi(order.id);
-      if (!rid || !/^\d+$/.test(rid)) throw new Error('bad_order_id');
-      const response = await api.json(`/api/orders/${encodeURIComponent(rid)}/journal`);
-      if (!response.ok) {
-        if (redirectOnUnauthorized(response.status)) return;
-        throw new Error(response.data?.error || 'journal_failed');
-      }
-      const entries = Array.isArray(response.data?.journal) ? response.data.journal : [];
-      if (!entries.length) {
-        CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Изменений пока нет.</p>';
-        return;
-      }
-      CLIENT_JOURNAL_LIST.innerHTML = renderJournalListHtml(entries);
-    } catch {
-      CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Не удалось загрузить журнал изменений.</p>';
+
+    CLIENT_JOURNAL_LIST.innerHTML = '<p class="opx-cc-empty">Загрузка журнала…</p>';
+
+    const rows = list.map((o) => ({
+      at: o.created_at || o.delivery_date,
+      sortKey: new Date(o.created_at || o.delivery_date || 0).getTime(),
+      order: o,
+      createAction: '',
+    }));
+
+    const api = window.EkvalineAPI;
+    if (api?.json) {
+      await Promise.all(
+        list.slice(0, 15).map(async (o) => {
+          try {
+            const entries = await fetchServerJournal(o.id);
+            const createEvt = entries.find((e) => e.action === 'order_create' || e.action === 'order_operator_create');
+            if (!createEvt) return;
+            const idx = rows.findIndex((r) => r.order && String(r.order.id) === String(o.id));
+            if (idx < 0) return;
+            if (createEvt.created_at) {
+              rows[idx].at = createEvt.created_at;
+              rows[idx].sortKey = new Date(createEvt.created_at).getTime();
+            }
+            rows[idx].createAction = String(createEvt.action || '');
+          } catch {
+            /* ignore */
+          }
+        })
+      );
     }
+
+    rows.sort((a, b) => b.sortKey - a.sortKey);
+
+    CLIENT_JOURNAL_LIST.innerHTML = rows
+      .map((row) => {
+        const o = row.order;
+        const when = formatClientJournalDateTime(row.at);
+        let headline = 'Заказ оформлен';
+        if (row.createAction === 'order_create') headline = 'Клиент оформил заказ';
+        else if (row.createAction === 'order_operator_create') headline = 'Оператор оформил заказ';
+        const oid = escapeHtml(displayOrderId(o.id));
+        const openAttr = escapeHtml(String(o.id ?? ''));
+        return `<div class="opx-cc-item opx-cc-journal-order">
+          <strong>${escapeHtml(when)}</strong>
+          <span>${escapeHtml(headline)}: <button type="button" class="opx-link-btn" data-opx-open-order="${openAttr}">${oid}</button></span>
+          <span class="opx-cc-journal-meta">Доставка ${escapeHtml(ruDate(o.delivery_date))}, ${escapeHtml(
+            slotLabelDisplay(o.delivery_slot)
+          )} · ${escapeHtml(statusLabel(o.status))} · ${escapeHtml(money(o.total_sum))} ₽</span>
+        </div>`;
+      })
+      .join('');
   }
 
   function fillClientPrice(order) {
@@ -4501,11 +5935,9 @@
 
   function fillMapAddressFields(addressDetails, preserveOptional = true) {
     const details = addressDetails || {};
-    const city = normalizeAddressPart(details.city || details.town || details.village || details.hamlet || '');
     const street = normalizeAddressPart(details.road || details.street || details.pedestrian || '');
     const house = normalizeAddressPart(details.house_number || details.building || '');
-    if (CLIENT_MAP_CITY instanceof HTMLInputElement && city) CLIENT_MAP_CITY.value = city;
-    if (CLIENT_MAP_CITY instanceof HTMLInputElement && !CLIENT_MAP_CITY.value.trim()) CLIENT_MAP_CITY.value = 'Оренбург';
+    if (CLIENT_MAP_CITY instanceof HTMLInputElement) CLIENT_MAP_CITY.value = DEFAULT_CITY;
     if (CLIENT_MAP_STREET instanceof HTMLInputElement && street) CLIENT_MAP_STREET.value = street;
     if (CLIENT_MAP_HOUSE instanceof HTMLInputElement && house) CLIENT_MAP_HOUSE.value = house;
     if (!preserveOptional) {
@@ -4513,6 +5945,53 @@
       if (CLIENT_MAP_ENTRANCE instanceof HTMLInputElement) CLIENT_MAP_ENTRANCE.value = '';
       if (CLIENT_MAP_FLOOR instanceof HTMLInputElement) CLIENT_MAP_FLOOR.value = '';
     }
+  }
+
+  function parseRussianAddressExtras(addressRaw) {
+    const s = cleanOrderAddressForGeocode(addressRaw);
+    const apartment =
+      /(?:кв\.?|квартира|офис)\s*([^,;]+)/iu.exec(s)?.[1]?.trim() ||
+      /(?:кв\.?|квартира|офис)\s*(\d+[\w\-]*)/iu.exec(s)?.[1]?.trim() ||
+      '';
+    const entrance = /(?:подъезд)\s*([^,;]+)/iu.exec(s)?.[1]?.trim() || '';
+    const floor = /(?:этаж)\s*([^,;]+)/iu.exec(s)?.[1]?.trim() || '';
+    return { apartment, entrance, floor };
+  }
+
+  /** Подставить в форму карты адрес из карточки клиента / заказа. */
+  function hydrateClientMapFormFromAddress(addressRaw) {
+    const raw = normalizeAddressPart(addressRaw);
+    if (!raw || raw === '—') return false;
+
+    const city = DEFAULT_CITY;
+    const parsed = parseRussianStreetHouseFromAddress(raw);
+    const extras = parseRussianAddressExtras(raw);
+
+    if (CLIENT_MAP_CITY instanceof HTMLInputElement) CLIENT_MAP_CITY.value = city;
+    if (CLIENT_MAP_STREET instanceof HTMLInputElement) CLIENT_MAP_STREET.value = parsed?.street || '';
+    if (CLIENT_MAP_HOUSE instanceof HTMLInputElement) CLIENT_MAP_HOUSE.value = parsed?.house || '';
+    if (CLIENT_MAP_APARTMENT instanceof HTMLInputElement) CLIENT_MAP_APARTMENT.value = extras.apartment || '';
+    if (CLIENT_MAP_ENTRANCE instanceof HTMLInputElement) CLIENT_MAP_ENTRANCE.value = extras.entrance || '';
+    if (CLIENT_MAP_FLOOR instanceof HTMLInputElement) CLIENT_MAP_FLOOR.value = extras.floor || '';
+
+    const composed = composeAddressFromFields() || raw;
+    if (CLIENT_MAP_SEARCH instanceof HTMLInputElement) CLIENT_MAP_SEARCH.value = composed;
+    if (CLIENT_MAP_SELECTED instanceof HTMLElement) CLIENT_MAP_SELECTED.textContent = composed;
+    state.mapSelectedAddress = composed;
+    return true;
+  }
+
+  function getClientMapSeedAddress() {
+    const fromClient = normalizeAddressPart(
+      CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : ''
+    );
+    if (fromClient && fromClient !== '—') return fromClient;
+
+    const fromModal = normalizeAddressPart(MODAL_ADDRESS instanceof HTMLInputElement ? MODAL_ADDRESS.value : '');
+    if (fromModal && fromModal !== '—') return fromModal;
+
+    const order = getActiveOrder();
+    return normalizeAddressPart(order?.address || '');
   }
 
   function composeAddressFromFields() {
@@ -4582,26 +6061,90 @@
     });
     if (!response.ok) return null;
     const list = await response.json();
-    if (!Array.isArray(list) || !list.length) return null;
+    if (!Array.isArray(list) || !list.length) {
+      const parsed = parseRussianStreetHouseFromAddress(pickSrc);
+      if (parsed?.street) {
+        return geocodeByFields(inferCityFromAddress(pickSrc), parsed.street, parsed.house || '', pickSrc);
+      }
+      return null;
+    }
     return pickBestNominatimItem(list, pickSrc);
+  }
+
+  let zoneMapGeoHintEl = null;
+
+  function setZoneMapGeoHint(text) {
+    if (!(ZONE_MAP_CANVAS instanceof HTMLElement)) return;
+    if (!zoneMapGeoHintEl) {
+      zoneMapGeoHintEl = document.createElement('div');
+      zoneMapGeoHintEl.id = 'opxZoneMapGeoHint';
+      zoneMapGeoHintEl.className = 'opx-zone-map-geo-hint';
+      zoneMapGeoHintEl.setAttribute('role', 'status');
+      zoneMapGeoHintEl.setAttribute('aria-live', 'polite');
+      ZONE_MAP_CANVAS.parentElement?.appendChild(zoneMapGeoHintEl);
+    }
+    const t = String(text || '').trim();
+    if (!t) {
+      zoneMapGeoHintEl.hidden = true;
+      zoneMapGeoHintEl.textContent = '';
+      return;
+    }
+    zoneMapGeoHintEl.hidden = false;
+    zoneMapGeoHintEl.textContent = t;
+  }
+
+  function paintZoneMapMarkersFromCache(source, generation) {
+    if (!zoneMapCtl || generation !== zoneMarkersBuildGeneration) return 0;
+    const isYandexZone = zoneMapCtl.engine === 'yandex';
+    zoneMapCtl.clear();
+    const duplicateIndexByKey = Object.create(null);
+    let placed = 0;
+    const bounds = [];
+
+    for (const order of source) {
+      if (generation !== zoneMarkersBuildGeneration) return placed;
+      const geoKey = geoCacheKeyForOrder(order);
+      const cached = ZONE_ADDRESS_COORD_CACHE.get(geoKey);
+      if (!cached || !Number.isFinite(cached.lat) || !Number.isFinite(cached.lng)) continue;
+
+      const dupIdx = duplicateIndexByKey[geoKey] || 0;
+      duplicateIndexByKey[geoKey] = dupIdx + 1;
+      const latLng = microJitterLatLng(cached.lat, cached.lng, dupIdx);
+      const zone = normalizeZoneName(order.zone);
+      const ringColor = markerStrokeColorForOrder(order);
+      zoneMapCtl.addOrderMarker(
+        latLng[0],
+        latLng[1],
+        ringColor,
+        zoneMapPopupHtml(order, zone, ringColor),
+        String(order.id ?? '')
+      );
+      bounds.push(latLng);
+      placed += 1;
+    }
+
+    if (placed && bounds.length) {
+      try {
+        if (isYandexZone && zoneMapCtl.map && window.ymaps) {
+          zoneMapCtl.map.setBounds(bounds, { checkZoomRange: true, zoomMargin: 40 });
+        }
+      } catch {
+        /* ignore fit errors */
+      }
+    }
+    return placed;
   }
 
   async function rebuildZoneMarkersInternal() {
     const generation = ++zoneMarkersBuildGeneration;
     if (!state.zoneMapOpen || !zoneMapCtl) return;
 
-    const isYandexZone = zoneMapCtl.engine === 'yandex';
-
-    function setMarkerCoordsJitter(mk, lat0, lng0, dupIdx) {
-      if (!mk) return;
-      const pair = microJitterLatLng(lat0, lng0, dupIdx);
-      if (isYandexZone) mk.geometry.setCoordinates(pair);
-      else mk.setLatLng(pair);
-    }
-
     const source = state.filtered.length ? state.filtered : state.orders;
     zoneMapCtl.clear();
-    if (!source.length) return;
+    if (!source.length) {
+      setZoneMapGeoHint('');
+      return;
+    }
 
     const addrRawByGeoKey = new Map();
     for (const order of source) {
@@ -4609,100 +6152,75 @@
       if (!addrRawByGeoKey.has(gk)) addrRawByGeoKey.set(gk, String(order.address || ''));
     }
 
-    const duplicateIndexByKey = Object.create(null);
-    const counters = { Подхват: 0, Степной: 0, Центр: 0, 'доп.зона': 0 };
-    const markerByOrderId = new Map();
-
-    for (const order of source) {
-      if (generation !== zoneMarkersBuildGeneration) return;
-      const zone = normalizeZoneName(order.zone);
-      const geoKey = geoCacheKeyForOrder(order);
-      const dupIdx = duplicateIndexByKey[geoKey] || 0;
-      duplicateIndexByKey[geoKey] = dupIdx + 1;
-
-      const cached = ZONE_ADDRESS_COORD_CACHE.get(geoKey);
-      let latLng;
-      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) {
-        latLng = microJitterLatLng(cached.lat, cached.lng, dupIdx);
-      } else {
-        const idx = counters[zone] || 0;
-        counters[zone] = idx + 1;
-        latLng = markerCoordsForOrder(order, idx);
-      }
-
-      const ringColor = markerStrokeColorForOrder(order);
-      const marker = zoneMapCtl.addOrderMarker(
-        latLng[0],
-        latLng[1],
-        ringColor,
-        zoneMapPopupHtml(order, zone, ringColor),
-        String(order.id ?? '')
-      );
-      markerByOrderId.set(String(order.id), marker);
-    }
-
-    /** Координаты из фона (prefetch), появились до открытия карты — сразу подставить. */
-    {
-      const dupSnap = Object.create(null);
-      for (const order of source) {
-        if (generation !== zoneMarkersBuildGeneration) return;
-        const geoKey = geoCacheKeyForOrder(order);
-        const dupIdx = dupSnap[geoKey] || 0;
-        dupSnap[geoKey] = dupIdx + 1;
-        const cr = ZONE_ADDRESS_COORD_CACHE.get(geoKey);
-        if (!cr || !Number.isFinite(cr.lat) || !Number.isFinite(cr.lng)) continue;
-        const mk = markerByOrderId.get(String(order.id));
-        if (mk) setMarkerCoordsJitter(mk, cr.lat, cr.lng, dupIdx);
-      }
-    }
-
-    const refineKeysFinal = [...addrRawByGeoKey.keys()].filter(
+    const keysToResolve = [...addrRawByGeoKey.keys()].filter(
       (gk) =>
         !gk.startsWith('__orphan:') && !ZONE_ADDRESS_COORD_CACHE.has(gk) && !ZONE_ADDRESS_GEO_NO_RESULT.has(gk)
     );
+    const totalKeys = keysToResolve.length;
+    let resolved = 0;
 
-    for (const geoKey of refineKeysFinal) {
-      if (generation !== zoneMarkersBuildGeneration) return;
-      const rawAddr = addrRawByGeoKey.get(geoKey) || '';
-      let coord = null;
-      try {
-        coord = await geocodeDeliveryAddressOnce(rawAddr);
-      } catch {
-        coord = null;
-      }
-      if (generation !== zoneMarkersBuildGeneration) return;
-      if (coord && Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
-        ZONE_ADDRESS_COORD_CACHE.set(geoKey, coord);
-      } else {
-        ZONE_ADDRESS_GEO_NO_RESULT.add(geoKey);
-      }
-
-      if (generation !== zoneMarkersBuildGeneration || !coord) continue;
-
-      let di = 0;
-      for (const o of source) {
-        if (geoCacheKeyForOrder(o) !== geoKey) continue;
-        const mk = markerByOrderId.get(String(o.id));
-        if (mk) {
-          setMarkerCoordsJitter(mk, coord.lat, coord.lng, di);
-          di += 1;
-        }
-      }
+    const placedCached = paintZoneMapMarkersFromCache(source, generation);
+    if (totalKeys) {
+      setZoneMapGeoHint(`Уточняем адреса на карте… ${placedCached} из ${source.length}`);
+    } else {
+      setZoneMapGeoHint(placedCached ? '' : 'Нет координат для адресов в списке');
     }
 
+    const MAP_GEO_CONCURRENCY = 4;
+    for (let i = 0; i < keysToResolve.length; i += MAP_GEO_CONCURRENCY) {
+      if (generation !== zoneMarkersBuildGeneration) return;
+      const chunk = keysToResolve.slice(i, i + MAP_GEO_CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (geoKey) => {
+          const rawAddr = addrRawByGeoKey.get(geoKey) || '';
+          let coord = null;
+          try {
+            coord = await geocodeDeliveryAddressOnce(rawAddr);
+          } catch {
+            coord = null;
+          }
+          if (generation !== zoneMarkersBuildGeneration) return;
+          if (coord && Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
+            ZONE_ADDRESS_COORD_CACHE.set(geoKey, coord);
+          } else {
+            ZONE_ADDRESS_GEO_NO_RESULT.add(geoKey);
+          }
+          resolved += 1;
+        })
+      );
+      if (generation !== zoneMarkersBuildGeneration) return;
+      const placed = paintZoneMapMarkersFromCache(source, generation);
+      setZoneMapGeoHint(
+        `Уточняем адреса… ${Math.min(resolved, totalKeys)}/${totalKeys} · на карте ${placed} заказов`
+      );
+    }
+
+    if (generation !== zoneMarkersBuildGeneration) return;
+    const finalPlaced = paintZoneMapMarkersFromCache(source, generation);
+    const missed = source.length - finalPlaced;
+    if (finalPlaced) {
+      setZoneMapGeoHint(
+        missed > 0
+          ? `На карте ${finalPlaced} заказов · ${missed} без точных координат (проверьте адрес в заказе)`
+          : ''
+      );
+    } else {
+      setZoneMapGeoHint('Не удалось определить координаты — проверьте формат адреса (город, улица, дом)');
+    }
   }
 
   async function geocodeByFields(city, street, house, addressRawForPick) {
+    const cityUse = isOrenburgCityName(city) ? city : DEFAULT_CITY;
     const pickSrc =
       addressRawForPick != null && String(addressRawForPick).trim()
         ? String(addressRawForPick)
-        : `${city}, ${street} ${house}`;
+        : `${cityUse}, ${street} ${house}`;
     const params = new URLSearchParams({
       limit: '12',
       bounded: '1',
       viewbox: `${ORENBURG_VIEWBOX.left},${ORENBURG_VIEWBOX.top},${ORENBURG_VIEWBOX.right},${ORENBURG_VIEWBOX.bottom}`,
       countrycodes: 'ru',
-      city,
+      city: cityUse,
       street: [street, house].filter(Boolean).join(', '),
     });
     const response = await fetch(`/api/public/geocode-search?${params.toString()}`, {
@@ -4715,47 +6233,37 @@
     return pickBestNominatimItem(list, pickSrc);
   }
 
-  /** Два последовательных запроса (общий текст + город/улица/дом) под политику Nominatim. */
+  /**
+   * Координаты дома: сначала city+street (Nominatim не понимает «ул./д.» в q),
+   * затем упрощённый текстовый запрос.
+   */
   async function geocodeDeliveryAddressOnce(addressRaw) {
-    await nominatimThrottleZoneMap();
-    const broad = await geocodeAddress(buildZoneMapGeocodeQuery(addressRaw), addressRaw);
-    if (
-      broad &&
-      Number.isFinite(broad.lat) &&
-      Number.isFinite(broad.lon) &&
-      coordsInOrenburgView(broad.lat, broad.lon)
-    ) {
-      return { lat: broad.lat, lng: broad.lon };
-    }
-
     const parsed = parseRussianStreetHouseFromAddress(addressRaw);
-    if (!parsed || !parsed.street) return null;
-
     const city = inferCityFromAddress(addressRaw);
-    const housePart = parsed.house ? String(parsed.house).trim() : '';
+    const housePart = parsed?.house ? String(parsed.house).trim() : '';
 
-    await nominatimThrottleZoneMap();
-    const narrowQ = `Оренбург, ${parsed.street}${housePart ? `, ${housePart}` : ''}, Россия`;
-    const narrow = await geocodeAddress(narrowQ, addressRaw);
-    if (
-      narrow &&
-      Number.isFinite(narrow.lat) &&
-      Number.isFinite(narrow.lon) &&
-      coordsInOrenburgView(narrow.lat, narrow.lon)
-    ) {
-      return { lat: narrow.lat, lng: narrow.lon };
+    if (parsed?.street) {
+      await nominatimThrottleZoneMap();
+      const byFields = await geocodeByFields(city, parsed.street, housePart, addressRaw);
+      if (
+        byFields &&
+        Number.isFinite(byFields.lat) &&
+        Number.isFinite(byFields.lon) &&
+        coordsInOrenburgView(byFields.lat, byFields.lon)
+      ) {
+        return { lat: byFields.lat, lng: byFields.lon };
+      }
     }
 
     await nominatimThrottleZoneMap();
-    const byFields = await geocodeByFields(city, parsed.street, housePart, addressRaw);
-    if (
-      byFields &&
-      Number.isFinite(byFields.lat) &&
-      Number.isFinite(byFields.lon) &&
-      coordsInOrenburgView(byFields.lat, byFields.lon)
-    ) {
-      return { lat: byFields.lat, lng: byFields.lon };
+    const simpleQ = parsed?.street
+      ? `${city}, ${parsed.street}${housePart ? `, ${housePart}` : ''}, Россия`
+      : buildZoneMapGeocodeQuery(addressRaw);
+    const hit = await geocodeAddress(simpleQ, addressRaw);
+    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon) && coordsInOrenburgView(hit.lat, hit.lon)) {
+      return { lat: hit.lat, lng: hit.lon };
     }
+
     return null;
   }
 
@@ -4799,7 +6307,8 @@
   }
 
   async function suggestStreets(query) {
-    const city = normalizeAddressPart(CLIENT_MAP_CITY instanceof HTMLInputElement ? CLIENT_MAP_CITY.value : 'Оренбург') || 'Оренбург';
+    enforceOrenburgCityField();
+    const city = DEFAULT_CITY;
     const key = `${city}|${query}`.toLowerCase();
     if (state.streetCache[key]) return state.streetCache[key];
     const params = new URLSearchParams({
@@ -4872,19 +6381,31 @@
     const EM = window.EkvalineMaps;
     if (!EM || typeof EM.attachInteractiveMap !== 'function') return false;
     try {
-      clientMapCtl = await EM.attachInteractiveMap(
+      const mapHost = await EM.attachInteractiveMap(
         CLIENT_MAP_CANVAS,
         [51.7682, 55.0969],
         12,
         {
           onMapClick: async (lat, lon) => {
+            if (!coordsInOrenburgView(lat, lon)) {
+              showToast('Можно выбрать адрес только в пределах Оренбурга.');
+              return;
+            }
             const reverse = await reverseGeocode(lat, lon);
-            const address = reverse?.address || `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-            updateMapSelection(lat, lon, address, reverse?.details || null);
+            if (
+              !reverse ||
+              !isOrenburgAddress({ address: reverse.details || {}, display_name: reverse.address || '' })
+            ) {
+              showToast('Эта точка вне зоны доставки по Оренбургу.');
+              return;
+            }
+            const address = reverse.address || `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+            updateMapSelection(lat, lon, address, reverse.details || null);
           },
         }
       );
-      return Boolean(clientMapCtl);
+      clientMapCtl = mapHost;
+      return Boolean(clientMapCtl && clientMapCtl.engine === 'yandex');
     } catch {
       clientMapCtl = null;
       return false;
@@ -4893,14 +6414,12 @@
 
   function openClientMapModal() {
     if (!(CLIENT_MAP_MODAL instanceof HTMLElement)) return;
-    if (CLIENT_MAP_CITY instanceof HTMLInputElement && !normalizeAddressPart(CLIENT_MAP_CITY.value)) {
+    enforceOrenburgCityField();
+    const seed = getClientMapSeedAddress();
+    if (seed) {
+      hydrateClientMapFormFromAddress(seed);
+    } else if (CLIENT_MAP_CITY instanceof HTMLInputElement && !normalizeAddressPart(CLIENT_MAP_CITY.value)) {
       CLIENT_MAP_CITY.value = 'Оренбург';
-    }
-    const draft = state.creatingOrder
-      ? normalizeAddressPart(MODAL_ADDRESS instanceof HTMLInputElement ? MODAL_ADDRESS.value : '')
-      : normalizeAddressPart(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '');
-    if (CLIENT_MAP_SEARCH instanceof HTMLInputElement && draft && !normalizeAddressPart(CLIENT_MAP_SEARCH.value)) {
-      CLIENT_MAP_SEARCH.value = draft;
     }
     CLIENT_MAP_MODAL.classList.add('is-open');
     CLIENT_MAP_MODAL.hidden = false;
@@ -4912,14 +6431,25 @@
         return;
       }
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => clientMapCtl?.invalidateSize()));
+      if (seed) {
+        const street = normalizeAddressPart(
+          CLIENT_MAP_STREET instanceof HTMLInputElement ? CLIENT_MAP_STREET.value : ''
+        );
+        const house = normalizeAddressPart(CLIENT_MAP_HOUSE instanceof HTMLInputElement ? CLIENT_MAP_HOUSE.value : '');
+        if (street.length >= 2 || seed.length >= 8) {
+          await searchOnClientMap();
+        }
+      }
     })();
     refreshBodyBackdropClass();
   }
 
 
   async function searchOnClientMap() {
+    enforceOrenburgCityField();
     const searchValue = normalizeAddressPart(CLIENT_MAP_SEARCH instanceof HTMLInputElement ? CLIENT_MAP_SEARCH.value : '');
-    const cityValue = normalizeAddressPart(CLIENT_MAP_CITY instanceof HTMLInputElement ? CLIENT_MAP_CITY.value : 'Оренбург') || 'Оренбург';
+    const cityValue = DEFAULT_CITY;
+    if (CLIENT_MAP_CITY instanceof HTMLInputElement) CLIENT_MAP_CITY.value = DEFAULT_CITY;
     const streetValue = normalizeStreetName(CLIENT_MAP_STREET instanceof HTMLInputElement ? CLIENT_MAP_STREET.value : '');
     const houseValue = normalizeAddressPart(CLIENT_MAP_HOUSE instanceof HTMLInputElement ? CLIENT_MAP_HOUSE.value : '');
     const structuredQuery = composeAddressFromFields();
@@ -4955,13 +6485,24 @@
   }
 
   function saveClientCardChanges() {
+    const nextClient = String(CLIENT_NAME_INPUT instanceof HTMLInputElement ? CLIENT_NAME_INPUT.value : '').trim();
+    const nextPhone = String(CLIENT_PHONE_INPUT instanceof HTMLInputElement ? CLIENT_PHONE_INPUT.value : '').trim();
+    const nextAddress = String(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '').trim();
+    const cardCheck = opxLimits()?.validateClientCardFields?.({
+      client: nextClient,
+      phoneRaw: nextPhone,
+      address: nextAddress,
+    });
+    if (cardCheck && !cardCheck.ok) {
+      showToast(cardCheck.message, 3200, 'error');
+      return;
+    }
+    const clientName = cardCheck?.client ?? nextClient;
+    const clientAddress = cardCheck?.address ?? nextAddress;
     if (state.creatingOrder) {
-      const nextClient = String(CLIENT_NAME_INPUT instanceof HTMLInputElement ? CLIENT_NAME_INPUT.value : '').trim();
-      const nextPhone = String(CLIENT_PHONE_INPUT instanceof HTMLInputElement ? CLIENT_PHONE_INPUT.value : '').trim();
-      const nextAddress = String(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '').trim();
-      if (MODAL_CLIENT instanceof HTMLInputElement) MODAL_CLIENT.value = nextClient;
+      if (MODAL_CLIENT instanceof HTMLInputElement) MODAL_CLIENT.value = clientName;
       if (MODAL_PHONE instanceof HTMLInputElement) MODAL_PHONE.value = nextPhone;
-      if (MODAL_ADDRESS instanceof HTMLInputElement) MODAL_ADDRESS.value = nextAddress;
+      if (MODAL_ADDRESS instanceof HTMLInputElement) MODAL_ADDRESS.value = clientAddress;
       scheduleModalClientSuggestRefresh();
       closeClientMapModal();
       closeClientCardModal();
@@ -4973,12 +6514,9 @@
     const prevPhone = order.phone;
     const prevAddress = order.address;
     const prevTotal = Number(order.total_sum) || 0;
-    const nextClient = String(CLIENT_NAME_INPUT instanceof HTMLInputElement ? CLIENT_NAME_INPUT.value : '').trim();
-    const nextPhone = String(CLIENT_PHONE_INPUT instanceof HTMLInputElement ? CLIENT_PHONE_INPUT.value : '').trim();
-    const nextAddress = String(CLIENT_ADDRESS_INPUT instanceof HTMLInputElement ? CLIENT_ADDRESS_INPUT.value : '').trim();
-    order.client = nextClient || order.client || 'КЛИЕНТ';
+    order.client = clientName || order.client || 'КЛИЕНТ';
     order.phone = nextPhone;
-    order.address = nextAddress || order.address;
+    order.address = clientAddress || order.address;
 
     const priceMode = String(CLIENT_PRICE_MODE instanceof HTMLSelectElement ? CLIENT_PRICE_MODE.value : 'none');
     const priceAmount = Number(CLIENT_PRICE_VALUE instanceof HTMLInputElement ? CLIENT_PRICE_VALUE.value : 0);
@@ -5082,10 +6620,10 @@
 
   async function runBulkStatusApply() {
     if (bulkApplyRunning) return;
-    const sel =
-      BULK_STATUS_SELECT instanceof HTMLSelectElement ? String(BULK_STATUS_SELECT.value || '').trim() : 'processing';
-    const allowed = new Set(['new', 'confirmed', 'processing', 'courier', 'on_way', 'delivered']);
-    if (!allowed.has(sel)) {
+    const selUi =
+      BULK_STATUS_SELECT instanceof HTMLSelectElement ? String(BULK_STATUS_SELECT.value || '').trim() : 'in_processing';
+    const allowedUi = new Set(['in_processing', 'confirmed', 'on_way', 'delivered']);
+    if (!allowedUi.has(selUi)) {
       showToast('Выберите допустимый статус');
       return;
     }
@@ -5106,7 +6644,8 @@
         skip += 1;
         continue;
       }
-      const r = await patchOrderStatusForBulk(order, sel);
+      const dbStatus = operatorDbStatusFromUi(selUi, order.status);
+      const r = await patchOrderStatusForBulk(order, dbStatus);
       if (r.outcome === 'auth') {
         bulkApplyRunning = false;
         if (BULK_APPLY_BTN instanceof HTMLButtonElement) BULK_APPLY_BTN.disabled = false;
@@ -5136,7 +6675,9 @@
     syncBulkBarUi();
   }
 
-  function render() {
+  let renderOrdersFrame = 0;
+
+  function renderOrdersTableNow() {
     if (!(BODY instanceof HTMLElement)) return;
     refreshFiltersIndicators();
     const newCount = incomingNewOrdersList().length;
@@ -5163,7 +6704,7 @@
     } else {
       BODY.innerHTML = state.filtered
         .map((o, i) => {
-          const product = parseProduct(o.items_json, i);
+          const product = formatOrderProductsLabel(o.items_json, i);
           const qty = parseQty(o.items_json);
           const zoneName = normalizeZoneName(o.zone);
           const dt = ruDateTime(o.created_at);
@@ -5188,16 +6729,16 @@
             <td title="${orderId}"><button type="button" class="opx-order-link" data-opx-open-order="${escapeHtml(String(o.id))}">${orderId}</button></td>
             <td>${periodBySlot(o.delivery_slot)}</td>
             <td><span class="opx-dt"><span class="opx-dt-date">${createdDate}</span><span class="opx-dt-time">${createdTime}</span></span></td>
-            <td class="opx-wrap" title="${o.client}">${o.client}</td>
+            <td class="opx-wrap" title="${escapeHtml(String(o.client || 'КЛИЕНТ'))}">${escapeHtml(String(o.client || 'КЛИЕНТ'))}</td>
             <td class="opx-wrap" title="${String(o.address || '')}">${String(o.address || '')}${phoneLine}</td>
             <td>${ruDate(o.delivery_date || o.created_at)}</td>
             <td class="opx-wrap" title="${product}">${product}</td>
             <td>${qty}</td>
             <td>${money(o.total_sum)}</td>
-            <td>${o.payment_method || 'налич.'}</td>
+            <td>${escapeHtml(paymentLabelDisplay(o.payment_method))}</td>
             <td>${zoneName}</td>
             <td title="${expTitle}">${exp ? escapeHtml(exp) : 'Не назначен'}</td>
-            <td class="opx-wrap opx-note" title="${String(o.courier_note || '')}">${String(o.courier_note || '')}</td>
+            <td class="opx-wrap opx-note" title="${escapeHtml(formatCourierNote(o.courier_note))}">${escapeHtml(formatCourierNote(o.courier_note))}</td>
           </tr>
         `;
         })
@@ -5208,6 +6749,14 @@
     }
     /** Геокод только по текущей выборке таблицы, не по всей базе (иначе тысячи обращений к Nominatim). */
     scheduleZoneCoordinatesPrefetch(state.filtered);
+  }
+
+  function render() {
+    if (renderOrdersFrame) return;
+    renderOrdersFrame = requestAnimationFrame(() => {
+      renderOrdersFrame = 0;
+      renderOrdersTableNow();
+    });
   }
 
   function syncDayPresetHighlightsFromState() {
@@ -5259,8 +6808,32 @@
   function bind() {
     ensureProductOptions();
     ensureFiltersModalStaticSelects();
+    opxLimits()?.bindOperatorFormLimits?.({
+      modalClient: MODAL_CLIENT,
+      modalPhone: MODAL_PHONE,
+      modalAddress: MODAL_ADDRESS,
+      modalNote: MODAL_NOTE,
+      reasonText: ORDER_REASON_TEXT,
+      search: SEARCH,
+      clientName: CLIENT_NAME_INPUT,
+      clientPhone: CLIENT_PHONE_INPUT,
+      clientAddress: CLIENT_ADDRESS_INPUT,
+      mapStreet: CLIENT_MAP_STREET,
+      mapHouse: CLIENT_MAP_HOUSE,
+      mapApartment: CLIENT_MAP_APARTMENT,
+      mapEntrance: CLIENT_MAP_ENTRANCE,
+      mapFloor: CLIENT_MAP_FLOOR,
+      mapSearch: CLIENT_MAP_SEARCH,
+      onTrim: (max) => showToast(`Не более ${max} символов`, 2400, 'info'),
+    });
     SEARCH?.addEventListener('input', () => {
-      state.query = String(SEARCH.value || '');
+      const searchMax = opxLimits()?.SEARCH_MAX ?? 120;
+      let q = String(SEARCH.value || '');
+      if (q.length > searchMax) {
+        q = q.slice(0, searchMax);
+        if (SEARCH instanceof HTMLInputElement) SEARCH.value = q;
+      }
+      state.query = q;
       applyFilters();
       render();
     });
@@ -5307,6 +6880,20 @@
     TAB_MAP?.addEventListener('click', openZoneMapOverlay);
     TAB_ORDERS?.addEventListener('click', switchToOrdersView);
     TAB_REPORTS?.addEventListener('click', openReportsOverlay);
+    TAB_SETTINGS?.addEventListener('click', openSettingsOverlay);
+    SETTINGS_CLOSE?.addEventListener('click', closeSettingsOverlay);
+    SETTINGS_SAVE_BTN?.addEventListener('click', () => void saveSettingsAvailability());
+    SETTINGS_DAYS_LIST?.addEventListener('change', onSettingsDaysListChange);
+    SETTINGS_OVERLAY?.addEventListener('click', (event) => {
+      const t = event.target;
+      const btn = t instanceof Element ? t.closest('[data-opx-settings-switch]') : null;
+      if (!(btn instanceof HTMLButtonElement) || btn.disabled) return;
+      const sw = String(btn.getAttribute('data-opx-settings-switch') || '');
+      if (sw === 'orders') switchToOrdersView();
+      else if (sw === 'map') openZoneMapOverlay();
+      else if (sw === 'reports') openReportsOverlay();
+      else if (sw === 'settings') openSettingsOverlay();
+    });
     ZONE_MAP_CLOSE?.addEventListener('click', closeZoneMapOverlay);
     REPORTS_CLOSE?.addEventListener('click', closeReportsOverlay);
     REPORTS_BUILD_BTN?.addEventListener('click', () => {
@@ -5315,9 +6902,24 @@
     });
     REPORTS_EXCEL_BTN?.addEventListener('click', downloadReportsExcel);
     REPORTS_PRINT_BTN?.addEventListener('click', printReportsArea);
+    window.addEventListener('beforeprint', () => {
+      if (state.reportsOpen && REPORTS_OVERLAY instanceof HTMLElement && !REPORTS_OVERLAY.hidden) {
+        document.body.classList.add('opx-printing-reports');
+      }
+    });
+    window.addEventListener('afterprint', () => {
+      document.body.classList.remove('opx-printing-reports');
+    });
     REPORTS_PDF_BTN?.addEventListener('click', () => void downloadReportsPdf());
     REPORTS_DATE_FROM?.addEventListener('change', renderReports);
     REPORTS_DATE_TO?.addEventListener('change', renderReports);
+    REPORTS_OVERLAY?.querySelectorAll('[data-opx-report-period]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const days = Number(btn.getAttribute('data-opx-report-period'));
+        setReportsPeriodDays(days);
+      });
+    });
     REPORTS_OVERLAY?.addEventListener('click', (event) => {
       const t = event.target;
       const paneBtn = t instanceof Element ? t.closest('[data-opx-report-pane]') : null;
@@ -5366,60 +6968,88 @@
         const slot = String(btn.getAttribute('data-opx-adv-slot') || 'all');
         state.advanced.slot = slot;
         syncAdvSlotButtonsFromState();
+        refreshFiltersIndicators();
         applyFilters();
         render();
       });
     });
-    FILTERS_ADV_STATUS?.addEventListener('change', () => {
-      if (!(FILTERS_ADV_STATUS instanceof HTMLSelectElement)) return;
-      const v = String(FILTERS_ADV_STATUS.value || 'all');
-      state.status = v;
+    function onAdvancedFilterChange() {
+      refreshFiltersIndicators();
       applyFilters();
       render();
+    }
+    FILTERS_ADV_STATUS?.addEventListener('change', () => {
+      if (!(FILTERS_ADV_STATUS instanceof HTMLSelectElement)) return;
+      state.status = String(FILTERS_ADV_STATUS.value || 'all');
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_PAYMENT?.addEventListener('change', () => {
       state.advanced.payment =
         FILTERS_ADV_PAYMENT instanceof HTMLSelectElement ? String(FILTERS_ADV_PAYMENT.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_ZONE?.addEventListener('change', () => {
       state.advanced.zone =
         FILTERS_ADV_ZONE instanceof HTMLSelectElement ? String(FILTERS_ADV_ZONE.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_DRIVER?.addEventListener('change', () => {
       state.advanced.driver =
         FILTERS_ADV_DRIVER instanceof HTMLSelectElement ? String(FILTERS_ADV_DRIVER.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_WEEKDAY?.addEventListener('change', () => {
       state.advanced.weekday =
         FILTERS_ADV_WEEKDAY instanceof HTMLSelectElement ? String(FILTERS_ADV_WEEKDAY.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_PRODUCT?.addEventListener('change', () => {
       state.advanced.product =
         FILTERS_ADV_PRODUCT instanceof HTMLSelectElement ? String(FILTERS_ADV_PRODUCT.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     FILTERS_ADV_SUM_KIND?.addEventListener('change', () => {
       state.advanced.sumKind =
         FILTERS_ADV_SUM_KIND instanceof HTMLSelectElement ? String(FILTERS_ADV_SUM_KIND.value || 'all') : 'all';
-      applyFilters();
-      render();
+      onAdvancedFilterChange();
     });
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && state.zoneMapOpen) closeZoneMapOverlay();
       if (event.key === 'Escape' && state.reportsOpen) closeReportsOverlay();
       if (event.key === 'Escape' && newOrdersInboxOpen) closeNewOrdersInboxModal();
+      if (
+        event.key === 'Escape' &&
+        CONFIRM_MODAL instanceof HTMLElement &&
+        CONFIRM_MODAL.classList.contains('is-open') &&
+        !CONFIRM_MODAL.hidden
+      ) {
+        closeOpxConfirm(false);
+      }
     });
-    LOGOUT?.addEventListener('click', () => {
-      if (!window.confirm('Выйти из учётной записи?')) return;
+    CONFIRM_OK_BTN?.addEventListener('click', () => closeOpxConfirm(true));
+    CONFIRM_CANCEL_BTN?.addEventListener('click', () => closeOpxConfirm(false));
+    CONFIRM_MODAL?.addEventListener('click', (event) => {
+      const t = event.target;
+      if (t instanceof Element && t.closest('[data-opx-confirm-dismiss]')) closeOpxConfirm(false);
+    });
+    LOGOUT?.addEventListener('click', async () => {
+      const ok = await showOpxConfirm({
+        title: 'Выход из системы',
+        message: 'Выйти из учётной записи?',
+        okLabel: 'Выйти',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      });
+      if (!ok) return;
+      const api = window.EkvalineAPI;
+      if (api?.json) {
+        try {
+          await api.json('/api/auth/logout', { method: 'POST', body: {} });
+        } catch {
+          /* ignore */
+        }
+        api.resetCsrf?.();
+      }
       localStorage.removeItem(CURRENT_USER_KEY);
       window.location.href = 'index.html';
     });
@@ -5503,14 +7133,19 @@
       const intent = orderReasonOverlayIntent;
       const ta = ORDER_REASON_TEXT;
       const raw = ta instanceof HTMLTextAreaElement ? ta.value.trim() : '';
-      if (raw.length < 3) {
-        showToast('Укажите причину не менее 3 символов');
+      const reasonCheck = opxLimits()?.validateChangeReason?.(raw, true);
+      if (reasonCheck && !reasonCheck.ok) {
+        showToast(reasonCheck.message, 3200, 'error');
         if (ta instanceof HTMLTextAreaElement) ta.focus();
         return;
       }
+      const reasonVal = reasonCheck?.value ?? raw;
       closeOrderReasonOverlay();
-      if (intent === 'cancel') await saveOrderModalChanges({ injectedReason: raw, forceCancelled: true });
-      else if (intent === 'reschedule') await saveOrderModalChanges({ injectedReason: raw });
+      if (MODAL_STATUS instanceof HTMLSelectElement && intent === 'cancel') {
+        MODAL_STATUS.value = 'cancelled';
+      }
+      if (intent === 'cancel') await saveOrderModalChanges({ injectedReason: reasonVal, forceCancelled: true });
+      else if (intent === 'reschedule') await saveOrderModalChanges({ injectedReason: reasonVal });
     });
     ORDER_REASON_OVERLAY?.addEventListener('click', (e) => {
       const t = e.target;
@@ -5574,23 +7209,65 @@
       orderNotesVisitedThisOpen = true;
       setOrderModalTab('notes');
     });
-    MODAL_PRODUCT?.addEventListener('change', updateGoodsSumPreview);
-    MODAL_QTY?.addEventListener('input', updateGoodsSumPreview);
-    MODAL_UNIT_PRICE?.addEventListener('input', updateGoodsSumPreview);
-    MODAL_PRODUCT?.addEventListener('change', () => {
+    ORDER_CART_ADD_BTN?.addEventListener('click', () => {
+      addOrderModalCartLine(null, getActiveOrder());
+      setOrderModalTab('goods');
+    });
+    ORDER_CART_FROM_SITE_BTN?.addEventListener('click', () => importSiteCartIntoOrderModal());
+    ORDER_CART_LIST?.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const removeBtn = target.closest('[data-opx-cart-remove]');
+      if (removeBtn instanceof HTMLButtonElement) {
+        const row = removeBtn.closest('[data-opx-cart-line]');
+        const index = row instanceof HTMLElement ? Number(row.getAttribute('data-opx-cart-line')) : NaN;
+        const lines = readOrderModalCartFromDom();
+        if (lines.length <= 1) {
+          showToast('В заказе должен остаться хотя бы один товар');
+          return;
+        }
+        if (Number.isFinite(index)) lines.splice(index, 1);
+        else lines.pop();
+        setOrderModalCartLines(lines, getActiveOrder());
+        return;
+      }
+    });
+    ORDER_CART_LIST?.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const row = target.closest('[data-opx-cart-line]');
+      if (!(row instanceof HTMLElement)) return;
       const order = getActiveOrder();
-      const product = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
-      const defaultPrice = order ? getDefaultPriceForOrder(order, product) : baseUnitPrice(product, 1);
-      if (MODAL_UNIT_PRICE instanceof HTMLInputElement) MODAL_UNIT_PRICE.value = String(defaultPrice);
+      if (target.matches('[data-opx-cart-product]') && target instanceof HTMLSelectElement) {
+        const title = normalizeProductName(target.value);
+        const qtyEl = row.querySelector('[data-opx-cart-qty]');
+        const qty = Math.min(50, Math.max(1, Number(qtyEl instanceof HTMLInputElement ? qtyEl.value : 1) || 1));
+        const priceEl = row.querySelector('[data-opx-cart-price]');
+        if (priceEl instanceof HTMLInputElement) {
+          priceEl.value = String(order ? getDefaultPriceForOrder(order, title, qty) : baseUnitPrice(title, qty));
+        }
+      }
+      if (target.matches('[data-opx-cart-qty]') && target instanceof HTMLInputElement) {
+        const titleEl = row.querySelector('[data-opx-cart-product]');
+        const title = normalizeProductName(
+          titleEl instanceof HTMLSelectElement ? titleEl.value : String(titleEl?.textContent || '')
+        );
+        const qty = Math.min(50, Math.max(1, Number(target.value) || 1));
+        target.value = String(qty);
+        const priceEl = row.querySelector('[data-opx-cart-price]');
+        if (priceEl instanceof HTMLInputElement && title === 'Вода') {
+          priceEl.value = String(order ? getDefaultPriceForOrder(order, title, qty) : baseUnitPrice(title, qty));
+        }
+      }
+      refreshOrderCartLineSum(row);
       updateGoodsSumPreview();
     });
-    MODAL_QTY?.addEventListener('input', () => {
-      const order = getActiveOrder();
-      const product = normalizeProductName(String(MODAL_PRODUCT instanceof HTMLSelectElement ? MODAL_PRODUCT.value : ''));
-      const defaultPrice = order
-        ? getDefaultPriceForOrder(order, product)
-        : baseUnitPrice(product, Math.min(50, Math.max(1, Number(MODAL_QTY instanceof HTMLInputElement ? MODAL_QTY.value : 1) || 1)));
-      if (MODAL_UNIT_PRICE instanceof HTMLInputElement) MODAL_UNIT_PRICE.value = String(defaultPrice);
+    ORDER_CART_LIST?.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.matches('[data-opx-cart-qty], [data-opx-cart-price]')) return;
+      const row = target.closest('[data-opx-cart-line]');
+      if (row instanceof HTMLElement) refreshOrderCartLineSum(row);
       updateGoodsSumPreview();
     });
     CLIENT_PRICE_PRODUCT?.addEventListener('change', () => {
@@ -5603,12 +7280,12 @@
     });
     MODAL_SLOT_BTNS.forEach((btn) => {
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;
         setModalSlot(String(btn.getAttribute('data-opx-slot') || '09:00-14:00'));
       });
     });
     MODAL_DATE_TODAY?.addEventListener('click', () => {
-      if (MODAL_DELIVERY_DATE instanceof HTMLInputElement) MODAL_DELIVERY_DATE.value = isoDate(new Date());
-      updateQuickDateButtons();
+      showToast('Доставка только с завтрашнего дня — выберите «завтра» или дату в календаре', 3200, 'info');
     });
     MODAL_DATE_TOMORROW?.addEventListener('click', () => {
       const d = new Date();
@@ -5620,7 +7297,10 @@
       if (MODAL_DELIVERY_DATE instanceof HTMLInputElement) MODAL_DELIVERY_DATE.value = nextMondayIsoDate();
       updateQuickDateButtons();
     });
-    MODAL_DELIVERY_DATE?.addEventListener('change', updateQuickDateButtons);
+    MODAL_DELIVERY_DATE?.addEventListener('change', () => {
+      applyModalDeliveryDateConstraints();
+      updateQuickDateButtons();
+    });
     MODAL_CLIENT?.addEventListener('input', () => {
       if (state.creatingOrder) scheduleModalClientSuggestRefresh();
       orderNotesMigrateStorageWhenIdentityChanges();
@@ -5711,8 +7391,29 @@
     CLIENT_MAP_CLOSE?.addEventListener('click', closeClientMapModal);
     CLIENT_MAP_CANCEL?.addEventListener('click', closeClientMapModal);
     CLIENT_MAP_APPLY?.addEventListener('click', () => {
-      const address = composeAddressFromFields();
-      if (address) {
+      void (async () => {
+        const pre = validateClientMapAddressSync();
+        if (!pre.ok) {
+          showToast(pre.error, 3600, 'error');
+          return;
+        }
+        const streetOk = await validateStreetInOrenburg(pre.street);
+        if (!streetOk) {
+          showToast('Улица не найдена в Оренбурге. Выберите из списка подсказок.', 3800, 'error');
+          return;
+        }
+        if (!state.mapSelectedCoords) {
+          await searchOnClientMap();
+        }
+        if (!state.mapSelectedCoords) {
+          showToast('Не удалось найти дом на карте. Проверьте улицу и номер дома.', 3800, 'error');
+          return;
+        }
+        const address = composeAddressFromFields();
+        if (!address) {
+          showToast('Заполните адрес доставки.', 3200, 'error');
+          return;
+        }
         state.mapSelectedAddress = address;
         if (CLIENT_MAP_SELECTED instanceof HTMLElement) CLIENT_MAP_SELECTED.textContent = address;
         if (state.creatingOrder) {
@@ -5722,8 +7423,8 @@
         } else if (CLIENT_ADDRESS_INPUT instanceof HTMLInputElement) {
           CLIENT_ADDRESS_INPUT.value = address;
         }
-      }
-      closeClientMapModal();
+        closeClientMapModal();
+      })();
     });
     CLIENT_MAP_SEARCH_BTN?.addEventListener('click', () => {
       void searchOnClientMap();
@@ -5852,34 +7553,42 @@
 
   async function init() {
     resetOperatorChromeOnBoot();
-    if (window.EkvalineMaps && typeof window.EkvalineMaps.prefetch === 'function') window.EkvalineMaps.prefetch();
-    try {
-      await window.EkvalineAPI?.awaitBootReconciliation?.();
-    } catch {
-      /* ignore */
+    if (window.EkvalineMaps && typeof window.EkvalineMaps.prefetch === 'function') {
+      window.EkvalineMaps.prefetch();
     }
-    await hydrateStaffFromServerSession();
+
+    const hydratePromise = (async () => {
+      try {
+        await window.EkvalineAPI?.awaitBootReconciliation?.();
+      } catch {
+        /* ignore */
+      }
+      await hydrateStaffFromServerSession();
+    })();
+
+    await hydratePromise;
     if (!ensureAccess()) return;
+
     bind();
     /** Иначе при пустой БД или датах доставки не «сегодня» таблица долго пустая. */
     state.date = '';
     if (DATE instanceof HTMLInputElement) DATE.value = '';
     syncDayPresetHighlightsFromState();
 
+    renderOrdersPlaceholder('Загрузка заказов…');
     if (isOperatorUiDevHost()) {
       state.orders = augmentDemoOrders(mapLocalOrders());
       applyFilters();
       render();
-    } else {
-      renderOrdersPlaceholder('Загрузка заказов…');
     }
 
     try {
-      await loadOrders();
+      await Promise.all([hydratePromise, loadOrders()]);
     } catch {
       emptyOrdersFallback();
       showToast('Сбой при загрузке — проверьте консоль или сеть.');
     }
+    if (!ensureAccess()) return;
     applyFilters();
     /** На выбранный день нет строк — снимаем ограничение по дате. */
     if (state.orders.length > 0 && state.filtered.length === 0 && String(state.date || '').trim()) {
@@ -5890,7 +7599,14 @@
       showToast('Нет заказов на выбранную дату доставки — включён показ всех дней.');
     }
     render();
+    startOrdersAutoRefresh();
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void pollOrdersForRealtime();
+  });
+
+  window.addEventListener('pagehide', stopOrdersAutoRefresh);
 
   document.addEventListener('DOMContentLoaded', () => {
     void init();

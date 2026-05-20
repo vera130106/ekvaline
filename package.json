@@ -6,6 +6,9 @@
     "start": "node server.js",
     "start:checked": "npm run verify && node server.js",
     "verify": "node scripts/verify.mjs",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "verify:operator": "node scripts/verify-operator-flow.mjs",
     "pg:setup": "node scripts/setup-postgres.js",
     "pg:seed-demo-orders": "node scripts/seed-demo-operator-orders.js",
     "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force"

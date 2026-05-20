@@ -1413,6 +1413,15 @@
     );
   }
 
+  function onBlogAdminDataUpdated() {
+    state.admin = readAdminData();
+    const saved = safeJsonParse(localStorage.getItem(FEED_KEY), null);
+    if (Array.isArray(saved)) {
+      state.posts = enforcePostsLimit(saved);
+    }
+    renderAll();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     initState();
     renderAll();
@@ -1420,6 +1429,10 @@
     bindEvents();
     initHeroParallax();
     void hydrateSitePollsFromApi();
+    window.addEventListener('ekvaline-blog-admin-updated', onBlogAdminDataUpdated);
+    window.addEventListener('storage', (event) => {
+      if (event.key === BLOG_ADMIN_KEY || event.key === FEED_KEY) onBlogAdminDataUpdated();
+    });
     const storyCtaBtn = document.getElementById('storyCtaBtn');
     const storyPrevZone = document.getElementById('storyPrevZone');
     const storyNextZone = document.getElementById('storyNextZone');

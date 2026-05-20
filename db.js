@@ -94,7 +94,11 @@ class PgDatabase {
     await ensureDeliveryAddressesBackfillZoneId(this.pool);
     await ensureExtendedCatalog(this.pool);
     await ensureDemoClientUser(this.pool);
+    await ensureDemoDriverUsers(this.pool);
     await ensureDemoOperatorOrders(this.pool);
+    await normalizeDemoOrderPayments(this.pool);
+    await syncDemoOrderDrivers(this.pool);
+    await ensureDemoOperatorAuditEvents(this.pool);
   }
 
   _normalizeSql(sql, args) {
@@ -151,6 +155,7 @@ async function migrate(pool) {
       photo_path TEXT,
       stock INTEGER NOT NULL DEFAULT 0,
       hidden INTEGER NOT NULL DEFAULT 0,
+      preorder INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0
     );
 
@@ -251,6 +256,7 @@ async function migrate(pool) {
   await ensureColumnDefault(pool, 'orders', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'orders', 'updated_at', 'NOW()');
   await ensureOrdersCompatibility(pool);
+  await ensureProductsCatalogColumns(pool);
   await ensureOrderAuditEvents(pool);
   await ensureIdentityDefault(pool, 'order_audit_events');
   await ensureUserDriverRouteLabel(pool);
@@ -920,6 +926,10 @@ async function ensureUsersRegisterColumns(pool) {
   await ensureColumnExists(pool, 'users', 'created_at', 'TIMESTAMPTZ NOT NULL DEFAULT NOW()');
 }
 
+async function ensureProductsCatalogColumns(pool) {
+  await ensureColumnExists(pool, 'products', 'preorder', 'INTEGER NOT NULL DEFAULT 0');
+}
+
 async function ensureOrdersCompatibility(pool) {
   await ensureColumnExists(pool, 'orders', 'user_id', 'INTEGER');
   await ensureColumnExists(pool, 'orders', 'address', "TEXT NOT NULL DEFAULT ''");
@@ -1122,6 +1132,12 @@ async function seedIfEmpty(pool) {
       demoDeliveryCoverage,
     ]
   );
+
+  await pool.query(
+    `INSERT INTO site_settings (key, value) VALUES ('deliveryAvailability', $1)
+     ON CONFLICT (key) DO NOTHING`,
+    [JSON.stringify({ closedDays: [], closedSlots: [] })]
+  );
 }
 
 async function ensureDefaultDeliveryAddresses(pool) {
@@ -1189,79 +1205,507 @@ async function ensureDemoClientUser(pool) {
 }
 
 const DEMO_OP_ORDER_NOTE_TAG = '§demo_op';
+const DEMO_MONTH_NOTE_TAG = '§demo_mo';
+/** Служебный маркер в примечании (в UI скрывается); по нему пересоздаём демо-строки. */
+const DEMO_SEED_TAG = '§ekva_seed';
+/** Целевое число заявок на календарный день доставки. */
+const DEMO_ORDERS_PER_DAY = 100;
+/** Сколько последних дней наполняем до DEMO_ORDERS_PER_DAY. */
+const DEMO_SEED_CALENDAR_DAYS = 30;
+const DEMO_AUDIT_TAG = '§ekva_audit';
+/** Не досеивать день, если заказов уже не меньше этого порога. */
+const DEMO_DAY_MIN_ORDERS = 85;
+const ORDER_REPORT_DATE_SQL = `COALESCE(NULLIF(trim(delivery_date), ''), to_char(created_at, 'YYYY-MM-DD'))`;
 
-/** Демо-заказы для панели оператора: при пустой таблице (и пока ни одного ряда с маркером демо). */
-async function ensureDemoOperatorOrders(pool) {
-  const demoPresent = await pool.query(
-    `SELECT 1 FROM orders WHERE position($1 IN coalesce(courier_note, '')) > 0 LIMIT 1`,
-    [DEMO_OP_ORDER_NOTE_TAG]
-  );
-  if (demoPresent.rowCount > 0) return;
+function isoCalendarDay(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
 
-  const cnt = await pool.query('SELECT COUNT(*)::int AS n FROM orders');
-  if (cnt.rows[0].n > 0) return;
+function noteWithDemoTags(note, tag) {
+  const s = String(note || '').trim();
+  return s ? `${s} ${tag}` : tag;
+}
 
-  const products = await pool.query(
-    'SELECT id, name, price FROM products WHERE COALESCE(hidden, 0) = 0 ORDER BY id ASC LIMIT 1'
-  );
-  if (!products.rowCount) return;
+const DEMO_SEED_FIRST_NAMES = [
+  'Юлия',
+  'Елена',
+  'Валерий',
+  'Александр',
+  'Наталья',
+  'Игорь',
+  'Марина',
+  'Андрей',
+  'Ольга',
+  'Сергей',
+  'Дмитрий',
+  'Татьяна',
+  'Павел',
+  'Светлана',
+  'Николай',
+  'Екатерина',
+  'Роман',
+  'Алина',
+  'Виктор',
+  'Ксения',
+];
+const DEMO_SEED_LAST_NAMES = [
+  'Соколова',
+  'Петренко',
+  'Киселёв',
+  'Морозов',
+  'Кузнецова',
+  'Смирнов',
+  'Волкова',
+  'Белов',
+  'Новикова',
+  'Орлов',
+  'Кравцов',
+  'Лебедева',
+  'Семёнов',
+  'Попова',
+  'Васильев',
+  'Медведева',
+  'Никитин',
+  'Фёдорова',
+  'Андреев',
+  'Захарова',
+];
+const DEMO_SEED_ORGS = [
+  { first_name: 'ООО «Ферронфоргик Машины»', last_name: '', phone: '79001234101' },
+  { first_name: 'ДИРЕКСКИЙ ЦЕНТР', last_name: '', phone: '79001234102' },
+  { first_name: 'ООО «СтройКомплект»', last_name: '', phone: '79001234103' },
+  { first_name: 'ИП Галиев Р.Р.', last_name: '', phone: '79001234104' },
+  { first_name: 'ООО «Оренбург-Торг»', last_name: '', phone: '79001234105' },
+];
 
-  const price = Number(products.rows[0].price) || 220;
-  const title = String(products.rows[0].name || 'Товар');
-  const mkItems = (qty) =>
-    JSON.stringify([{ title, qty: Number(qty), unit_price: price }]);
-  /** Маркер в примечании — повторная инициализация без дубликатов. */
-  function noteWithDemoTag(note) {
-    const s = String(note || '').trim();
-    const tag = DEMO_OP_ORDER_NOTE_TAG;
-    return s ? `${s} ${tag}` : tag;
+function buildDemoClientProfiles() {
+  const profiles = [];
+  for (let i = 0; i < 32; i += 1) {
+    profiles.push({
+      first_name: DEMO_SEED_FIRST_NAMES[i % DEMO_SEED_FIRST_NAMES.length],
+      last_name: DEMO_SEED_LAST_NAMES[(i * 3) % DEMO_SEED_LAST_NAMES.length],
+      email: `demo.client${String(i + 1).padStart(2, '0')}@ekvaline.local`,
+      phone: `7900123${String(5000 + i).padStart(4, '0')}`,
+    });
   }
+  DEMO_SEED_ORGS.forEach((org, i) => {
+    profiles.push({
+      first_name: org.first_name,
+      last_name: org.last_name,
+      email: `demo.org${i + 1}@ekvaline.local`,
+      phone: org.phone,
+    });
+  });
+  return profiles;
+}
 
-  let clientId;
-  const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1)', [
+const DEMO_CLIENT_PROFILES = buildDemoClientProfiles();
+
+/** Имена в колонке orders.driver и в driver_route_label учётки водителя (как в панели оператора). */
+const DEMO_DRIVER_ROUTE_LABELS = [
+  'Петров Пётр Петрович',
+  'Сидоров Сергей Сергеевич',
+  'Казаченко Сергей',
+  'Комаров Сергей',
+  'Лукашин Евгений',
+  'Макаров Александр Александрович',
+  'Кравцов Илья Петрович',
+  'Новиков Дмитрий Сергеевич',
+  'Белов Андрей Владимирович',
+];
+
+const DEMO_DRIVER_PROFILES = [
+  { label: 'Петров Пётр Петрович', first_name: 'Пётр', last_name: 'Петров', email: 'driver.petrov@ekvaline.local', phone: '79002000001' },
+  { label: 'Сидоров Сергей Сергеевич', first_name: 'Сергей', last_name: 'Сидоров', email: 'driver.sidorov@ekvaline.local', phone: '79002000002' },
+  { label: 'Казаченко Сергей', first_name: 'Сергей', last_name: 'Казаченко', email: 'driver.kazachenko@ekvaline.local', phone: '79002000003' },
+  { label: 'Комаров Сергей', first_name: 'Сергей', last_name: 'Комаров', email: 'driver.komarov@ekvaline.local', phone: '79002000004' },
+  { label: 'Лукашин Евгений', first_name: 'Евгений', last_name: 'Лукашин', email: 'driver.lukashin@ekvaline.local', phone: '79002000005' },
+  { label: 'Макаров Александр Александрович', first_name: 'Александр', last_name: 'Макаров', email: 'driver.makarov@ekvaline.local', phone: '79002000006' },
+  { label: 'Кравцов Илья Петрович', first_name: 'Илья', last_name: 'Кравцов', email: 'driver.kravtsov@ekvaline.local', phone: '79002000007' },
+  { label: 'Новиков Дмитрий Сергеевич', first_name: 'Дмитрий', last_name: 'Новиков', email: 'driver.novikov@ekvaline.local', phone: '79002000008' },
+  { label: 'Белов Андрей Владимирович', first_name: 'Андрей', last_name: 'Белов', email: 'driver.belov@ekvaline.local', phone: '79002000009' },
+];
+
+async function ensureDemoDriverUsers(pool) {
+  const pwd = bcrypt.hashSync('DriverEkva2026!', 12);
+  for (const profile of DEMO_DRIVER_PROFILES) {
+    const email = String(profile.email || '').trim();
+    if (!email) continue;
+    const label = String(profile.label || '').trim();
+    const first = String(profile.first_name || '').trim();
+    const last = String(profile.last_name || '').trim();
+    const phone = String(profile.phone || '').trim();
+    const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1', [email]);
+    if (existing.rowCount > 0) {
+      await pool.query(
+        `UPDATE users SET first_name = $1, last_name = $2, phone = $3, role = 'driver',
+         driver_route_label = $4, blocked = 0 WHERE id = $5`,
+        [first, last, phone, label, existing.rows[0].id]
+      );
+      continue;
+    }
+    await pool.query(
+      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, driver_route_label)
+       VALUES ($1,$2,$3,$4,$5,'driver', NOW()::text, $6)`,
+      [email, phone, pwd, first, last, label]
+    );
+  }
+}
+
+/** Переводит английские коды оплаты в подписи для интерфейса оператора. */
+async function normalizeDemoOrderPayments(pool) {
+  await pool.query(`UPDATE orders SET payment_method = 'Наличная' WHERE lower(trim(payment_method)) = 'cash'`);
+  await pool.query(`UPDATE orders SET payment_method = 'Безнал' WHERE lower(trim(payment_method)) = 'noncash'`);
+  await pool.query(`UPDATE orders SET payment_method = 'Карта' WHERE lower(trim(payment_method)) = 'card'`);
+}
+
+/** Равномерно назначает экспедиторов на демо-заказы (кроме новых/отменённых). */
+async function syncDemoOrderDrivers(pool) {
+  const labels = DEMO_DRIVER_ROUTE_LABELS;
+  if (!labels.length) return;
+  const rows = await pool.query(
+    `SELECT id, status FROM orders
+     WHERE position($1 IN coalesce(courier_note, '')) > 0
+        OR position($2 IN coalesce(courier_note, '')) > 0
+        OR position($3 IN coalesce(courier_note, '')) > 0
+     ORDER BY id ASC`,
+    [DEMO_SEED_TAG, DEMO_MONTH_NOTE_TAG, DEMO_OP_ORDER_NOTE_TAG]
+  );
+  for (let i = 0; i < rows.rows.length; i += 1) {
+    const id = rows.rows[i].id;
+    const st = String(rows.rows[i].status || '').trim();
+    if (['new', 'pending_operator', 'cancelled'].includes(st)) {
+      await pool.query(`UPDATE orders SET driver = NULL WHERE id = $1`, [id]);
+      continue;
+    }
+    await pool.query(`UPDATE orders SET driver = $1 WHERE id = $2`, [labels[i % labels.length], id]);
+  }
+}
+
+async function ensureDemoClientProfile(pool, profile) {
+  const email = String(profile.email || '').trim();
+  if (!email) return null;
+  const first = String(profile.first_name || '').trim();
+  const last = String(profile.last_name || '').trim();
+  const phone = String(profile.phone || '').trim();
+  const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1', [email]);
+  if (existing.rowCount > 0) {
+    await pool.query('UPDATE users SET first_name = $1, last_name = $2, phone = $3 WHERE id = $4', [
+      first,
+      last,
+      phone,
+      existing.rows[0].id,
+    ]);
+    return existing.rows[0].id;
+  }
+  const hash = bcrypt.hashSync('ClientDemo2026!', 12);
+  const ins = await pool.query(
+    `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
+     VALUES ($1,$2,$3,$4,$5,'client', NOW()::text) RETURNING id`,
+    [email, phone || '79000000000', hash, first, last]
+  );
+  return ins.rows[0].id;
+}
+
+async function ensureDemoClientPool(pool) {
+  const ids = [];
+  for (const profile of DEMO_CLIENT_PROFILES) {
+    const id = await ensureDemoClientProfile(pool, profile);
+    if (id != null) ids.push(id);
+  }
+  const legacy = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1', [
     'clienteekva@mail.ru',
   ]);
-  if (existing.rowCount > 0) {
-    clientId = existing.rows[0].id;
-  } else {
-    const hash = bcrypt.hashSync('ClientDemo2026!', 12);
-    const ins = await pool.query(
-      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
-       VALUES ($1,$2,$3,$4,$5,'client', NOW()::text) RETURNING id`,
-      ['clienteekva@mail.ru', '79001112299', hash, 'Демо', 'Клиент']
-    );
-    clientId = ins.rows[0].id;
+  if (legacy.rowCount > 0) {
+    await pool.query('UPDATE users SET first_name = $1, last_name = $2, phone = $3 WHERE id = $4', [
+      'Анна',
+      'Кравцова',
+      '79001234099',
+      legacy.rows[0].id,
+    ]);
+    ids.push(legacy.rows[0].id);
+  }
+  return ids.filter(Boolean);
+}
+
+/** Разносит демо-заказы по разным клиентам (после старого сида с одним user_id). */
+async function syncDemoOperatorOrderClients(pool) {
+  const clientIds = await ensureDemoClientPool(pool);
+  if (!clientIds.length) return;
+
+  const tagged = await pool.query(
+    `SELECT id FROM orders
+     WHERE position($1 IN coalesce(courier_note, '')) > 0
+        OR position($2 IN coalesce(courier_note, '')) > 0
+        OR position($3 IN coalesce(courier_note, '')) > 0
+     ORDER BY id ASC`,
+    [DEMO_MONTH_NOTE_TAG, DEMO_OP_ORDER_NOTE_TAG, DEMO_SEED_TAG]
+  );
+  for (let i = 0; i < tagged.rows.length; i += 1) {
+    await pool.query('UPDATE orders SET user_id = $1 WHERE id = $2', [
+      clientIds[i % clientIds.length],
+      tagged.rows[i].id,
+    ]);
   }
 
-  const now = new Date();
-  const iso = (d) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const d0 = iso(now);
-  const d1 = iso(new Date(now.getTime() + 86400000));
-  const dPrev = iso(new Date(now.getTime() - 86400000));
-  const slot1 = '09:00 – 14:00';
-  const slot2 = '14:00 – 17:00';
-  const slot3 = '17:00 – 21:00';
-  const pay = 'cash';
+  const legacy = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1', [
+    'clienteekva@mail.ru',
+  ]);
+  if (!legacy.rowCount) return;
+  const legacyOrders = await pool.query('SELECT id FROM orders WHERE user_id = $1 ORDER BY id ASC', [
+    legacy.rows[0].id,
+  ]);
+  for (let i = 0; i < legacyOrders.rows.length; i += 1) {
+    await pool.query('UPDATE orders SET user_id = $1 WHERE id = $2', [
+      clientIds[i % clientIds.length],
+      legacyOrders.rows[i].id,
+    ]);
+  }
+}
 
-  const rows = [
-    [clientId, 'Оренбург, ул. Чкалова, д. 15', d0, slot1, 'new', pay, mkItems(2), noteWithDemoTag(''), 'Центр', null, 0, Math.round(2 * price)],
-    [clientId, 'Оренбург, ул. Салмышская, д. 42', d0, slot2, 'pending_operator', pay, mkItems(1), noteWithDemoTag('Перед выездом набрать'), 'Степной', null, 0, Math.round(price)],
-    /** «Обработка» на сегодня — чтобы строки были видны в фильтре «В работе» + «Сегодня». */
-    [clientId, 'Оренбург, ул. Пушкинская, д. 10', d0, slot3, 'processing', pay, mkItems(2), noteWithDemoTag('Доставить до обеда'), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
-    [clientId, 'Оренбург, просп. Гагарина, д. 28', d1, slot1, 'confirmed', 'card', mkItems(3), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(3 * price)],
-    [clientId, 'Оренбург, ул. Комсомольская, д. 5', d1, slot3, 'processing', pay, mkItems(2), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
-    [clientId, 'Оренбург, ул. Пролетарская, д. 100', d0, slot1, 'courier', pay, mkItems(1), noteWithDemoTag(''), 'Доп. зона', 'Петров Пётр Петрович', 0, Math.round(price)],
-    [clientId, 'Оренбург, мкр. Ростоши-1, д. 8', d0, slot2, 'on_way', pay, mkItems(4), noteWithDemoTag('Домофон 045'), 'Окраина', 'Сидоров Сергей Сергеевич', 0, Math.round(4 * price)],
-    [clientId, 'Оренбург, ул. Кирова, д. 33', dPrev, slot1, 'delivered', pay, mkItems(2), noteWithDemoTag(''), 'Центр', 'Петров Пётр Петрович', 0, Math.round(2 * price)],
-    [clientId, 'Оренбург, ул. Ленина, д. 7', d0, slot3, 'cancelled', pay, mkItems(1), noteWithDemoTag(''), 'Центр', null, 0, Math.round(price)],
+function demoWaterUnitPrice(qty) {
+  const q = Math.max(1, Number(qty) || 1);
+  if (q >= 5) return 175;
+  if (q >= 2) return 190;
+  return 220;
+}
+
+async function countOrdersOnDeliveryDay(pool, deliveryDay) {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM orders WHERE ${ORDER_REPORT_DATE_SQL} = $1`,
+    [deliveryDay]
+  );
+  return Number(r.rows[0].n) || 0;
+}
+
+function demoStatusForDay(deliveryDay, todayIso, index) {
+  if (deliveryDay < todayIso) {
+    return ['delivered', 'delivered', 'delivered', 'delivered', 'cancelled', 'delivered'][index % 6];
+  }
+  if (deliveryDay > todayIso) {
+    return ['confirmed', 'new', 'pending_operator', 'confirmed'][index % 4];
+  }
+  return [
+    'processing',
+    'confirmed',
+    'on_way',
+    'courier',
+    'new',
+    'pending_operator',
+    'delivered',
+    'processing',
+    'confirmed',
+  ][index % 9];
+}
+
+/**
+ * Демо-заявки: ~100 заказов на каждый из последних DEMO_SEED_CALENDAR_DAYS дней доставки.
+ * Маркер §ekva_seed в примечании (в UI скрывается).
+ */
+/** События журнала оператора за последний месяц (действия оператора и водителя, не админа). */
+async function ensureDemoOperatorAuditEvents(pool) {
+  const minWanted = 450;
+  const existing = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM order_audit_events WHERE position($1 IN coalesce(detail, '')) > 0`,
+    [DEMO_AUDIT_TAG]
+  );
+  if (existing.rows[0].n >= minWanted) return;
+
+  const opRow = await pool.query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [
+    'operatorekva@mail.ru',
+  ]);
+  if (!opRow.rowCount) return;
+  const operatorId = opRow.rows[0].id;
+
+  const drvRow = await pool.query(`SELECT id FROM users WHERE lower(role) = 'driver' ORDER BY id ASC LIMIT 1`);
+  const driverId = drvRow.rowCount ? drvRow.rows[0].id : null;
+
+  await pool.query(`DELETE FROM order_audit_events WHERE position($1 IN coalesce(detail, '')) > 0`, [DEMO_AUDIT_TAG]);
+
+  const ordersRes = await pool.query(
+    `SELECT id FROM orders
+     WHERE position($1 IN coalesce(courier_note, '')) > 0
+        OR position($2 IN coalesce(courier_note, '')) > 0
+     ORDER BY id DESC
+     LIMIT 4000`,
+    [DEMO_SEED_TAG, DEMO_MONTH_NOTE_TAG]
+  );
+  const orders = ordersRes.rows;
+  if (!orders.length) return;
+
+  const patchReasons = [
+    'Назначен экспедитор',
+    'Изменение заказа (без переноса/отмены)',
+    'Уточнён адрес доставки',
+    'Подтверждён оператором',
+  ];
+  const rescheduleReasons = ['Клиент просит перенести на вечер', 'Не успели в интервал — перенос'];
+  const cancelReasons = ['Клиент отказался', 'Дубль заказа', 'Нет связи с клиентом'];
+
+  const insertSql = `INSERT INTO order_audit_events (order_id, action, reason, actor_user_id, detail, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`;
+
+  const now = new Date();
+  for (let dayOff = 0; dayOff < 30; dayOff += 1) {
+    const day = isoCalendarDay(new Date(now.getTime() - dayOff * 86400000));
+    const eventsToday = 16 + (dayOff % 6);
+    for (let e = 0; e < eventsToday; e += 1) {
+      const order = orders[(dayOff * 19 + e * 13) % orders.length];
+      const pick = (dayOff + e) % 10;
+      let action;
+      let actor;
+      let reason;
+      if (pick <= 5) {
+        action = 'operator_patch';
+        actor = operatorId;
+        reason = patchReasons[e % patchReasons.length];
+      } else if (pick === 6 && driverId) {
+        action = 'driver_mark_delivered';
+        actor = driverId;
+        reason = 'Доставлен (водитель)';
+      } else if (pick === 7) {
+        action = 'order_reschedule';
+        actor = operatorId;
+        reason = rescheduleReasons[e % rescheduleReasons.length];
+      } else if (pick === 8) {
+        action = 'order_status_cancelled';
+        actor = operatorId;
+        reason = cancelReasons[e % cancelReasons.length];
+      } else {
+        action = 'operator_patch';
+        actor = operatorId;
+        reason = patchReasons[(e + 1) % patchReasons.length];
+      }
+      const hours = 8 + ((e * 37 + dayOff * 11) % 11);
+      const mins = (e * 19 + dayOff * 3) % 60;
+      const createdAt = new Date(
+        `${day}T${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:00`
+      );
+      const detail = JSON.stringify({ tag: DEMO_AUDIT_TAG });
+      await pool.query(insertSql, [order.id, action, reason, actor, detail, createdAt.toISOString()]);
+    }
+  }
+}
+
+async function ensureDemoOperatorOrders(pool) {
+  await syncDemoOperatorOrderClients(pool);
+
+  const waterRow = await pool.query(
+    `SELECT id, name, price FROM products
+     WHERE COALESCE(hidden, 0) = 0
+       AND (name ILIKE '%19%' OR name ILIKE '%вода%' OR name ILIKE '%эквалайн%')
+     ORDER BY id ASC LIMIT 1`
+  );
+  const products = waterRow.rowCount
+    ? waterRow
+    : await pool.query('SELECT id, name, price FROM products WHERE COALESCE(hidden, 0) = 0 ORDER BY id ASC LIMIT 1');
+  if (!products.rowCount) return;
+
+  const clientIds = await ensureDemoClientPool(pool);
+  if (!clientIds.length) return;
+
+  const now = new Date();
+  const todayIso = isoCalendarDay(now);
+  const zones = ['Центр', 'Степной', 'Доп. зона', 'Окраина', 'Подхват'];
+  const drivers = DEMO_DRIVER_ROUTE_LABELS;
+  const payments = ['Наличная', 'Безнал', 'Рассчетный счет', 'Наличная', 'Карта', 'Безнал'];
+  const slots = ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00', '09:00 – 17:00'];
+  const addresses = [
+    'Оренбург, ул. Чкалова, д. 15',
+    'Оренбург, ул. Салмышская, д. 42',
+    'Оренбург, ул. Пушкинская, д. 10',
+    'Оренбург, просп. Гагарина, д. 28',
+    'Оренбург, ул. Комсомольская, д. 5',
+    'Оренбург, ул. Пролетарская, д. 100',
+    'Оренбург, мкр. Ростоши-1, д. 8',
+    'Оренбург, ул. Кирова, д. 33',
+    'Оренбург, ул. Ленина, д. 7',
+    'Оренбург, пос. Подгородный, ул. Южная, д. 3',
+    'Оренбург, ул. Нежинское, д. 9',
+    'Оренбург, ул. Карпова, д. 3',
+    'Оренбург, ул. Красносельская, д. 66',
+    'Оренбург, ул. Монтажников, д. 8/2',
+    'Оренбург, ул. Ткачева, д. 12',
+  ];
+  const notes = [
+    '',
+    'Позвонить за 20 минут до приезда',
+    'Домофон не работает — звонить на мобильный',
+    'Доставить до 13:00',
+    'Оставить у охраны, пропуск заказан',
+    'Сдача с 5000 ₽',
+    'Оплата по факту, чек не нужен',
+    'Второй подъезд, код 4521',
+    'Документы на воду в бухгалтерию',
+    'Пустую тару забрать с прошлой доставки',
+    'Не звонить — ребёнок спит до 14:00',
+    'Офис 312, пропуск по паспорту',
+    'Лифт в ремонте, 4 этаж пешком',
+    'Парковка со двора, шлагбаум 18',
+    'Договорная цена согласована с оператором',
+    'Повторный заказ, адрес тот же',
   ];
 
+  const prod = products.rows[0];
+  const title = String(prod.name || 'Вода 18.9л');
   const insertSql = `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method,
-    bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum)
-    VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9,$10,$11,$12)`;
-  for (const row of rows) {
-    await pool.query(insertSql, row);
+    bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9,$10,$11,$12,$13::timestamptz,$13::timestamptz)`;
+
+  for (let dayOffset = 0; dayOffset < DEMO_SEED_CALENDAR_DAYS; dayOffset += 1) {
+    const deliveryDay = isoCalendarDay(new Date(now.getTime() - dayOffset * 86400000));
+    const onDay = await countOrdersOnDeliveryDay(pool, deliveryDay);
+    if (onDay >= DEMO_DAY_MIN_ORDERS) continue;
+
+    const need = Math.max(0, DEMO_ORDERS_PER_DAY - onDay);
+    if (need <= 0) continue;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (let i = 0; i < need; i += 1) {
+        const globalIx = dayOffset * DEMO_ORDERS_PER_DAY + i;
+        const qty = 1 + (globalIx % 6);
+        const unit = demoWaterUnitPrice(qty);
+        const totalSum = Math.round(unit * qty);
+        const itemsJson = JSON.stringify([{ title, qty, unit_price: unit }]);
+        const status = demoStatusForDay(deliveryDay, todayIso, globalIx);
+        const zone = zones[globalIx % zones.length];
+        let driver = drivers[globalIx % drivers.length];
+        if (['new', 'pending_operator', 'cancelled'].includes(status)) driver = null;
+        const payment = payments[globalIx % payments.length];
+        const slot = slots[globalIx % slots.length];
+        const address = addresses[globalIx % addresses.length];
+        const note = noteWithDemoTags(notes[globalIx % notes.length], DEMO_SEED_TAG);
+        const createdAt = new Date(`${deliveryDay}T08:00:00`);
+        const minutes = 8 * 60 + (globalIx * 7) % (11 * 60);
+        createdAt.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+        const createdIso = createdAt.toISOString();
+
+        await client.query(insertSql, [
+          clientIds[globalIx % clientIds.length],
+          address,
+          deliveryDay,
+          slot,
+          status,
+          payment,
+          itemsJson,
+          note,
+          zone,
+          driver,
+          0,
+          totalSum,
+          createdIso,
+        ]);
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -1279,4 +1723,28 @@ function openDatabase() {
   return singleton;
 }
 
-module.exports = { openDatabase, ensureDemoOperatorOrders };
+/** Проверка подключения при старте сервера (лог в консоль). */
+async function checkPostgresConnection() {
+  try {
+    const row = await openDatabase().prepare('SELECT NOW() AS now').get();
+    // eslint-disable-next-line no-console
+    console.log(`[postgres] Подключено: ${row.now}`);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[postgres] Не подключено: ${err.message}`);
+    return false;
+  }
+}
+
+module.exports = {
+  openDatabase,
+  ensureDemoDriverUsers,
+  ensureDemoOperatorAuditEvents,
+  normalizeDemoOrderPayments,
+  syncDemoOrderDrivers,
+  ensureDemoOperatorOrders,
+  syncDemoOperatorOrderClients,
+  checkPostgresConnection,
+  DEMO_DRIVER_ROUTE_LABELS,
+};

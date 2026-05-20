@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
   </head>
   <body class="admin-page">
     <header class="topbar">
@@ -50,20 +51,85 @@
         <section id="adminPaneStats" class="admin-pane" data-pane="stats">
           <section class="admin-card admin-intro-card">
             <h1>Админ-панель</h1>
-            <p>Сводные данные по заказам, товарам и учётным записям.</p>
+            <p>Сводные данные и отчёты по заказам, товарам и учётным записям.</p>
           </section>
 
+          <section class="admin-card admin-stats-toolbar-card">
+            <header class="admin-card-head">
+              <h2>Формирование отчёта</h2>
+              <p class="admin-muted admin-card-desc">
+                Укажите период по дате доставки заказа (если дата доставки не задана — по дате создания). Нажмите
+                «Сформировать отчёт», затем при необходимости скачайте PDF или Excel.
+              </p>
+            </header>
+            <p class="admin-stats-date-hint admin-muted">Формат даты: день.месяц.год. Дата «по» не может быть позже сегодняшнего дня.</p>
+            <div class="admin-stats-toolbar">
+              <label class="admin-stats-field admin-stats-field--date">
+                <span class="admin-stats-field-lbl">Дата с</span>
+                <input
+                  type="date"
+                  id="adminStatsFrom"
+                  class="admin-input admin-date-input"
+                  lang="ru"
+                  title="Не позже сегодняшнего дня"
+                />
+              </label>
+              <label class="admin-stats-field admin-stats-field--date">
+                <span class="admin-stats-field-lbl">Дата по</span>
+                <input
+                  type="date"
+                  id="adminStatsTo"
+                  class="admin-input admin-date-input"
+                  lang="ru"
+                  title="Не позже сегодняшнего дня"
+                />
+              </label>
+              <div class="admin-stats-presets" role="group" aria-label="Быстрый период">
+                <button type="button" class="ghost-btn admin-stats-preset" data-admin-stats-preset="7">7 дней</button>
+                <button type="button" class="ghost-btn admin-stats-preset" data-admin-stats-preset="30">30 дней</button>
+                <button type="button" class="ghost-btn admin-stats-preset" data-admin-stats-preset="month">Текущий месяц</button>
+                <button type="button" class="ghost-btn admin-stats-preset" data-admin-stats-preset="all">Всё время</button>
+              </div>
+              <button type="button" class="solid-btn" id="adminStatsBuildBtn">Сформировать отчёт</button>
+            </div>
+            <div class="admin-stats-export-row">
+              <span class="admin-stats-export-label">Скачать отчёт:</span>
+              <button type="button" class="ghost-btn" id="adminStatsExcelBtn" disabled>Скачать Excel</button>
+              <button type="button" class="ghost-btn" id="adminStatsPdfBtn" disabled>Скачать PDF</button>
+            </div>
+            <p id="adminStatsPeriodMeta" class="admin-stats-period-meta"></p>
+            <p id="adminStatsMsg" class="admin-msg" aria-live="polite"></p>
+          </section>
+
+          <div id="adminStatsReportRoot" class="admin-stats-report-root" hidden>
           <div id="adminStatsGrid" class="admin-stats-grid" aria-live="polite"></div>
 
-          <section class="admin-card">
-            <h2>Заказы по статусам</h2>
-            <div id="adminStatsOrders"></div>
-          </section>
+            <div class="admin-stats-sections">
+              <section class="admin-card admin-stats-block">
+                <h2>Заказы по статусам</h2>
+                <div id="adminStatsOrders" class="admin-stats-table-host"></div>
+              </section>
+              <section class="admin-card admin-stats-block">
+                <h2>Заказы по зонам доставки</h2>
+                <div id="adminStatsZones" class="admin-stats-table-host"></div>
+              </section>
+              <section class="admin-card admin-stats-block">
+                <h2>Заказы по способу оплаты</h2>
+                <div id="adminStatsPayment" class="admin-stats-table-host"></div>
+              </section>
+              <section class="admin-card admin-stats-block">
+                <h2>Заказы по экспедиторам</h2>
+                <div id="adminStatsDrivers" class="admin-stats-table-host"></div>
+              </section>
+              <section class="admin-card admin-stats-block admin-stats-block--wide">
+                <h2>Учётные записи по ролям</h2>
+                <p class="admin-muted admin-stats-snapshot-note">Срез на текущий момент (не зависит от периода заказов).</p>
+                <div id="adminStatsUsers" class="admin-stats-table-host"></div>
+              </section>
+            </div>
+          </div>
 
-          <section class="admin-card">
-            <h2>Учётные записи по ролям</h2>
-            <div id="adminStatsUsers"></div>
-          </section>
+          <section id="adminStatsReportPrint" class="admin-stats-print-sheet" aria-hidden="true"></section>
         </section>
 
         <section id="adminPaneStaff" class="admin-pane admin-pane-staff hidden" data-pane="staff">
@@ -82,14 +148,14 @@
                     <span class="admin-field-label">Имя</span>
                     <span class="admin-char-count" id="adminStaffFirstNameCount">0/60</span>
                   </div>
-                  <input name="first_name" maxlength="60" data-char-count-for="adminStaffFirstNameCount" placeholder="Иван" required />
+                  <input name="first_name" maxlength="60" data-char-count-for="adminStaffFirstNameCount" placeholder="Ева" required />
                 </label>
                 <label class="admin-field">
                   <div class="admin-field-head">
                     <span class="admin-field-label">Фамилия</span>
                     <span class="admin-char-count" id="adminStaffLastNameCount">0/60</span>
                   </div>
-                  <input name="last_name" maxlength="60" data-char-count-for="adminStaffLastNameCount" placeholder="Иванов" />
+                  <input name="last_name" maxlength="60" data-char-count-for="adminStaffLastNameCount" placeholder="Петрова" />
                 </label>
                 <label class="admin-field admin-field-span-2">
                   <div class="admin-field-head">
@@ -166,7 +232,10 @@
           <section class="admin-card">
             <h2>Новый товар</h2>
             <form id="adminCreateProductForm" class="admin-form admin-form-wide admin-form-products">
-              <select name="category_id" id="adminProductCategory" required></select>
+              <label class="admin-field admin-field-span-row">
+                <span class="admin-field-label">Категория</span>
+                <select name="category_id" id="adminProductCategory" required></select>
+              </label>
               <label class="admin-field admin-field-span-row">
                 <div class="admin-field-head">
                   <span class="admin-field-label">Название</span>
@@ -181,46 +250,101 @@
                 </div>
                 <textarea name="description" maxlength="400" data-char-count-for="adminProductCreateDescCount" placeholder="Описание (необязательно)" rows="2"></textarea>
               </label>
-              <input name="price" type="number" min="0" step="1" placeholder="Цена, ₽" required />
-              <input name="stock" type="number" min="0" step="1" placeholder="Остаток" required />
-              <input
-                name="volume_liters"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Объём, л (необяз.)"
-              />
-              <input name="sort_order" type="number" min="0" step="1" placeholder="Сортировка" />
-              <select name="hidden">
-                <option value="0">В каталоге</option>
-                <option value="1">Скрыть</option>
-              </select>
-              <button class="solid-btn" type="submit">Добавить</button>
+              <label class="admin-field">
+                <span class="admin-field-label">Цена, ₽</span>
+                <input
+                  name="price"
+                  type="number"
+                  min="0"
+                  max="1000000"
+                  step="1"
+                  inputmode="numeric"
+                  maxlength="7"
+                  placeholder="до 1 000 000"
+                  required
+                />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field-label">Объём, л</span>
+                <input
+                  name="volume_liters"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.01"
+                  inputmode="decimal"
+                  maxlength="8"
+                  placeholder="необяз., до 1000"
+                />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field-label">Сортировка</span>
+                <input
+                  name="sort_order"
+                  type="number"
+                  min="0"
+                  max="99999"
+                  step="1"
+                  inputmode="numeric"
+                  maxlength="5"
+                  placeholder="0–99999"
+                />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field-label">В каталоге</span>
+                <select name="catalog_mode">
+                  <option value="visible">В каталоге</option>
+                  <option value="preorder">Под заказ</option>
+                  <option value="hidden">Скрыть</option>
+                </select>
+              </label>
+              <button class="solid-btn admin-product-submit-btn" type="submit">Добавить</button>
             </form>
             <p id="adminProductMsg" class="admin-msg"></p>
           </section>
 
-          <section class="admin-card">
+          <section class="admin-card admin-products-catalog-card">
             <h2>Каталог (редактирование)</h2>
-            <div id="adminProductsList" class="admin-product-grid"></div>
+            <p class="admin-muted admin-card-desc admin-products-catalog-desc">
+              Карточки ниже — как на странице каталога у клиента. «Изменить» и «Удалить» — только в админке.
+            </p>
+            <div id="adminProductsList" class="full-catalog-grid admin-product-catalog-grid"></div>
           </section>
         </section>
 
         <section id="adminPaneSettings" class="admin-pane hidden" data-pane="settings">
-          <section class="admin-card">
+          <section class="admin-card admin-settings-sync-card">
             <h2>Настройки сайта</h2>
+            <p class="admin-muted admin-card-desc">
+              Изменения сохраняются на сервер и сразу подставляются на страницах для посетителей. После сохранения
+              откройте ссылку и обновите страницу (Ctrl+F5).
+            </p>
+            <div class="admin-client-preview-links" aria-label="Страницы для проверки">
+              <a href="delivery.html" target="_blank" rel="noopener" class="admin-client-preview-link">Доставка</a>
+              <a href="about.html" target="_blank" rel="noopener" class="admin-client-preview-link">О компании</a>
+              <a href="catalog.html" target="_blank" rel="noopener" class="admin-client-preview-link">Каталог</a>
+              <a href="community.html" target="_blank" rel="noopener" class="admin-client-preview-link">Блог</a>
+            </div>
+          </section>
+          <section class="admin-card">
             <form id="adminSettingsForm" class="admin-form">
               <!-- Режим работы, текст сообщества и слоты хранятся на сервере и подставляются при загрузке; на экране не показываем. -->
               <!-- Лимиты как у Joi managerSettingsSchema -->
               <input type="hidden" name="workLine" maxlength="200" />
               <textarea name="communityIntro" maxlength="500" hidden aria-hidden="true"></textarea>
               <textarea name="deliverySlotsText" maxlength="1500" hidden aria-hidden="true"></textarea>
-              <div class="admin-delivery-faq-block">
-                <h3 class="admin-delivery-faq-title">Раздел вопросов</h3>
+              <section class="admin-settings-section admin-delivery-faq-block" aria-labelledby="adminSettingsFaqHeading">
+                <div class="admin-settings-section-head">
+                  <h3 class="admin-delivery-faq-title" id="adminSettingsFaqHeading">Вопросы на «Доставке»</h3>
+                  <span class="admin-settings-page-badge">delivery.html</span>
+                </div>
                 <p class="admin-delivery-faq-hint">
-                  Ниже — как блок выглядит на странице «Доставка». Измените карточку («Изменить») или добавьте вопрос и подтвердите в окне («Сохранить» / «Добавить в список»), при необходимости нажмите «Сохранить настройки» внизу. Обновите страницу «Доставка», чтобы проверить текст.
+                  Блок FAQ внизу страницы «Доставка». Сохраните в окне карточки или кнопкой «Сохранить блок на сайте».
                 </p>
                 <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminFaqBlockSave" class="solid-btn admin-delivery-faq-toolbar-primary">
+                    Сохранить блок на сайте
+                  </button>
                   <button type="button" id="adminDeliveryFaqAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
                     + Добавить вопрос
                   </button>
@@ -237,12 +361,15 @@
                     </div>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              <div class="admin-delivery-coverage-block admin-delivery-faq-block">
-                <h3 class="admin-delivery-faq-title">Блок «Зоны покрытия» на странице «Доставка»</h3>
+              <section class="admin-settings-section admin-delivery-coverage-block admin-delivery-faq-block" aria-labelledby="adminSettingsCoverageHeading">
+                <div class="admin-settings-section-head">
+                  <h3 class="admin-delivery-faq-title" id="adminSettingsCoverageHeading">Зоны покрытия</h3>
+                  <span class="admin-settings-page-badge">delivery.html</span>
+                </div>
                 <p class="admin-delivery-faq-hint">
-                  Отредактируйте заголовок и карточки ниже. Сохраните в окне карточки («Сохранить») или голубой кнопкой «Сохранить настройки» в самом низу страницы настроек — без этого изменения не попадут на сайт.
+                  Карточки справа от карты на странице «Доставка». Сохраните заголовок и карточки кнопкой «Сохранить блок на сайте».
                 </p>
                 <label class="admin-field admin-field-span-row">
                   <div class="admin-field-head">
@@ -260,27 +387,42 @@
                   />
                 </label>
                 <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminCoverageBlockSave" class="solid-btn admin-delivery-faq-toolbar-primary">
+                    Сохранить блок на сайте
+                  </button>
                   <button type="button" id="adminCoverageCardAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
                     + Добавить карточку
                   </button>
                 </div>
                 <div id="adminCoverageCardsNav" class="admin-site-poll-nav" aria-label="Карточки блока зоны покрытия"></div>
-              </div>
+              </section>
 
-              <div class="admin-about-certs-block admin-delivery-faq-block">
-                <h3 class="admin-delivery-faq-title">Сертификаты на странице «О компании»</h3>
+              <section class="admin-settings-section admin-about-certs-block admin-delivery-faq-block" aria-labelledby="adminSettingsCertsHeading">
+                <div class="admin-settings-section-head">
+                  <h3 class="admin-delivery-faq-title" id="adminSettingsCertsHeading">Сертификаты</h3>
+                  <span class="admin-settings-page-badge">about.html</span>
+                </div>
                 <p class="admin-delivery-faq-hint">
-                  Карточки блока «Наши сертификаты» на странице «О компании». Добавляйте и правьте записи ниже: для изображения выберите файл в окне (при добавлении без файла подставится образец по умолчанию). Сохраните в окне или кнопкой «Сохранить настройки» внизу.
+                  Блок «Наши сертификаты» на странице «О компании». Для картинки выберите файл в окне. Сохраните в окне
+                  или кнопкой «Сохранить блок на сайте».
                 </p>
                 <div class="admin-delivery-faq-toolbar">
+                  <button type="button" id="adminAboutCertsBlockSave" class="solid-btn admin-delivery-faq-toolbar-primary">
+                    Сохранить блок на сайте
+                  </button>
                   <button type="button" id="adminAboutCertAdd" class="ghost-btn admin-delivery-faq-toolbar-secondary">
                     + Добавить сертификат
                   </button>
                 </div>
                 <div id="adminAboutCertsNav" class="admin-site-poll-nav" aria-label="Сертификаты для страницы О компании"></div>
-              </div>
+              </section>
 
-              <button class="solid-btn" type="submit">Сохранить настройки</button>
+              <div class="admin-settings-submit-bar">
+                <button class="solid-btn admin-settings-submit-all" type="submit">Сохранить все настройки</button>
+                <p class="admin-muted admin-settings-submit-note">
+                  Полное сохранение всех блоков сразу. Для одного раздела удобнее кнопки «Сохранить блок на сайте» выше.
+                </p>
+              </div>
             </form>
             <p id="adminSettingsMsg" class="admin-msg"></p>
           </section>
@@ -648,35 +790,96 @@
 
       <div id="adminProductEditModal" class="admin-edit-modal" hidden aria-hidden="true">
         <div class="admin-edit-modal-backdrop" data-close-product-modal="true"></div>
-        <div class="admin-edit-modal-card" role="dialog" aria-modal="true" aria-labelledby="adminProductEditTitle">
+        <div
+          class="admin-edit-modal-card admin-product-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminProductEditTitle"
+        >
           <h3 id="adminProductEditTitle">Редактирование товара</h3>
-          <form id="adminProductEditForm" class="admin-form">
+          <form id="adminProductEditForm" class="admin-form admin-form-products admin-product-edit-form">
             <input type="hidden" name="product_id" id="adminProductEditId" />
-            <label>Категория
+            <label class="admin-field admin-field-span-row">
+              <span class="admin-field-label">Категория</span>
               <select name="category_id" id="adminProductEditCategory" required></select>
             </label>
-            <label class="admin-field-span-row">
+            <label class="admin-field admin-field-span-row">
               <div class="admin-field-head">
                 <span class="admin-field-label">Название</span>
                 <span class="admin-char-count" id="adminProductEditNameCount">0/180</span>
               </div>
-              <input name="name" id="adminProductEditName" maxlength="180" data-char-count-for="adminProductEditNameCount" required />
+              <input
+                name="name"
+                id="adminProductEditName"
+                maxlength="180"
+                data-char-count-for="adminProductEditNameCount"
+                placeholder="Название"
+                required
+              />
             </label>
-            <label class="admin-field-span-row">
+            <label class="admin-field admin-field-span-row">
               <div class="admin-field-head">
                 <span class="admin-field-label">Описание</span>
                 <span class="admin-char-count" id="adminProductEditDescCount">0/400</span>
               </div>
-              <textarea name="description" id="adminProductEditDescription" maxlength="400" data-char-count-for="adminProductEditDescCount" rows="2"></textarea>
+              <textarea
+                name="description"
+                id="adminProductEditDescription"
+                maxlength="400"
+                data-char-count-for="adminProductEditDescCount"
+                placeholder="Описание (необязательно)"
+                rows="3"
+              ></textarea>
             </label>
-            <label>Цена, ₽<input name="price" id="adminProductEditPrice" type="number" min="0" step="1" required /></label>
-            <label>Остаток<input name="stock" id="adminProductEditStock" type="number" min="0" step="1" required /></label>
-            <label>Объём, л (необяз.)<input name="volume_liters" id="adminProductEditVolume" type="number" min="0" step="0.01" /></label>
-            <label>Сортировка<input name="sort_order" id="adminProductEditSort" type="number" min="0" step="1" /></label>
-            <label>Видимость
-              <select name="hidden" id="adminProductEditHidden">
-                <option value="0">В каталоге</option>
-                <option value="1">Скрыть</option>
+            <label class="admin-field">
+              <span class="admin-field-label">Цена, ₽</span>
+              <input
+                name="price"
+                id="adminProductEditPrice"
+                type="number"
+                min="0"
+                max="1000000"
+                step="1"
+                inputmode="numeric"
+                maxlength="7"
+                placeholder="до 1 000 000"
+                required
+              />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field-label">Объём, л</span>
+              <input
+                name="volume_liters"
+                id="adminProductEditVolume"
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                inputmode="decimal"
+                maxlength="8"
+                placeholder="необяз., до 1000"
+              />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field-label">Сортировка</span>
+              <input
+                name="sort_order"
+                id="adminProductEditSort"
+                type="number"
+                min="0"
+                max="99999"
+                step="1"
+                inputmode="numeric"
+                maxlength="5"
+                placeholder="0–99999"
+              />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field-label">В каталоге</span>
+              <select name="catalog_mode" id="adminProductEditCatalogMode">
+                <option value="visible">В каталоге</option>
+                <option value="preorder">Под заказ</option>
+                <option value="hidden">Скрыть</option>
               </select>
             </label>
             <div class="admin-edit-modal-actions">
@@ -709,7 +912,14 @@
       </div>
     </div>
 
+    <script src="mobile-nav.js?v=20260519mobile"></script>
     <script src="api-client.js"></script>
-    <script src="admin.js"></script>
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script src="admin.js?v=20260519login"></script>
   </body>
 </html>

@@ -71,25 +71,49 @@
     });
   }
 
-  function orderStatusLabel(status) {
-    const map = {
-      new: 'Новый',
-      pending_operator: 'Требует оператора',
-      processing: 'В обработке',
-      confirmed: 'Подтвержден',
-      courier: 'Передан курьеру',
-      on_way: 'В пути',
-      delivered: 'Доставлен',
-      cancelled: 'Отменен',
-    };
-    return map[String(status || '')] || String(status || '—');
+  function formatDeliverySlotClient(raw) {
+    const s = String(raw || '')
+      .trim()
+      .replace(/\u2013|\u2014|\u2212/g, '-');
+    const m = /(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/.exec(s);
+    if (m) return `${m[1]}–${m[2]}`;
+    return s || '';
+  }
+
+  /** Подпись статуса в личном кабинете клиента (как видит этапы обработки оператором). */
+  function orderStatusLabel(order) {
+    const st = String(order?.status || '').toLowerCase();
+    const slot = formatDeliverySlotClient(order?.delivery_slot);
+    if (st === 'delivered') return 'Доставлен';
+    if (st === 'cancelled') return 'Отменён';
+    if (['processing', 'courier', 'on_way'].includes(st)) {
+      return slot ? `В пути · доставка ${slot}` : 'В пути';
+    }
+    if (st === 'confirmed') return 'Подтверждён';
+    return 'В обработке';
+  }
+
+  function orderStatusBadgeClass(order) {
+    const st = String(order?.status || '').toLowerCase();
+    if (['processing', 'courier', 'on_way'].includes(st)) return 'on_way';
+    if (st === 'confirmed') return 'confirmed';
+    if (st === 'delivered') return 'delivered';
+    if (st === 'cancelled') return 'cancelled';
+    return 'new';
+  }
+
+  function earliestDeliveryDateIso() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   function parseItems(itemsJson) {
     try {
-      const arr = JSON.parse(itemsJson || '[]');
-      if (!Array.isArray(arr)) return [];
-      return arr;
+      const parsed = JSON.parse(itemsJson || '[]');
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.lines)) return parsed.lines;
+      return [];
     } catch {
       return [];
     }
@@ -125,14 +149,21 @@
       ? currentOrders
           .map((order) => {
             const items = parseItems(order.items_json).map((item) => `${item.qty} × ${item.title}`).join(', ');
-            const editable = ['processing', 'confirmed'].includes(String(order.status || ''));
+            const editable = ['new', 'pending_operator', 'confirmed'].includes(String(order.status || ''));
+            const statusText = orderStatusLabel(order);
+            const badgeClass = orderStatusBadgeClass(order);
+            const slotLine = formatDeliverySlotClient(order.delivery_slot);
+            const delRu = order.delivery_date
+              ? String(order.delivery_date).split('-').reverse().join('.')
+              : '—';
             return `
               <article class="cabinet-full-order">
                 <div class="cabinet-full-order-head">
                   <strong>${order.id}</strong>
                   <span>${formatDate(order.created_at)}</span>
                 </div>
-                <p>Статус: <span class="cabinet-status-badge is-${String(order.status || '').toLowerCase()}">${orderStatusLabel(order.status)}</span></p>
+                <p>Статус: <span class="cabinet-status-badge is-${badgeClass}">${statusText}</span></p>
+                <p>Доставка: <strong>${delRu}</strong>${slotLine ? ` · интервал ${slotLine}` : ''}</p>
                 <p>Состав: ${items || '—'}</p>
                 <p>Адрес: ${order.address || '—'}</p>
                 <p>Итого: <strong>${Number(order.total_sum || 0)} ₽</strong> · Списано бонусов: ${Number(order.bonuses_used || 0)} · Начислено: ${Number(
@@ -145,7 +176,7 @@
                           <input type="text" name="address" maxlength="180" value="${order.address || ''}" />
                         </label>
                         <label>Дата доставки
-                          <input type="date" name="delivery_date" value="${order.delivery_date || ''}" />
+                          <input type="date" name="delivery_date" min="${earliestDeliveryDateIso()}" value="${order.delivery_date || ''}" />
                         </label>
                         <label>Интервал
                           <input type="text" name="delivery_slot" maxlength="64" value="${order.delivery_slot || ''}" />
@@ -205,6 +236,9 @@
     }
     renderProfile(currentUser);
     await reloadOrders();
+    window.setInterval(() => {
+      void reloadOrders();
+    }, 15000);
   }
 
   if (logoutBtn instanceof HTMLButtonElement) {
