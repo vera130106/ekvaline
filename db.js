@@ -265,6 +265,16 @@ async function migrate(pool) {
   await ensureLegacyClientsOrdersFk(pool);
   await ensureDeclarativeForeignKeysPublic(pool);
   await ensurePublicRussianTableComments(pool);
+  await ensureDeliveryAvailabilitySetting(pool);
+}
+
+/** Ключ для закрытия дней/интервалов приёма заказов (панель оператора). */
+async function ensureDeliveryAvailabilitySetting(pool) {
+  await pool.query(
+    `INSERT INTO site_settings (key, value) VALUES ('deliveryAvailability', $1)
+     ON CONFLICT (key) DO NOTHING`,
+    [JSON.stringify({ closedDays: [], closedSlots: [] })]
+  );
 }
 
 /** Метка в учётке водителя = точное совпадение с полем orders.driver из панели оператора. */

@@ -1170,14 +1170,19 @@ app.get(
   requireAuth,
   requireRole('operator', 'manager', 'admin'),
   asyncHandler(async (_req, res) => {
-    const record = await loadDeliveryAvailabilityRecord();
-    res.set('Cache-Control', 'no-store');
-    res.json({
-      availability: record.availability,
-      lastChange: record.meta,
-      slotDefs: deliveryAvailability.BOOKING_SLOT_DEFS,
-      days: deliveryAvailability.enumerateBookingDays(30),
-    });
+    try {
+      const record = await loadDeliveryAvailabilityRecord();
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        availability: record.availability,
+        lastChange: record.meta,
+        slotDefs: deliveryAvailability.BOOKING_SLOT_DEFS,
+        days: deliveryAvailability.enumerateBookingDays(30),
+      });
+    } catch (err) {
+      console.error('[delivery-availability GET]', err);
+      res.status(500).json({ error: 'Не удалось загрузить настройки приёма заказов.' });
+    }
   })
 );
 

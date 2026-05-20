@@ -9819,6 +9819,21 @@ a.is-manager-locked {
   color: #607d8b;
 }
 
+body.opx-operator-fullscreen main.opx-shell > .opx-topbar,
+body.opx-operator-fullscreen main.opx-shell > .opx-controls,
+body.opx-operator-fullscreen main.opx-shell > .opx-row-legend,
+body.opx-operator-fullscreen main.opx-shell > .opx-grid-wrap,
+body.opx-operator-fullscreen main.opx-shell > .opx-footer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body.opx-operator-fullscreen .opx-zone-map-overlay,
+body.opx-operator-fullscreen .opx-settings-overlay,
+body.opx-operator-fullscreen .opx-reports-overlay {
+  top: 0;
+}
+
 .opx-zone-map-overlay {
   position: fixed;
   top: 54px;

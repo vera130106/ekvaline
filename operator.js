@@ -2032,6 +2032,7 @@
       })();
     };
     window.requestAnimationFrame(() => window.requestAnimationFrame(showMap));
+    syncOperatorFullscreenBodyClass();
   }
 
   function closeZoneMapOverlay() {
@@ -2056,6 +2057,8 @@
     if (ZONE_MAP_CANVAS instanceof HTMLElement) {
       ZONE_MAP_CANVAS.innerHTML = '';
     }
+    syncOperatorFullscreenBodyClass();
+    refreshBodyBackdropClass();
   }
 
   function syncEmbeddedReportsNav(activeSection) {
@@ -2076,6 +2079,7 @@
     REPORTS_OVERLAY.hidden = true;
     TAB_REPORTS?.classList.remove('is-active');
     if (!state.zoneMapOpen && !state.settingsOpen) TAB_ORDERS?.classList.add('is-active');
+    syncOperatorFullscreenBodyClass();
     refreshBodyBackdropClass();
   }
 
@@ -2114,6 +2118,21 @@
     { key: '17:00-21:00', label: '17:00–21:00' },
     { key: '09:00-17:00', label: 'Для организаций: 09:00–17:00' },
   ];
+
+  function enumerateSettingsBookingDays(count = 30) {
+    const out = [];
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const n = Math.min(Math.max(Number(count) || 30, 1), 90);
+    for (let i = 0; i < n; i += 1) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      out.push(`${y}-${m}-${day}`);
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
 
   let settingsSlotDefs = BOOKING_SLOT_UI.slice();
   let settingsDaysList = [];
@@ -2212,36 +2231,80 @@
       .join('');
   }
 
+  function applySettingsAvailabilityPayload(payload) {
+    const av = payload?.availability;
+    settingsAvailabilityDraft = {
+      closedDays: Array.isArray(av?.closedDays) ? av.closedDays.slice() : [],
+      closedSlots: Array.isArray(av?.closedSlots) ? av.closedSlots.map((r) => ({ ...r })) : [],
+    };
+    if (Array.isArray(payload?.slotDefs) && payload.slotDefs.length) {
+      settingsSlotDefs = payload.slotDefs.map((s) => ({
+        key: String(s.key || ''),
+        label: String(s.label || s.key || ''),
+      }));
+    } else {
+      settingsSlotDefs = BOOKING_SLOT_UI.slice();
+    }
+    const days = Array.isArray(payload?.days) ? payload.days : [];
+    settingsDaysList = days.length ? days.slice() : enumerateSettingsBookingDays(30);
+    settingsLastChangeMeta = payload?.lastChange || null;
+    renderSettingsDaysList();
+    renderSettingsLastChange(settingsLastChangeMeta);
+    if (SETTINGS_STATUS instanceof HTMLElement) SETTINGS_STATUS.textContent = '';
+  }
+
+  function settingsLoadErrorHtml(message) {
+    const msg = escapeHtml(String(message || 'Не удалось загрузить настройки'));
+    return `<p class="opx-settings-empty">${msg} <a href="index.html" data-auth-login>Войти с главной</a></p>`;
+  }
+
   async function loadSettingsAvailability() {
     if (!(SETTINGS_DAYS_LIST instanceof HTMLElement)) return;
     SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">Загрузка…</p>';
     const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
     if (!api) {
-      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">API недоступен</p>';
+      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">API недоступен — откройте сайт через сервер (npm start).</p>';
       return;
     }
     try {
+      await hydrateStaffFromServerSession();
       const response = await api.json('/api/orders/operator/delivery-availability', { method: 'GET' });
-      if (!response.ok) throw new Error('load failed');
-      const av = response.data?.availability;
-      settingsAvailabilityDraft = {
-        closedDays: Array.isArray(av?.closedDays) ? av.closedDays.slice() : [],
-        closedSlots: Array.isArray(av?.closedSlots) ? av.closedSlots.map((r) => ({ ...r })) : [],
-      };
-      if (Array.isArray(response.data?.slotDefs) && response.data.slotDefs.length) {
-        settingsSlotDefs = response.data.slotDefs.map((s) => ({
-          key: String(s.key || ''),
-          label: String(s.label || s.key || ''),
-        }));
+      if (response.ok && response.data) {
+        applySettingsAvailabilityPayload(response.data);
+        return;
       }
-      settingsDaysList = Array.isArray(response.data?.days) ? response.data.days.slice() : [];
-      settingsLastChangeMeta = response.data?.lastChange || null;
-      renderSettingsDaysList();
-      renderSettingsLastChange(settingsLastChangeMeta);
-      if (SETTINGS_STATUS instanceof HTMLElement) SETTINGS_STATUS.textContent = '';
+      if ((response.status === 401 || response.status === 403) && isOperatorUiDevHost()) {
+        const pub = await api.json('/api/public/delivery-availability', { method: 'GET' });
+        if (pub.ok && pub.data) {
+          applySettingsAvailabilityPayload({
+            availability: pub.data,
+            slotDefs: BOOKING_SLOT_UI,
+            days: enumerateSettingsBookingDays(30),
+            lastChange: null,
+          });
+          if (SETTINGS_STATUS instanceof HTMLElement) {
+            SETTINGS_STATUS.textContent =
+              'Просмотр без входа (localhost). Для сохранения войдите с главной страницы.';
+          }
+          return;
+        }
+      }
+      const serverErr =
+        typeof response?.data?.error === 'string' && response.data.error.trim()
+          ? response.data.error.trim()
+          : '';
+      let hint = serverErr || 'Не удалось загрузить настройки';
+      if (response.status === 401 || response.status === 403) {
+        hint = 'Сессия истекла или нет прав. Выйдите и войдите снова с главной страницы.';
+      } else if (response.status >= 500) {
+        hint = 'Ошибка сервера при загрузке настроек. Проверьте, что PostgreSQL запущен.';
+      }
+      SETTINGS_DAYS_LIST.innerHTML = settingsLoadErrorHtml(hint);
     } catch (e) {
       console.error(e);
-      SETTINGS_DAYS_LIST.innerHTML = '<p class="opx-settings-empty">Не удалось загрузить настройки</p>';
+      SETTINGS_DAYS_LIST.innerHTML = settingsLoadErrorHtml(
+        'Нет связи с сервером. Запустите npm start и обновите страницу.'
+      );
     }
   }
 
@@ -2315,6 +2378,14 @@
     });
   }
 
+  function syncOperatorFullscreenBodyClass() {
+    const on =
+      state.settingsOpen ||
+      state.reportsOpen ||
+      state.zoneMapOpen;
+    document.body.classList.toggle('opx-operator-fullscreen', on);
+  }
+
   function openSettingsOverlay() {
     if (!(SETTINGS_OVERLAY instanceof HTMLElement)) return;
     closeOperatorModalsBlockingFullScreenUi();
@@ -2327,6 +2398,7 @@
     TAB_MAP?.classList.remove('is-active');
     TAB_REPORTS?.classList.remove('is-active');
     syncSettingsTabsNav('settings');
+    syncOperatorFullscreenBodyClass();
     void loadSettingsAvailability();
     refreshBodyBackdropClass();
   }
@@ -2337,6 +2409,7 @@
     SETTINGS_OVERLAY.hidden = true;
     TAB_SETTINGS?.classList.remove('is-active');
     if (!state.zoneMapOpen && !state.reportsOpen && !state.settingsOpen) TAB_ORDERS?.classList.add('is-active');
+    syncOperatorFullscreenBodyClass();
     refreshBodyBackdropClass();
   }
 
@@ -3435,6 +3508,8 @@
     TAB_ORDERS?.classList.remove('is-active');
     setReportsPeriodDays(30);
     syncEmbeddedReportsNav('reports');
+    syncOperatorFullscreenBodyClass();
+    refreshBodyBackdropClass();
   }
 
   function setModalValue(el, value) {
@@ -6934,7 +7009,8 @@
       const sw = String(btn.getAttribute('data-opx-reports-switch') || '');
       if (sw === 'orders') switchToOrdersView();
       else if (sw === 'map') openZoneMapOverlay();
-      else if (sw === 'reports') syncEmbeddedReportsNav('reports');
+      else if (sw === 'reports') openReportsOverlay();
+      else if (sw === 'settings') openSettingsOverlay();
     });
     CREATE_ORDER_BTN?.addEventListener('click', () => openCreateOrderModal());
     ORDERS_EXPORT_BTN?.addEventListener('click', () => void exportOrdersPdfAndPrint());
