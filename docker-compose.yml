@@ -33,6 +33,14 @@ services:
       DATABASE_URL: postgres://ekvaline:ekvaline@db:5432/ekvaline
       SESSION_SECRET: ${SESSION_SECRET:-docker-local-dev-secret-min-32-chars!!}
       YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+      YANDEX_GEOCODER_API_KEY: ${YANDEX_GEOCODER_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-1}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
     depends_on:
       db:
         condition: service_healthy

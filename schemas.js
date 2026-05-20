@@ -40,6 +40,30 @@ const passwordSchema = Joi.string()
       'Пароль: нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).',
   });
 
+const PSEUDO_EMAIL_SUFFIXES = ['@phone.ekvaline.local', '@ekvaline.local'];
+
+function isPseudoClientEmail(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return true;
+  return PSEUDO_EMAIL_SUFFIXES.some((suffix) => e.endsWith(suffix));
+}
+
+const realClientEmailSchema = Joi.string()
+  .trim()
+  .lowercase()
+  .max(EMAIL_MAX)
+  .email({ tlds: { allow: false } })
+  .custom((value, helpers) => {
+    if (isPseudoClientEmail(value)) {
+      return helpers.message({ custom: 'Укажите ваш настоящий email — служебные адреса не принимаются.' });
+    }
+    return value;
+  })
+  .messages({
+    'string.email': 'Укажите корректный email.',
+    'string.max': `Email: не более ${EMAIL_MAX} символов.`,
+  });
+
 const registerSchema = Joi.object({
   first_name: Joi.string()
     .trim()
@@ -61,23 +85,57 @@ const registerSchema = Joi.object({
       'string.max': `Фамилия: не более ${NAME_MAX} символов.`,
       'string.pattern.base': 'Фамилия: только буквы, пробел, дефис и апостроф.',
     }),
-  email: Joi.string()
-    .trim()
-    .lowercase()
-    .max(EMAIL_MAX)
-    .email({ tlds: { allow: false } })
-    .required()
-    .messages({
-      'string.email': 'Укажите корректный email.',
-      'string.max': `Email: не более ${EMAIL_MAX} символов.`,
-    }),
+  email: realClientEmailSchema.required(),
   phone: ruPhoneSchema.required(),
   password: passwordSchema.required(),
+});
+
+const clientLoginSchema = Joi.object({
+  email: realClientEmailSchema.required(),
+  password: Joi.string().min(1).max(128).required(),
 });
 
 const loginSchema = Joi.object({
   credential: Joi.string().trim().min(3).max(EMAIL_MAX + 5).required(),
   password: Joi.string().min(1).max(128).required(),
+});
+
+const forgotPasswordSchema = Joi.object({
+  email: realClientEmailSchema.required(),
+});
+
+const resetPasswordSchema = Joi.object({
+  token: Joi.string().trim().min(16).max(128).required(),
+  password: passwordSchema.required(),
+});
+
+const authCodeSchema = Joi.string()
+  .trim()
+  .pattern(/^\d{6}$/)
+  .required()
+  .messages({
+    'string.pattern.base': 'Код: 6 цифр.',
+    'any.required': 'Введите код из письма.',
+  });
+
+const confirmEmailCodeSchema = Joi.object({
+  code: authCodeSchema,
+});
+
+const changePasswordWithCodeSchema = Joi.object({
+  code: authCodeSchema,
+  password: passwordSchema.required(),
+});
+
+const resetPasswordByEmailSchema = Joi.object({
+  email: realClientEmailSchema.required(),
+  code: authCodeSchema,
+  password: passwordSchema.required(),
+});
+
+const checkPasswordResetByEmailSchema = Joi.object({
+  email: realClientEmailSchema.required(),
+  code: authCodeSchema,
 });
 
 const profileSchema = Joi.object({
@@ -92,12 +150,7 @@ const profileSchema = Joi.object({
     .max(NAME_MAX)
     .allow('')
     .pattern(/^[A-Za-zА-Яа-яЁё\s\-']*$/),
-  email: Joi.string()
-    .trim()
-    .lowercase()
-    .max(EMAIL_MAX)
-    .email({ tlds: { allow: false } })
-    .required(),
+  email: realClientEmailSchema.required(),
   phone: ruPhoneSchema.required(),
 });
 
@@ -372,13 +425,46 @@ const sitePollSchema = Joi.object({
   options: Joi.array().items(sitePollOptionSchema).min(2).max(12).required(),
 });
 
+const pollVoteSchema = Joi.object({
+  poll_id: Joi.string().trim().min(1).max(56).required(),
+  option_id: Joi.string().trim().min(1).max(48).required(),
+});
+
+const blogHydrationPollPutSchema = Joi.object({
+  poll: Joi.object({
+    id: Joi.string().trim().min(1).max(56).required(),
+    title: Joi.string().trim().max(40).allow('').required(),
+    question: Joi.string().trim().min(3).max(120).required(),
+    active: Joi.boolean().required(),
+    options: Joi.array()
+      .items(
+        Joi.object({
+          id: Joi.string().trim().min(1).max(48).required(),
+          text: Joi.string().trim().min(1).max(60).required(),
+        })
+      )
+      .min(2)
+      .max(8)
+      .required(),
+  })
+    .allow(null)
+    .required(),
+});
+
 /** Сертификаты на странице «О компании». */
+const aboutCertificatePdfPathSchema = Joi.string()
+  .trim()
+  .max(280)
+  .pattern(/^(assets\/|\/assets\/)[^?\s#]+\.pdf$/i)
+  .allow('');
+
 const aboutCertificateItemSchema = Joi.object({
   image: Joi.string().trim().min(3).max(600000).required(),
   alt: Joi.string().trim().min(1).max(200).required(),
   badge: Joi.string().trim().max(80).allow('').required(),
   title: Joi.string().trim().min(1).max(120).required(),
   description: Joi.string().trim().min(1).max(400).required(),
+  pdf: aboutCertificatePdfPathSchema.optional(),
 });
 
 /** Карточки справа от карты на странице «Доставка» (блок «Зоны покрытия»). */
@@ -424,6 +510,18 @@ const deliveryAddressPatchSchema = Joi.object({
   sort_order: Joi.number().integer().min(0).max(99999).optional(),
   active: Joi.number().valid(0, 1).optional(),
   notes: Joi.string().trim().max(300).allow('').optional(),
+}).min(1);
+
+const clientSavedAddressCreateSchema = Joi.object({
+  label: Joi.string().trim().max(80).allow('').default(''),
+  address_line: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
+  is_default: Joi.boolean().optional(),
+});
+
+const clientSavedAddressPatchSchema = Joi.object({
+  label: Joi.string().trim().max(80).allow('').optional(),
+  address_line: Joi.string().trim().min(5).max(ADDRESS_MAX).optional(),
+  is_default: Joi.boolean().optional(),
 }).min(1);
 
 const deliveryZonePatchSchema = Joi.object({
@@ -525,7 +623,14 @@ module.exports = {
   validate,
   waterCalcQuerySchema,
   registerSchema,
+  clientLoginSchema,
   loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  confirmEmailCodeSchema,
+  changePasswordWithCodeSchema,
+  resetPasswordByEmailSchema,
+  checkPasswordResetByEmailSchema,
   profileSchema,
   feedbackSchema,
   adminUserPatchSchema,
@@ -541,6 +646,8 @@ module.exports = {
   deliveryFaqItemSchema,
   sitePollSchema,
   sitePollOptionSchema,
+  pollVoteSchema,
+  blogHydrationPollPutSchema,
   aboutCertificateItemSchema,
   deliveryCoverageCardSchema,
   deliveryCoveragePanelSchema,
@@ -548,9 +655,13 @@ module.exports = {
   aboutCertificatesPanelSchema,
   deliveryAddressCreateSchema,
   deliveryAddressPatchSchema,
+  clientSavedAddressCreateSchema,
+  clientSavedAddressPatchSchema,
   deliveryZonePatchSchema,
   operatorDeliveryAvailabilitySchema,
   passwordSchema,
+  isPseudoClientEmail,
+  realClientEmailSchema,
   EMAIL_MAX,
   NAME_MAX,
   MSG_MAX,

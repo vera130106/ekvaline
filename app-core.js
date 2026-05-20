@@ -184,10 +184,32 @@
     markNotificationRead(id) {
       const list = this.getNotifications().map((n) => (n.id === id ? { ...n, read: true } : n));
       writeJson(KEYS.notifs, list);
+      if (typeof window.EkvalineNotificationsSync?.markReadOnServer === 'function') {
+        void window.EkvalineNotificationsSync.markReadOnServer(id);
+      }
     },
     markAllNotificationsRead() {
       const list = this.getNotifications().map((n) => ({ ...n, read: true }));
       writeJson(KEYS.notifs, list);
+      if (typeof window.EkvalineNotificationsSync?.markAllOnServer === 'function') {
+        void window.EkvalineNotificationsSync.markAllOnServer();
+      }
+    },
+    mergeServerNotifications(serverRows) {
+      const presets = this.getNotifications().filter((n) => isRegistrationWelcomeNotification(n));
+      const fromServer = (Array.isArray(serverRows) ? serverRows : []).map((s) => ({
+        id: `srv_${s.id}`,
+        serverId: s.id,
+        title: s.title || '',
+        body: s.body || '',
+        read: !!s.read,
+        createdAt: s.created_at || new Date().toISOString(),
+        type: s.type || 'order',
+        orderId: s.order_id != null ? Number(s.order_id) : null,
+      }));
+      const merged = [...fromServer, ...presets];
+      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      writeJson(KEYS.notifs, merged.slice(0, 60));
     },
     unreadCount() {
       return this.getNotifications().filter((n) => !n.read).length;

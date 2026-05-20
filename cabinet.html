@@ -11,9 +11,9 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260521client" />
   </head>
-  <body class="cabinet-page-full">
+  <body class="client-site cabinet-page-full">
     <header class="topbar">
       <div class="container topbar-inner">
         <a class="brand" href="index.html" aria-label="ЭкваЛайн">
@@ -49,49 +49,214 @@
           <button type="button" class="cabinet-logout cabinet-full-logout-btn" id="cabinetFullLogoutBtn">Выйти</button>
         </div>
         <div class="cabinet-full-grid">
-          <section class="cabinet-full-card">
-            <h2>Профиль</h2>
-            <form id="cabinetFullProfileForm" class="cabinet-full-form" novalidate>
-              <label>Имя
-                <input type="text" name="name" maxlength="40" />
+          <section class="cabinet-full-card cabinet-full-card-wide cabinet-profile-card" id="cabinet-profile">
+            <h2>Контактная информация</h2>
+            <p class="cabinet-full-muted">Имя, email и телефон сохраняются в системе учёта и используются для связи по заказам.</p>
+            <div class="cabinet-profile-split">
+              <div class="cabinet-profile-col">
+                <form id="cabinetFullProfileForm" class="cabinet-full-form" novalidate>
+                  <label>Имя
+                    <input type="text" name="name" maxlength="40" />
+                  </label>
+                  <label>Email
+                    <input type="email" name="email" />
+                  </label>
+                  <label>Телефон
+                    <input type="tel" name="phone" maxlength="18" />
+                  </label>
+                  <p class="cabinet-full-error" id="cabinetFullProfileError"></p>
+                  <p class="cabinet-full-success" id="cabinetFullProfileSuccess"></p>
+                  <button type="submit" class="solid-btn">Сохранить профиль</button>
+                </form>
+              </div>
+
+            <div class="cabinet-profile-password-wrap">
+              <div class="cabinet-password-subsection" id="cabinet-password-blocked">
+                <h3>Смена пароля</h3>
+                <p class="cabinet-password-blocked-text">
+                  Чтобы сменить пароль, сначала подтвердите email в блоке «Подтверждение email» ниже. После подтверждения
+                  здесь появится пошаговая смена пароля.
+                </p>
+                <button type="button" class="ghost-btn" id="cabinetGoVerifyEmailBtn">Перейти к подтверждению email</button>
+              </div>
+
+              <div class="cabinet-password-subsection" id="cabinet-change-password" hidden>
+                <h3>Смена пароля</h3>
+                <p class="cabinet-security-note" id="cabinetSecurityEmailNote">
+                  Шаг 1 — код на email. Шаг 2 — проверка кода. Шаг 3 — новый пароль. Действует только последний отправленный код.
+                </p>
+
+                <div class="cabinet-password-step" id="cabinetPasswordStepSend">
+                  <p class="cabinet-step-label">Шаг 1. Код на email</p>
+                  <button type="button" class="ghost-btn cabinet-btn-loading" id="cabinetSendPasswordCodeBtn">
+                    <span class="cabinet-btn-label">Отправить код на email</span>
+                    <span class="cabinet-btn-spinner" hidden aria-hidden="true"></span>
+                  </button>
+                </div>
+
+                <p class="cabinet-full-error" id="cabinetPasswordError"></p>
+                <p class="cabinet-full-success" id="cabinetPasswordSuccess"></p>
+                <div class="cabinet-dev-code-box" id="cabinetPasswordDevCode" hidden></div>
+
+                <form
+                  id="cabinetVerifyPasswordCodeForm"
+                  class="cabinet-full-form cabinet-auth-code-form cabinet-password-step"
+                  hidden
+                  novalidate
+                >
+                  <p class="cabinet-step-label">Шаг 2. Проверка кода</p>
+                  <label>Код из письма
+                    <input
+                      type="text"
+                      name="code"
+                      class="cabinet-auth-code-input"
+                      inputmode="numeric"
+                      autocomplete="one-time-code"
+                      maxlength="6"
+                      pattern="[0-9]{6}"
+                      placeholder="000000"
+                    />
+                  </label>
+                  <button type="submit" class="solid-btn cabinet-btn-loading" id="cabinetCheckPasswordCodeBtn">
+                    <span class="cabinet-btn-label">Проверить код</span>
+                    <span class="cabinet-btn-spinner" hidden aria-hidden="true"></span>
+                  </button>
+                </form>
+
+                <form
+                  id="cabinetChangePasswordForm"
+                  class="cabinet-full-form cabinet-password-step"
+                  hidden
+                  novalidate
+                >
+                  <p class="cabinet-step-label">Шаг 3. Новый пароль</p>
+                  <p class="cabinet-password-rules-hint" id="cabinetPasswordRulesHint">
+                    Доступно после проверки кода. Требования как при регистрации: заглавная и строчная буквы, цифра, спецсимвол, от 8 символов.
+                  </p>
+                  <label>Новый пароль
+                    <input type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" disabled />
+                  </label>
+                  <p class="cabinet-password-strength-line" id="cabinetPasswordStrengthLine" aria-live="polite"></p>
+                  <label>Повторите пароль
+                    <input type="password" name="passwordConfirm" minlength="8" maxlength="128" autocomplete="new-password" disabled />
+                  </label>
+                  <button type="submit" class="solid-btn cabinet-btn-loading" id="cabinetSavePasswordBtn" disabled>
+                    <span class="cabinet-btn-label">Сохранить новый пароль</span>
+                    <span class="cabinet-btn-spinner" hidden aria-hidden="true"></span>
+                  </button>
+                </form>
+              </div>
+            </div>
+            </div>
+          </section>
+
+          <section class="cabinet-full-card cabinet-full-card-wide" id="cabinet-verify-email">
+            <h2>Подтверждение email</h2>
+            <p class="cabinet-security-note">
+              На ваш email приходит 6-значный код. Введите его здесь — статус сразу сохранится в базе данных.
+            </p>
+            <p class="cabinet-full-muted" id="cabinetEmailVerifyStatus"></p>
+            <p class="cabinet-full-error" id="cabinetVerifyError"></p>
+            <p class="cabinet-full-success" id="cabinetVerifySuccess"></p>
+            <div class="cabinet-dev-code-box" id="cabinetVerifyDevCode" hidden></div>
+            <button type="button" class="ghost-btn cabinet-btn-loading" id="cabinetSendVerifyCodeBtn">
+              <span class="cabinet-btn-label">Отправить код на email</span>
+              <span class="cabinet-btn-spinner" hidden aria-hidden="true"></span>
+            </button>
+            <form id="cabinetVerifyEmailForm" class="cabinet-full-form cabinet-auth-code-form" novalidate>
+              <label>Код из письма
+                <input
+                  type="text"
+                  name="code"
+                  class="cabinet-auth-code-input"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  maxlength="6"
+                  pattern="[0-9]{6}"
+                  placeholder="000000"
+                />
               </label>
-              <label>Email
-                <input type="email" name="email" />
-              </label>
-              <label>Телефон
-                <input type="tel" name="phone" maxlength="18" />
-              </label>
-              <p class="cabinet-full-error" id="cabinetFullProfileError"></p>
-              <p class="cabinet-full-success" id="cabinetFullProfileSuccess"></p>
-              <button type="submit" class="solid-btn">Сохранить профиль</button>
+              <button type="submit" class="solid-btn">Подтвердить email</button>
             </form>
           </section>
 
-          <section class="cabinet-full-card">
-            <h2>Бонусы</h2>
-            <p class="cabinet-full-bonus" id="cabinetBonusValue">0</p>
-            <p class="cabinet-full-muted">1 бонус = 1 ₽. Можно списать при оформлении заказа.</p>
+          <section class="cabinet-full-card cabinet-full-card-wide" id="cabinet-bonus-program">
+            <h2>Бонусная программа</h2>
+            <p class="cabinet-full-muted">
+              За каждый оформленный заказ начисляются бонусы (1 бонус = 1 ₽). Их можно списать при следующих покупках.
+            </p>
+            <div class="cabinet-bonus-head">
+              <div>
+                <p class="cabinet-full-bonus" id="cabinetBonusValue">0</p>
+                <p class="cabinet-full-muted">доступно к списанию</p>
+              </div>
+              <div class="cabinet-bonus-status-wrap">
+                <span class="cabinet-bonus-status" id="cabinetBonusStatus">—</span>
+              </div>
+            </div>
+            <p class="cabinet-full-muted" id="cabinetBonusStatusHint"></p>
+            <div class="cabinet-bonus-stats" id="cabinetBonusStats"></div>
+            <p class="cabinet-bonus-expiry" id="cabinetBonusExpiryNote"></p>
+            <h3 class="cabinet-bonus-history-title">История операций</h3>
+            <ul class="cabinet-bonus-history" id="cabinetBonusHistory"></ul>
           </section>
 
-          <section class="cabinet-full-card cabinet-full-card-wide">
+          <section class="cabinet-full-card cabinet-full-card-wide" id="cabinet-addresses">
             <h2>Адреса доставки</h2>
-            <ul id="cabinetAddressesList" class="cabinet-full-list"></ul>
+            <p class="cabinet-full-muted">
+              Сохранённые адреса подставляются при оформлении заказа на сайте. Добавление и изменение — через карту Оренбурга.
+            </p>
+            <p class="cabinet-full-error" id="cabinetAddressesError"></p>
+            <p class="cabinet-full-success" id="cabinetAddressesSuccess"></p>
+            <ul id="cabinetAddressesList" class="cabinet-saved-addresses"></ul>
+            <div id="cabinetAddressesEmpty" class="cabinet-addresses-empty" hidden>
+              <p class="cabinet-addresses-empty-text">Сохранённых адресов пока нет.</p>
+              <button type="button" class="solid-btn" id="cabinetAddAddressBtn">Добавить адрес</button>
+            </div>
+            <div id="cabinetAddressEditPanel" class="cabinet-address-edit-panel" hidden>
+              <p class="cabinet-address-edit-hint" id="cabinetAddressEditHint">Редактирование адреса</p>
+              <form id="cabinetAddressForm" class="cabinet-full-form cabinet-address-form" novalidate>
+                <input type="hidden" name="edit_id" value="" />
+                <label>Название <span class="cabinet-optional">(необязательно)</span>
+                  <input type="text" name="label" maxlength="80" placeholder="Дом, работа, дача…" />
+                </label>
+                <p class="cabinet-address-current-line" id="cabinetAddressCurrentLine"></p>
+                <label class="cabinet-checkbox-label">
+                  <input type="checkbox" name="is_default" />
+                  Использовать по умолчанию
+                </label>
+                <div class="cabinet-address-form-actions">
+                  <button type="button" class="ghost-btn" id="cabinetAddressChangeMapBtn">Изменить на карте</button>
+                  <button type="submit" class="solid-btn" id="cabinetAddressSubmitBtn">Сохранить</button>
+                  <button type="button" class="ghost-btn" id="cabinetAddressCancelEditBtn">Отмена</button>
+                </div>
+              </form>
+            </div>
           </section>
 
           <section class="cabinet-full-card cabinet-full-card-wide">
-            <h2>Заказы</h2>
-            <div id="cabinetOrdersList" class="cabinet-full-orders"></div>
+            <h2>Активные доставки</h2>
+            <p class="cabinet-section-hint">Текущие заказы и статус доставки. При смене статуса придёт уведомление в колокольчике на сайте.</p>
+            <div id="cabinetActiveOrders" class="cabinet-full-orders"></div>
+          </section>
+
+          <section class="cabinet-full-card cabinet-full-card-wide">
+            <h2>История покупок</h2>
+            <div id="cabinetOrdersHistory" class="cabinet-full-orders"></div>
           </section>
         </div>
       </section>
     </main>
 
-    <script src="mobile-nav.js?v=20260519mobile"></script>
+    <script src="mobile-nav.js?v=20260521client"></script>
     <script src="app-core.js"></script>
     <script src="api-client.js"></script>
+    <script src="notifications-client.js?v=20260520notif"></script>
+    <script src="orders-sync.js?v=20260520sync"></script>
     <script src="maps-runtime.js"></script>
     <script src="/ekvaline-runtime.js"></script>
-    <script src="script.js?v=20260506fc"></script>
-    <script src="cabinet-pg.js?v=20260519status4"></script>
+    <script src="auth-password.js?v=20260522pwdrules"></script>
+    <script src="script.js?v=20260522pwdrules"></script>
+    <script src="cabinet-pg.js?v=20260522pwdrules"></script>
   </body>
 </html>

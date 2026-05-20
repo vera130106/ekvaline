@@ -10,8 +10,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260519opxsettings" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
+    <link rel="stylesheet" href="styles.css?v=20260520notify" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260521staff" />
   </head>
   <body class="operator-page">
     <main class="opx-shell">
@@ -173,7 +173,7 @@
     <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
       <div class="opx-zone-map-toolbar">
         <div class="opx-zone-map-toolbar-head">
-          <div class="opx-zone-map-title">Карта заказов</div>
+          <div class="opx-zone-map-title">Карта зон и заказов</div>
           <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
         </div>
         <div class="opx-row-legend opx-row-legend--map" aria-label="Подсветка заказов на карте">
@@ -404,6 +404,7 @@
           <button type="button" class="opx-modal-tab" data-opx-ord-tab="notes">Заметки</button>
         </nav>
 
+        <div id="opxOrdPanels" class="opx-ord-panels">
         <section class="opx-ord-panel" data-opx-ord-panel="basic">
         <section class="opx-modal-section">
           <h3 class="opx-modal-section-title">Клиент</h3>
@@ -460,7 +461,6 @@
                 <option value="Степной">Степной</option>
                 <option value="Центр">Центр</option>
                 <option value="доп.зона">доп.зона</option>
-                <option value="Окраина">Окраина</option>
               </select>
             </label>
             <label class="opx-modal-field">
@@ -509,7 +509,6 @@
             <div class="opx-order-cart-head">
               <h3 class="opx-modal-section-title">Товары заказа</h3>
               <div class="opx-order-cart-actions">
-                <button type="button" class="opx-modal-btn opx-map-ghost" id="opxOrderCartFromSiteBtn">Из корзины сайта</button>
                 <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxOrderCartAddBtn">+ Добавить товар</button>
               </div>
             </div>
@@ -558,6 +557,7 @@
             </div>
           </section>
         </section>
+        </div>
 
         <div class="opx-modal-actions">
           <div class="opx-modal-actions-extra">
@@ -574,7 +574,7 @@
           </div>
         </div>
       </section>
-      <aside id="opxOrderNotesDock" class="opx-order-notes-dock" aria-label="Заметки по клиенту">
+      <aside id="opxOrderNotesDock" class="opx-order-notes-dock" aria-label="Заметки по клиенту" hidden>
         <h3 class="opx-order-notes-dock-title">Заметки</h3>
         <ul id="opxOrderNotesDockList" class="opx-order-notes-dock-list" aria-live="polite"></ul>
         <button type="button" class="opx-order-notes-dock-details" id="opxOrderNotesDockDetails">Подробно</button>
@@ -830,15 +830,20 @@
       </section>
     </div>
 
-    <div id="opxToast" class="opx-toast" hidden role="status" aria-live="polite" aria-atomic="true">
-      <div class="opx-toast-card"><p id="opxToastText"></p></div>
+    <div id="opxToast" class="ek-notify opx-toast" hidden role="status" aria-live="polite" aria-atomic="true">
+      <div class="ek-notify-card">
+        <span class="ek-notify-icon" aria-hidden="true"></span>
+        <p id="opxToastText" class="ek-notify-text"></p>
+        <button type="button" id="opxToastClose" class="ek-notify-close" aria-label="Закрыть">×</button>
+      </div>
     </div>
 
     <script src="api-client.js"></script>
-    <script src="maps-runtime.js?v=20260519ymaps"></script>
+    <script src="orders-sync.js?v=20260520stats"></script>
+    <script src="maps-runtime.js?v=20260520mapchrome"></script>
     <script src="delivery-slots.js?v=20260519cleanup"></script>
     <script src="opx-field-limits.js?v=20260519cleanup"></script>
-    <script src="operator.js?v=20260519opxsettings"></script>
+    <script src="operator.js?v=20260520notify"></script>
     <script src="vendor/xlsx.full.min.js"></script>
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"

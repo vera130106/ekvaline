@@ -175,6 +175,8 @@
     },
     /** Активные опросы из GET /api/public/settings (sitePolls). */
     sitePolls: [],
+    /** Агрегаты голосов с сервера GET /api/public/poll-aggregates. */
+    pollAggregates: {},
   };
   let revealObserver = null;
 
@@ -317,6 +319,65 @@
 
   function saveSitePollAgg(map) {
     localStorage.setItem(SITE_POLL_AGG_KEY, JSON.stringify(map));
+  }
+
+  async function hydratePollAggregatesFromApi() {
+    try {
+      const res = await fetch('/api/public/poll-aggregates', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      state.pollAggregates =
+        data?.aggregates && typeof data.aggregates === 'object' ? data.aggregates : {};
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function pollVoteCount(pollId, optionId) {
+    const bucket = state.pollAggregates[String(pollId || '')];
+    if (!bucket || typeof bucket !== 'object') return 0;
+    return Math.max(0, Number(bucket[String(optionId || '')]) || 0);
+  }
+
+  async function submitPollVoteToServer(pollId, optionId) {
+    const api = window.EkvalineAPI;
+    if (!api?.json) return false;
+    try {
+      const r = await api.json('/api/polls/vote', {
+        method: 'POST',
+        body: { poll_id: pollId, option_id: optionId },
+      });
+      if (r.ok && r.data?.counts) {
+        state.pollAggregates[String(pollId)] = r.data.counts;
+        api.resetCsrf?.();
+        return true;
+      }
+      if (Number(r.status) === 409) return 'already';
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
+  function markLocalPollVote(pollId, optionId, useSitePollKeys) {
+    if (useSitePollKeys) {
+      const vm = readSitePollUserVotes();
+      vm[pollId] = optionId;
+      saveSitePollUserVotes(vm);
+      return;
+    }
+    const votesMap = readPollVotes();
+    votesMap[pollId] = optionId;
+    savePollVotes(votesMap);
+  }
+
+  function hasLocalPollVote(pollId, useSitePollKeys) {
+    if (useSitePollKeys) {
+      const vm = readSitePollUserVotes();
+      return Boolean(vm[pollId]);
+    }
+    const votesMap = readPollVotes();
+    return Boolean(votesMap[pollId]);
   }
 
   function readCurrentUser() {
@@ -515,11 +576,16 @@
     }
 
     const votesMap = readPollVotes();
-    const alreadyVoted = Boolean(votesMap[poll.id]);
-    const totalVotes = poll.options.reduce((sum, item) => sum + (Number(item.votes) || 0), 0);
+    const alreadyVoted = Boolean(votesMap[poll.id]) || hasLocalPollVote(poll.id, false);
+    let totalVotes = 0;
+    const optionsWithVotes = poll.options.map((item) => {
+      const votes = pollVoteCount(poll.id, item.id);
+      totalVotes += votes;
+      return { ...item, votes };
+    });
     titleEl.textContent = poll.title || 'Опрос дня';
     questionEl.textContent = poll.question;
-    optionsEl.innerHTML = poll.options
+    optionsEl.innerHTML = optionsWithVotes
       .map((item) => {
         const votes = Number(item.votes) || 0;
         const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
@@ -545,21 +611,23 @@
       mount.innerHTML = '';
       return;
     }
-    const voteMap = readSitePollUserVotes();
-    const aggRoot = readSitePollAgg();
     mount.innerHTML = polls
       .map((poll) => {
-        const voted = Boolean(voteMap[poll.id]);
+        const voted = hasLocalPollVote(poll.id, true);
         const buckets =
-          aggRoot[poll.id] && typeof aggRoot[poll.id] === 'object' ? aggRoot[poll.id] : {};
+          state.pollAggregates[poll.id] && typeof state.pollAggregates[poll.id] === 'object'
+            ? state.pollAggregates[poll.id]
+            : readSitePollAgg()[poll.id] && typeof readSitePollAgg()[poll.id] === 'object'
+              ? readSitePollAgg()[poll.id]
+              : {};
         let total = 0;
         for (const o of poll.options) {
-          total += Number(buckets[o.id]) || 0;
+          total += pollVoteCount(poll.id, o.id) || Number(buckets[o.id]) || 0;
         }
         const heading = String(poll.title || '').trim() || 'Опрос';
         const optionsHtml = poll.options
           .map((item) => {
-            const votes = Number(buckets[item.id]) || 0;
+            const votes = pollVoteCount(poll.id, item.id) || Number(buckets[item.id]) || 0;
             const percent = total > 0 ? Math.round((votes / total) * 100) : 0;
             return `
           <button type="button" class="blogv2-action blogv2-poll-option" data-site-poll-option="1" data-site-poll-id="${escapeHtml(
@@ -590,7 +658,18 @@
       if (!res.ok) return;
       const data = await res.json();
       state.sitePolls = Array.isArray(data.sitePolls) ? data.sitePolls : [];
+      if (data.blogHydrationPoll && typeof data.blogHydrationPoll === 'object') {
+        state.admin.hydrationPoll = {
+          id: String(data.blogHydrationPoll.id || ''),
+          title: String(data.blogHydrationPoll.title || 'Опрос дня'),
+          question: String(data.blogHydrationPoll.question || ''),
+          active: Boolean(data.blogHydrationPoll.active),
+          options: Array.isArray(data.blogHydrationPoll.options) ? data.blogHydrationPoll.options : [],
+        };
+      }
+      await hydratePollAggregatesFromApi();
       renderSitePollsFromSettings();
+      renderHydrationPoll();
     } catch {
       /* ignore */
     }
@@ -1053,37 +1132,64 @@
         const polls = Array.isArray(state.sitePolls) ? state.sitePolls : [];
         const poll = polls.find((p) => String(p.id) === String(pollId));
         if (!poll || !Array.isArray(poll.options)) return;
-        const vm = readSitePollUserVotes();
-        if (vm[pollId]) return;
-        vm[pollId] = optionId;
-        saveSitePollUserVotes(vm);
-        const agg = readSitePollAgg();
-        const prevBucket =
-          agg[pollId] && typeof agg[pollId] === 'object' ? agg[pollId] : {};
-        const bucket = { ...prevBucket };
-        bucket[optionId] = (Number(bucket[optionId]) || 0) + 1;
-        agg[pollId] = bucket;
-        saveSitePollAgg(agg);
-        renderSitePollsFromSettings();
+        if (hasLocalPollVote(pollId, true)) return;
+        void (async () => {
+          const result = await submitPollVoteToServer(pollId, optionId);
+          if (result === 'already') {
+            markLocalPollVote(pollId, optionId, true);
+            renderSitePollsFromSettings();
+            return;
+          }
+          if (result === true) {
+            markLocalPollVote(pollId, optionId, true);
+            renderSitePollsFromSettings();
+            return;
+          }
+          const vm = readSitePollUserVotes();
+          if (vm[pollId]) return;
+          vm[pollId] = optionId;
+          saveSitePollUserVotes(vm);
+          const agg = readSitePollAgg();
+          const prevBucket =
+            agg[pollId] && typeof agg[pollId] === 'object' ? agg[pollId] : {};
+          const bucket = { ...prevBucket };
+          bucket[optionId] = (Number(bucket[optionId]) || 0) + 1;
+          agg[pollId] = bucket;
+          saveSitePollAgg(agg);
+          renderSitePollsFromSettings();
+        })();
         return;
       }
 
       const pollBtn = target.closest('[data-poll-option]');
       if (pollBtn) {
-        if (!requireAuthorizedAction()) return;
         const optionId = pollBtn.getAttribute('data-poll-option');
         const poll = state.admin.hydrationPoll;
         if (!optionId || !poll || !poll.id || !poll.active) return;
-        const votesMap = readPollVotes();
-        if (votesMap[poll.id]) return;
-        const nextOptions = (poll.options || []).map((item) =>
-          item.id === optionId ? { ...item, votes: (Number(item.votes) || 0) + 1 } : item
-        );
-        state.admin.hydrationPoll = { ...poll, options: nextOptions };
-        localStorage.setItem(BLOG_ADMIN_KEY, JSON.stringify(state.admin));
-        votesMap[poll.id] = optionId;
-        savePollVotes(votesMap);
-        renderHydrationPoll();
+        if (hasLocalPollVote(poll.id, false)) return;
+        void (async () => {
+          const result = await submitPollVoteToServer(poll.id, optionId);
+          if (result === 'already') {
+            markLocalPollVote(poll.id, optionId, false);
+            renderHydrationPoll();
+            return;
+          }
+          if (result === true) {
+            markLocalPollVote(poll.id, optionId, false);
+            renderHydrationPoll();
+            return;
+          }
+          const votesMap = readPollVotes();
+          if (votesMap[poll.id]) return;
+          const nextOptions = (poll.options || []).map((item) =>
+            item.id === optionId ? { ...item, votes: (Number(item.votes) || 0) + 1 } : item
+          );
+          state.admin.hydrationPoll = { ...poll, options: nextOptions };
+          localStorage.setItem(BLOG_ADMIN_KEY, JSON.stringify(state.admin));
+          votesMap[poll.id] = optionId;
+          savePollVotes(votesMap);
+          renderHydrationPoll();
+        })();
         return;
       }
 
@@ -1192,6 +1298,16 @@
     const hydrationAddBtn = document.getElementById('hydrationAddBtn');
     const hydrationInput = document.getElementById('hydrationInput');
     if (hydrationAddBtn && hydrationInput) {
+      hydrationInput.addEventListener('input', () => {
+        const compact = String(hydrationInput.value || '')
+          .replace(',', '.')
+          .replace(/[^\d.]/g, '');
+        const parts = compact.split('.');
+        const intPart = (parts[0] || '').slice(0, 1);
+        const fracPart = (parts[1] || '').slice(0, 1);
+        const normalized = fracPart ? `${intPart}.${fracPart}` : intPart;
+        hydrationInput.value = normalized.slice(0, 3);
+      });
       hydrationAddBtn.addEventListener('click', () => {
         const value = Number(hydrationInput.value);
         if (!Number.isFinite(value) || value <= 0) return;

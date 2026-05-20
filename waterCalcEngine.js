@@ -35,6 +35,13 @@ const usageLabels = {
   both: 'Питье и готовка',
 };
 
+function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const int = Math.round(n);
+  return Math.min(max, Math.max(min, int));
+}
+
 function toOneDecimal(value) {
   return Math.round(value * 10) / 10;
 }
@@ -67,10 +74,10 @@ function pluralDays(days) {
  * @param {{ people: number; usage: 'drink' | 'cook' | 'both'; activity: 'low' | 'medium' | 'high'; season: 'winter' | 'spring-autumn' | 'summer' }} input
  */
 function estimateWaterConsumption(input) {
-  const people = Number(input.people);
-  const usage = input.usage;
-  const activity = input.activity;
-  const season = input.season;
+  const people = clampInt(input.people, 1, 15, 1);
+  const usage = usageLabels[input.usage] ? input.usage : 'both';
+  const activity = activityLabels[input.activity] ? input.activity : 'medium';
+  const season = seasonLabels[input.season] ? input.season : 'spring-autumn';
 
   const isDrinking = usage === 'drink' || usage === 'both';
   const isCooking = usage === 'cook' || usage === 'both';

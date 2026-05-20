@@ -45,6 +45,9 @@
 
   /** Последний успешно сформированный отчёт (для экспорта). */
   let lastStatsReport = null;
+  let statsLiveTimer = null;
+  let statsLiveUnsub = null;
+  let statsRefreshInFlight = false;
 
   const editModal = document.getElementById('adminProductEditModal');
   const editForm = document.getElementById('adminProductEditForm');
@@ -79,6 +82,7 @@
   const adminAboutCertEditBadge = document.getElementById('adminAboutCertEditBadge');
   const adminAboutCertEditTitleLine = document.getElementById('adminAboutCertEditTitleLine');
   const adminAboutCertEditDesc = document.getElementById('adminAboutCertEditDesc');
+  const adminAboutCertEditPdf = document.getElementById('adminAboutCertEditPdf');
   const adminAboutCertEditConfirm = document.getElementById('adminAboutCertEditConfirm');
   const adminAboutCertEditDelete = document.getElementById('adminAboutCertEditDelete');
   const adminAboutCertEditModalMsg = document.getElementById('adminAboutCertEditModalMsg');
@@ -88,6 +92,7 @@
   const adminAboutCertAddBadge = document.getElementById('adminAboutCertAddBadge');
   const adminAboutCertAddTitleLine = document.getElementById('adminAboutCertAddTitleLine');
   const adminAboutCertAddDesc = document.getElementById('adminAboutCertAddDesc');
+  const adminAboutCertAddPdf = document.getElementById('adminAboutCertAddPdf');
   const adminAboutCertAddConfirm = document.getElementById('adminAboutCertAddConfirm');
   const adminAboutCertAddModalMsg = document.getElementById('adminAboutCertAddModalMsg');
   const adminAboutCertEditImageFile = document.getElementById('adminAboutCertEditImageFile');
@@ -144,25 +149,13 @@
 
   const DEFAULT_ADMIN_ABOUT_CERTIFICATES = Object.freeze([
     {
-      image: 'assets/certificate-card.jpg',
-      alt: 'Карточка предприятия',
-      badge: 'Документ',
-      title: 'Карточка предприятия',
-      description: 'Реквизиты организации, контакты, банковские данные и юридическая информация.',
-    },
-    {
-      image: 'assets/certificate-eac.jpg',
+      image: 'assets/certificate-declaration-eac-2025-preview.jpg',
       alt: 'Декларация о соответствии ЕАЭС',
-      badge: 'ЕАЭС',
+      badge: 'Документ',
       title: 'Декларация о соответствии',
-      description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
-    },
-    {
-      image: 'assets/certificate-lab.jpg',
-      alt: 'Протокол лабораторных испытаний',
-      badge: 'Лаборатория',
-      title: 'Протокол испытаний',
-      description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
+      description:
+        'Подтверждение соответствия продукции «ЭкваЛайн» требованиям технических регламентов ЕАЭС.',
+      pdf: 'assets/certificate-declaration-eac-2025.pdf',
     },
   ]);
 
@@ -247,21 +240,31 @@
   }
 
   function paymentLabel(raw) {
-    const k = String(raw || '')
-      .trim()
-      .toLowerCase();
-    if (PAYMENT_METHOD_LABELS[k]) return PAYMENT_METHOD_LABELS[k];
-    const s = String(raw || '').trim();
-    return s || 'Не указан';
+    const p = String(raw || '').trim();
+    if (!p) return 'Не указан';
+    const low = p.toLowerCase().replace(/ё/g, 'е');
+    if (low === 'cash' || low.includes('налич')) return 'Наличная';
+    if (low === 'noncash' || low.includes('безнал')) return 'Безнал';
+    if (low === 'card' || low.includes('карт')) return 'Карта';
+    if (low.includes('расч') && (low.includes('сч') || low.includes('счет') || low.includes('счёт'))) {
+      return 'Расчётный счёт';
+    }
+    if (PAYMENT_METHOD_LABELS[low]) return PAYMENT_METHOD_LABELS[low];
+    return p;
   }
 
   function formatStatsPeriodLabel(period) {
     const from = period?.from ? ruDateFromIso(period.from) : null;
     const to = period?.to ? ruDateFromIso(period.to) : null;
-    if (from && to) return `Период: ${from} — ${to} (по дате доставки заказа)`;
-    if (from) return `Период: с ${from}`;
-    if (to) return `Период: по ${to}`;
-    return 'Период: всё время (все заказы в базе)';
+    const base =
+      from && to
+        ? `Период: ${from} — ${to} (по дате доставки заказа)`
+        : from
+          ? `Период: с ${from}`
+          : to
+            ? `Период: по ${to}`
+            : 'Период: всё время (все заказы в базе)';
+    return `${base}. Учитываются только реальные заказы оператора (без демо).`;
   }
 
   function showStatsMsg(text, ok) {
@@ -474,6 +477,13 @@
   }
 
   const ABOUT_CERT_IMAGE_MAX_LEN = 600000;
+
+  function aboutCertPdfAllowed(pdf) {
+    const s = String(pdf ?? '').trim();
+    if (!s) return true;
+    if (/^(javascript:|vbscript:|data:)/i.test(s)) return false;
+    return /^(assets\/|\/assets\/)[^?\s#]+\.pdf$/i.test(s);
+  }
 
   function aboutCertImageAllowed(image) {
     const s = String(image ?? '').trim();
@@ -852,6 +862,29 @@
   function showAppWorkspace() {
     if (adminRestrictedEl instanceof HTMLElement) adminRestrictedEl.hidden = true;
     if (adminAppRoot instanceof HTMLElement) adminAppRoot.hidden = false;
+    initBackToTopButton();
+  }
+
+  function initBackToTopButton() {
+    if (document.querySelector('.back-to-top-btn')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'back-to-top-btn admin-back-to-top';
+    button.setAttribute('aria-label', 'Наверх');
+    button.title = 'Наверх';
+    button.textContent = '↑';
+    document.body.appendChild(button);
+
+    const updateVisibility = () => {
+      button.classList.toggle('is-visible', (window.scrollY || 0) > 280);
+    };
+
+    button.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    window.addEventListener('scroll', updateVisibility, { passive: true });
+    updateVisibility();
   }
 
   async function ensureAdmin() {
@@ -994,19 +1027,20 @@
     }
   }
 
-  async function buildAdminStatsReport() {
+  async function buildAdminStatsReport(options) {
+    const silent = options && options.silent === true;
     if (!validateStatsPeriodForReport()) return null;
     const { from, to } = readStatsPeriodFromForm();
     const q = new URLSearchParams();
     if (from) q.set('from', from);
     if (to) q.set('to', to);
     const path = q.toString() ? `/api/admin/stats?${q.toString()}` : '/api/admin/stats';
-    showStatsMsg('Формируем отчёт…', false);
+    if (!silent) showStatsMsg('Формируем отчёт…', false);
     if (statsBuildBtn instanceof HTMLButtonElement) statsBuildBtn.disabled = true;
     const r = await api.json(path);
     if (statsBuildBtn instanceof HTMLButtonElement) statsBuildBtn.disabled = false;
     if (!r.ok) {
-      showStatsMsg(String(r.data?.error || 'Не удалось загрузить статистику.'), false);
+      if (!silent) showStatsMsg(String(r.data?.error || 'Не удалось загрузить статистику.'), false);
       return null;
     }
     lastStatsReport = r.data;
@@ -1014,8 +1048,46 @@
     if (statsReportRootEl instanceof HTMLElement) statsReportRootEl.hidden = false;
     if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
     if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
-    showStatsMsg('Отчёт сформирован. Можно скачать Excel или PDF.', true);
+    if (!silent) showStatsMsg('Отчёт сформирован. Можно скачать Excel или PDF.', true);
     return lastStatsReport;
+  }
+
+  function isStatsPaneActive() {
+    const pane = document.getElementById('adminPaneStats');
+    return Boolean(pane && !pane.classList.contains('hidden'));
+  }
+
+  async function refreshStatsLive() {
+    if (!lastStatsReport || !isStatsPaneActive() || statsRefreshInFlight) return;
+    statsRefreshInFlight = true;
+    try {
+      await buildAdminStatsReport({ silent: true });
+    } finally {
+      statsRefreshInFlight = false;
+    }
+  }
+
+  function startStatsLiveRefresh() {
+    if (statsLiveTimer) return;
+    statsLiveTimer = window.setInterval(() => {
+      void refreshStatsLive();
+    }, 15000);
+    if (typeof window.EkvalineOrdersSync?.subscribeOrdersDataChanged === 'function') {
+      statsLiveUnsub = window.EkvalineOrdersSync.subscribeOrdersDataChanged(() => {
+        void refreshStatsLive();
+      });
+    }
+  }
+
+  function stopStatsLiveRefresh() {
+    if (statsLiveTimer) {
+      window.clearInterval(statsLiveTimer);
+      statsLiveTimer = null;
+    }
+    if (typeof statsLiveUnsub === 'function') {
+      statsLiveUnsub();
+      statsLiveUnsub = null;
+    }
   }
 
   function statsExportFilenameBase() {
@@ -1197,6 +1269,7 @@
     });
     void ensureXlsxLoaded().catch(() => {});
     void buildAdminStatsReport();
+    startStatsLiveRefresh();
   }
   function coerceAdminFaqItem(raw) {
     if (!raw || typeof raw !== 'object') return null;
@@ -1280,7 +1353,11 @@
     const title = String(raw.title ?? '').trim().slice(0, 120);
     const description = String(raw.description ?? '').trim().slice(0, 400);
     if (image.length < 3 || alt.length < 1 || title.length < 1 || description.length < 1) return null;
-    return { image, alt, badge, title, description };
+    const pdfRaw = String(raw.pdf ?? '').trim().slice(0, 280);
+    const pdf = aboutCertPdfAllowed(pdfRaw) ? pdfRaw.replace(/^\/+/, '') : '';
+    const row = { image, alt, badge, title, description };
+    if (pdf) row.pdf = pdf;
+    return row;
   }
 
   function normalizeAboutCertsLoaded(list) {
@@ -1295,13 +1372,17 @@
   }
 
   function cloneAboutCertsList(items) {
-    return (items || []).map((c) => ({
-      image: String(c.image ?? ''),
-      alt: String(c.alt ?? ''),
-      badge: String(c.badge ?? ''),
-      title: String(c.title ?? ''),
-      description: String(c.description ?? ''),
-    }));
+    return (items || []).map((c) => {
+      const row = {
+        image: String(c.image ?? ''),
+        alt: String(c.alt ?? ''),
+        badge: String(c.badge ?? ''),
+        title: String(c.title ?? ''),
+        description: String(c.description ?? ''),
+      };
+      if (c.pdf) row.pdf = String(c.pdf);
+      return row;
+    });
   }
 
   /** @returns {{ image:string,alt:string,badge:string,title:string,description:string }[]} */
@@ -2099,6 +2180,7 @@
     if (adminAboutCertEditBadge instanceof HTMLInputElement) adminAboutCertEditBadge.value = item.badge || '';
     if (adminAboutCertEditTitleLine instanceof HTMLInputElement) adminAboutCertEditTitleLine.value = item.title || '';
     if (adminAboutCertEditDesc instanceof HTMLTextAreaElement) adminAboutCertEditDesc.value = item.description || '';
+    if (adminAboutCertEditPdf instanceof HTMLInputElement) adminAboutCertEditPdf.value = item.pdf || '';
     if (adminAboutCertEditModal instanceof HTMLElement) refreshCharCounters(adminAboutCertEditModal);
   }
 
@@ -2109,7 +2191,8 @@
     const badge = adminAboutCertEditBadge instanceof HTMLInputElement ? adminAboutCertEditBadge.value : '';
     const title = adminAboutCertEditTitleLine instanceof HTMLInputElement ? adminAboutCertEditTitleLine.value : '';
     const description = adminAboutCertEditDesc instanceof HTMLTextAreaElement ? adminAboutCertEditDesc.value : '';
-    const coerced = coerceAboutCertificateItem({ image, alt, badge, title, description });
+    const pdf = adminAboutCertEditPdf instanceof HTMLInputElement ? adminAboutCertEditPdf.value : '';
+    const coerced = coerceAboutCertificateItem({ image, alt, badge, title, description, pdf });
     if (!coerced) return false;
     aboutCertsDraft[aboutCertEditModalIdx] = coerced;
     return true;
@@ -2255,6 +2338,15 @@
       wrap.appendChild(top);
       wrap.appendChild(titleEl);
       wrap.appendChild(imgPath);
+
+      if (item.pdf) {
+        const pdfPath = document.createElement('p');
+        pdfPath.className = 'admin-delivery-faq-card-answer-preview';
+        pdfPath.style.fontSize = '0.85rem';
+        pdfPath.style.color = '#1f6fd4';
+        pdfPath.textContent = `PDF: ${item.pdf}`;
+        wrap.appendChild(pdfPath);
+      }
       adminAboutCertsNav.appendChild(wrap);
     });
   }
@@ -2275,6 +2367,7 @@
     if (adminAboutCertAddTitleLine instanceof HTMLInputElement) adminAboutCertAddTitleLine.value = 'Новый сертификат';
     if (adminAboutCertAddDesc instanceof HTMLTextAreaElement)
       adminAboutCertAddDesc.value = 'Краткое описание для карточки на странице «О компании».';
+    if (adminAboutCertAddPdf instanceof HTMLInputElement) adminAboutCertAddPdf.value = '';
     if (adminAboutCertAddModal instanceof HTMLElement) refreshCharCounters(adminAboutCertAddModal);
   }
 
@@ -2321,7 +2414,8 @@
     const badge = adminAboutCertAddBadge instanceof HTMLInputElement ? adminAboutCertAddBadge.value : '';
     const title = adminAboutCertAddTitleLine instanceof HTMLInputElement ? adminAboutCertAddTitleLine.value : '';
     const description = adminAboutCertAddDesc instanceof HTMLTextAreaElement ? adminAboutCertAddDesc.value : '';
-    const coerced = coerceAboutCertificateItem({ image, alt, badge, title, description });
+    const pdf = adminAboutCertAddPdf instanceof HTMLInputElement ? adminAboutCertAddPdf.value : '';
+    const coerced = coerceAboutCertificateItem({ image, alt, badge, title, description, pdf });
     if (!coerced) {
       showMsg(
         adminAboutCertAddModalMsg,
@@ -2398,6 +2492,8 @@
       const isSame = btn.getAttribute('data-admin-pane') === pane;
       btn.classList.toggle('is-active', Boolean(isSame));
     });
+    if (pane === 'stats') startStatsLiveRefresh();
+    else stopStatsLiveRefresh();
     try {
       localStorage.setItem('ekvaline_admin_pane', pane);
     } catch {

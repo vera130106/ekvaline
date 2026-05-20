@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260521staff" />
   </head>
   <body class="admin-page">
     <header class="topbar">
@@ -403,8 +403,9 @@
                   <span class="admin-settings-page-badge">about.html</span>
                 </div>
                 <p class="admin-delivery-faq-hint">
-                  Блок «Наши сертификаты» на странице «О компании». Для картинки выберите файл в окне. Сохраните в окне
-                  или кнопкой «Сохранить блок на сайте».
+                  Блок «Наши сертификаты» на странице «О компании». Превью — файл изображения; PDF — путь к файлу в папке
+                  <code>assets/</code> (например <code>assets/certificate-declaration-eac-2025.pdf</code>). На сайте фото и
+                  кнопка PDF отображаются рядом. Сохраните в окне или кнопкой «Сохранить блок на сайте».
                 </p>
                 <div class="admin-delivery-faq-toolbar">
                   <button type="button" id="adminAboutCertsBlockSave" class="solid-btn admin-delivery-faq-toolbar-primary">
@@ -637,6 +638,21 @@
                 data-char-count-for="adminAboutCertEditDescCount"
               ></textarea>
             </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">PDF (путь в assets/, необязательно)</span>
+              </div>
+              <input
+                type="text"
+                maxlength="280"
+                id="adminAboutCertEditPdf"
+                autocomplete="off"
+                placeholder="assets/certificate-declaration-eac-2025.pdf"
+              />
+              <p class="admin-muted" style="margin: 0.35rem 0 0; font-size: 0.82rem">
+                Файл PDF положите в папку <code>assets/</code>. На сайте — превью слева и кнопка «Открыть PDF» справа.
+              </p>
+            </label>
           </div>
           <p id="adminAboutCertEditModalMsg" class="admin-msg"></p>
           <div class="admin-faq-edit-modal-footer">
@@ -686,6 +702,18 @@
                 <span class="admin-char-count" id="adminAboutCertAddDescCount">0/400</span>
               </div>
               <textarea rows="4" maxlength="400" id="adminAboutCertAddDesc" data-char-count-for="adminAboutCertAddDescCount"></textarea>
+            </label>
+            <label class="admin-field admin-field-span-2">
+              <div class="admin-field-head">
+                <span class="admin-field-label">PDF (путь в assets/, необязательно)</span>
+              </div>
+              <input
+                type="text"
+                maxlength="280"
+                id="adminAboutCertAddPdf"
+                autocomplete="off"
+                placeholder="assets/certificate-declaration-eac-2025.pdf"
+              />
             </label>
           </div>
           <p id="adminAboutCertAddModalMsg" class="admin-msg"></p>
@@ -912,14 +940,14 @@
       </div>
     </div>
 
-    <script src="mobile-nav.js?v=20260519mobile"></script>
     <script src="api-client.js"></script>
+    <script src="orders-sync.js?v=20260520stats"></script>
     <script src="vendor/xlsx.full.min.js"></script>
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
-    <script src="admin.js?v=20260519login"></script>
+    <script src="admin.js?v=20260520stats"></script>
   </body>
 </html>

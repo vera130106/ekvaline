@@ -93,12 +93,14 @@ class PgDatabase {
     await ensureDefaultDeliveryAddresses(this.pool);
     await ensureDeliveryAddressesBackfillZoneId(this.pool);
     await ensureExtendedCatalog(this.pool);
-    await ensureDemoClientUser(this.pool);
-    await ensureDemoDriverUsers(this.pool);
-    await ensureDemoOperatorOrders(this.pool);
-    await normalizeDemoOrderPayments(this.pool);
-    await syncDemoOrderDrivers(this.pool);
-    await ensureDemoOperatorAuditEvents(this.pool);
+    await ensureSiteCatalogProducts(this.pool);
+    const seedDemoOrders = ['1', 'true', 'yes'].includes(
+      String(process.env.SEED_DEMO_ORDERS || '').trim().toLowerCase()
+    );
+    if (seedDemoOrders) {
+      await ensureDemoClientUser(this.pool);
+      await ensureDemoOperatorOrders(this.pool);
+    }
   }
 
   _normalizeSql(sql, args) {
@@ -237,6 +239,36 @@ async function migrate(pool) {
       notes TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS client_saved_addresses (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label TEXT NOT NULL DEFAULT '',
+      address_line TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      id SERIAL PRIMARY KEY,
+      poll_id TEXT NOT NULL,
+      option_id TEXT NOT NULL,
+      voter_key TEXT NOT NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS client_notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'order',
+      order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   await ensureIdentityDefault(pool, 'users');
@@ -247,9 +279,16 @@ async function migrate(pool) {
   await ensureIdentityDefault(pool, 'subscriptions');
   await ensureIdentityDefault(pool, 'delivery_zones');
   await ensureIdentityDefault(pool, 'bonus_operations');
+  await ensureBonusOperationsExpiry(pool);
   await ensureIdentityDefault(pool, 'feedback_messages');
   await ensureIdentityDefault(pool, 'audit_log');
   await ensureIdentityDefault(pool, 'delivery_addresses');
+  await ensureIdentityDefault(pool, 'client_saved_addresses');
+  await ensureClientSavedAddressesIndex(pool);
+  await ensureIdentityDefault(pool, 'poll_votes');
+  await ensurePollVotesIndexes(pool);
+  await ensureIdentityDefault(pool, 'client_notifications');
+  await ensureClientNotificationsIndexes(pool);
 
   await ensureColumnDefault(pool, 'feedback_messages', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'audit_log', 'created_at', 'NOW()');
@@ -265,15 +304,84 @@ async function migrate(pool) {
   await ensureLegacyClientsOrdersFk(pool);
   await ensureDeclarativeForeignKeysPublic(pool);
   await ensurePublicRussianTableComments(pool);
-  await ensureDeliveryAvailabilitySetting(pool);
+  await ensureAboutCertificatesDeclarationPdf(pool);
 }
 
-/** Ключ для закрытия дней/интервалов приёма заказов (панель оператора). */
-async function ensureDeliveryAvailabilitySetting(pool) {
+/** Единственная карточка на странице «О компании» — декларация ЕАЭС. */
+const ABOUT_CERTIFICATES_SITE_DEFAULT = Object.freeze([
+  {
+    image: 'assets/certificate-declaration-eac-2025-preview.jpg',
+    alt: 'Декларация о соответствии ЕАЭС',
+    badge: 'Документ',
+    title: 'Декларация о соответствии',
+    description:
+      'Подтверждение соответствия продукции «ЭкваЛайн» требованиям технических регламентов ЕАЭС.',
+    pdf: 'assets/certificate-declaration-eac-2025.pdf',
+  },
+]);
+
+/** Декларация ЕАЭС: превью + PDF; убираем старые блоки «карточка» и «лаборатория». */
+async function ensureAboutCertificatesDeclarationPdf(pool) {
+  const row = await pool.query("SELECT value FROM site_settings WHERE key = 'aboutCertificates'");
+  const defaultJson = JSON.stringify(ABOUT_CERTIFICATES_SITE_DEFAULT);
+  if (!row.rows[0]?.value) {
+    await pool.query(
+      `INSERT INTO site_settings (key, value) VALUES ('aboutCertificates', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [defaultJson]
+    );
+    return;
+  }
+  let list;
+  try {
+    list = JSON.parse(row.rows[0].value);
+  } catch {
+    list = [];
+  }
+  if (!Array.isArray(list)) list = [];
+
+  const hasLegacy =
+    list.length !== 1 ||
+    list.some((item) => {
+      if (!item || typeof item !== 'object') return true;
+      const img = String(item.image || '');
+      const title = String(item.title || '');
+      return (
+        /certificate-card|certificate-lab/i.test(img) ||
+        /карточка предприятия|протокол испытан/i.test(title)
+      );
+    });
+
+  if (hasLegacy) {
+    await pool.query(
+      `INSERT INTO site_settings (key, value) VALUES ('aboutCertificates', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [defaultJson]
+    );
+    return;
+  }
+
+  let changed = false;
+  const next = list.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const title = String(item.title || '').trim();
+    if (!/декларация/i.test(title)) return item;
+    const out = { ...item };
+    if (!out.pdf) {
+      out.pdf = 'assets/certificate-declaration-eac-2025.pdf';
+      changed = true;
+    }
+    if (String(out.badge || '') === 'ЕАЭС') {
+      out.badge = 'Документ';
+      changed = true;
+    }
+    return out;
+  });
+  if (!changed) return;
   await pool.query(
-    `INSERT INTO site_settings (key, value) VALUES ('deliveryAvailability', $1)
-     ON CONFLICT (key) DO NOTHING`,
-    [JSON.stringify({ closedDays: [], closedSlots: [] })]
+    `INSERT INTO site_settings (key, value) VALUES ('aboutCertificates', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify(next)]
   );
 }
 
@@ -855,6 +963,9 @@ async function ensurePublicRussianTableComments(pool) {
     ['site_settings', 'Настройки сайта'],
     ['audit_log', 'Журнал аудита'],
     ['delivery_addresses', 'Пресеты адресов доставки'],
+    ['client_saved_addresses', 'Сохранённые адреса клиентов'],
+    ['poll_votes', 'Голоса в опросах клиентов'],
+    ['client_notifications', 'Уведомления клиентов'],
     ['order_audit_events', 'События по заказам (аудит)'],
   ];
   for (const [table, title] of pairs) {
@@ -922,6 +1033,73 @@ async function ensureColumnExists(pool, tableName, columnName, typeSql) {
   await pool.query(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${typeSql}`);
 }
 
+async function ensureClientNotificationsIndexes(pool) {
+  await pool
+    .query(
+      `CREATE INDEX IF NOT EXISTS client_notifications_user_id_idx ON client_notifications (user_id, id DESC)`
+    )
+    .catch(() => {});
+}
+
+async function ensurePollVotesIndexes(pool) {
+  await pool
+    .query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS poll_votes_poll_voter_uidx ON poll_votes (poll_id, voter_key)`
+    )
+    .catch(() => {});
+  await pool
+    .query(`CREATE INDEX IF NOT EXISTS poll_votes_poll_id_idx ON poll_votes (poll_id)`)
+    .catch(() => {});
+}
+
+async function ensureClientSavedAddressesIndex(pool) {
+  await pool
+    .query(
+      `CREATE INDEX IF NOT EXISTS client_saved_addresses_user_id_idx ON client_saved_addresses (user_id)`
+    )
+    .catch(() => {});
+}
+
+async function ensureBonusOperationsExpiry(pool) {
+  await ensureColumnExists(pool, 'bonus_operations', 'expires_at', 'TIMESTAMPTZ');
+  await ensureColumnExists(pool, 'bonus_operations', 'remaining', 'INTEGER');
+  await ensureColumnExists(pool, 'bonus_operations', 'order_id', 'INTEGER');
+
+  await pool
+    .query(
+      `UPDATE bonus_operations
+       SET remaining = amount
+       WHERE type = 'accrual' AND amount > 0 AND remaining IS NULL`
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `UPDATE bonus_operations
+       SET expires_at = created_at + INTERVAL '365 days'
+       WHERE type = 'accrual' AND expires_at IS NULL`
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `UPDATE bonus_operations SET remaining = 0
+       WHERE type IN ('spend', 'expire') AND remaining IS NULL`
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `UPDATE users u
+       SET bonus_balance = COALESCE((
+         SELECT SUM(b.remaining)::int FROM bonus_operations b
+         WHERE b.user_id = u.id AND b.type = 'accrual'
+           AND b.remaining > 0 AND b.expires_at > NOW()
+       ), 0)`
+    )
+    .catch(() => {});
+}
+
 /** Старые БД без полного набора колонок users — иначе INSERT при регистрации падает (42P01/23502/42703). */
 async function ensureUsersRegisterColumns(pool) {
   await ensureColumnExists(pool, 'users', 'first_name', "TEXT NOT NULL DEFAULT ''");
@@ -934,6 +1112,19 @@ async function ensureUsersRegisterColumns(pool) {
   await ensureColumnExists(pool, 'users', 'login_attempts', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumnExists(pool, 'users', 'locked_until', 'TEXT');
   await ensureColumnExists(pool, 'users', 'created_at', 'TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+  await ensureColumnExists(pool, 'users', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumnExists(pool, 'users', 'email_verify_token', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'email_verify_expires', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'password_reset_token', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'password_reset_expires', 'TEXT');
+
+  await pool.query(`
+    UPDATE users
+    SET email_verified = 1
+    WHERE COALESCE(email_verified, 0) = 0
+      AND lower(email) NOT LIKE '%@phone.ekvaline.local'
+      AND lower(email) NOT LIKE '%@ekvaline.local'
+  `).catch(() => {});
 }
 
 async function ensureProductsCatalogColumns(pool) {
@@ -1079,30 +1270,7 @@ async function seedIfEmpty(pool) {
     },
   ]);
 
-  const demoAboutCertificates = JSON.stringify([
-    {
-      image: 'assets/certificate-card.jpg',
-      alt: 'Карточка предприятия',
-      badge: 'Документ',
-      title: 'Карточка предприятия',
-      description:
-        'Реквизиты организации, контакты, банковские данные и юридическая информация.',
-    },
-    {
-      image: 'assets/certificate-eac.jpg',
-      alt: 'Декларация о соответствии ЕАЭС',
-      badge: 'ЕАЭС',
-      title: 'Декларация о соответствии',
-      description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
-    },
-    {
-      image: 'assets/certificate-lab.jpg',
-      alt: 'Протокол лабораторных испытаний',
-      badge: 'Лаборатория',
-      title: 'Протокол испытаний',
-      description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
-    },
-  ]);
+  const demoAboutCertificates = JSON.stringify(ABOUT_CERTIFICATES_SITE_DEFAULT);
 
   const demoDeliveryCoverage = JSON.stringify({
     title: 'Зоны покрытия Оренбурга',
@@ -1142,12 +1310,6 @@ async function seedIfEmpty(pool) {
       demoDeliveryCoverage,
     ]
   );
-
-  await pool.query(
-    `INSERT INTO site_settings (key, value) VALUES ('deliveryAvailability', $1)
-     ON CONFLICT (key) DO NOTHING`,
-    [JSON.stringify({ closedDays: [], closedSlots: [] })]
-  );
 }
 
 async function ensureDefaultDeliveryAddresses(pool) {
@@ -1163,6 +1325,46 @@ async function ensureDefaultDeliveryAddresses(pool) {
     await pool.query(
       'INSERT INTO delivery_addresses (label, address_line, sort_order, active, notes) VALUES ($1,$2,$3,1,\'\')',
       d
+    );
+  }
+}
+
+/** Названия как на catalog.html — чтобы заказ с сайта находил product_id. */
+async function ensureSiteCatalogProducts(pool) {
+  const rows = [
+    ['Электрическая помпа', 2100, null, 25, 10, 'Аксессуары'],
+    ['Пустая тара', 400, null, 80, 5, 'Аксессуары'],
+    ['Кулер для воды Vatten L 45 NE', 29900, null, 5, 11, 'Оборудование'],
+    ['Кулер для воды AEL LK-AEL-47c black/silver', 7450, null, 5, 12, 'Оборудование'],
+    ['Одноразовые стаканы', 0, null, 100, 13, 'Аксессуары'],
+  ];
+  for (const r of rows) {
+    const [name, price, volume, stock, sortOrder, catName] = r;
+    const exact = await pool.query('SELECT id FROM products WHERE lower(trim(name)) = lower(trim($1)) LIMIT 1', [
+      name,
+    ]);
+    if (exact.rowCount > 0) continue;
+
+    if (/электрическ/i.test(name) && /помп/i.test(name)) {
+      const alias = await pool.query(
+        `SELECT id FROM products WHERE lower(name) LIKE '%электрическ%' AND lower(name) LIKE '%помп%' ORDER BY id LIMIT 1`
+      );
+      if (alias.rowCount > 0) {
+        await pool.query('UPDATE products SET name = $1, price = $2, hidden = 0 WHERE id = $3', [
+          name,
+          price,
+          alias.rows[0].id,
+        ]);
+        continue;
+      }
+    }
+
+    const cat = await pool.query('SELECT id FROM categories WHERE name = $1', [catName]);
+    if (!cat.rowCount) continue;
+    await pool.query(
+      `INSERT INTO products (category_id, name, description, price, volume_liters, stock, sort_order, hidden)
+       VALUES ($1,$2,'',$3,$4,$5,$6,0)`,
+      [cat.rows[0].id, name, price, volume, stock, sortOrder]
     );
   }
 }
@@ -1221,8 +1423,7 @@ const DEMO_SEED_TAG = '§ekva_seed';
 /** Целевое число заявок на календарный день доставки. */
 const DEMO_ORDERS_PER_DAY = 100;
 /** Сколько последних дней наполняем до DEMO_ORDERS_PER_DAY. */
-const DEMO_SEED_CALENDAR_DAYS = 30;
-const DEMO_AUDIT_TAG = '§ekva_audit';
+const DEMO_SEED_CALENDAR_DAYS = 14;
 /** Не досеивать день, если заказов уже не меньше этого порога. */
 const DEMO_DAY_MIN_ORDERS = 85;
 const ORDER_REPORT_DATE_SQL = `COALESCE(NULLIF(trim(delivery_date), ''), to_char(created_at, 'YYYY-MM-DD'))`;
@@ -1311,87 +1512,6 @@ function buildDemoClientProfiles() {
 }
 
 const DEMO_CLIENT_PROFILES = buildDemoClientProfiles();
-
-/** Имена в колонке orders.driver и в driver_route_label учётки водителя (как в панели оператора). */
-const DEMO_DRIVER_ROUTE_LABELS = [
-  'Петров Пётр Петрович',
-  'Сидоров Сергей Сергеевич',
-  'Казаченко Сергей',
-  'Комаров Сергей',
-  'Лукашин Евгений',
-  'Макаров Александр Александрович',
-  'Кравцов Илья Петрович',
-  'Новиков Дмитрий Сергеевич',
-  'Белов Андрей Владимирович',
-];
-
-const DEMO_DRIVER_PROFILES = [
-  { label: 'Петров Пётр Петрович', first_name: 'Пётр', last_name: 'Петров', email: 'driver.petrov@ekvaline.local', phone: '79002000001' },
-  { label: 'Сидоров Сергей Сергеевич', first_name: 'Сергей', last_name: 'Сидоров', email: 'driver.sidorov@ekvaline.local', phone: '79002000002' },
-  { label: 'Казаченко Сергей', first_name: 'Сергей', last_name: 'Казаченко', email: 'driver.kazachenko@ekvaline.local', phone: '79002000003' },
-  { label: 'Комаров Сергей', first_name: 'Сергей', last_name: 'Комаров', email: 'driver.komarov@ekvaline.local', phone: '79002000004' },
-  { label: 'Лукашин Евгений', first_name: 'Евгений', last_name: 'Лукашин', email: 'driver.lukashin@ekvaline.local', phone: '79002000005' },
-  { label: 'Макаров Александр Александрович', first_name: 'Александр', last_name: 'Макаров', email: 'driver.makarov@ekvaline.local', phone: '79002000006' },
-  { label: 'Кравцов Илья Петрович', first_name: 'Илья', last_name: 'Кравцов', email: 'driver.kravtsov@ekvaline.local', phone: '79002000007' },
-  { label: 'Новиков Дмитрий Сергеевич', first_name: 'Дмитрий', last_name: 'Новиков', email: 'driver.novikov@ekvaline.local', phone: '79002000008' },
-  { label: 'Белов Андрей Владимирович', first_name: 'Андрей', last_name: 'Белов', email: 'driver.belov@ekvaline.local', phone: '79002000009' },
-];
-
-async function ensureDemoDriverUsers(pool) {
-  const pwd = bcrypt.hashSync('DriverEkva2026!', 12);
-  for (const profile of DEMO_DRIVER_PROFILES) {
-    const email = String(profile.email || '').trim();
-    if (!email) continue;
-    const label = String(profile.label || '').trim();
-    const first = String(profile.first_name || '').trim();
-    const last = String(profile.last_name || '').trim();
-    const phone = String(profile.phone || '').trim();
-    const existing = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1', [email]);
-    if (existing.rowCount > 0) {
-      await pool.query(
-        `UPDATE users SET first_name = $1, last_name = $2, phone = $3, role = 'driver',
-         driver_route_label = $4, blocked = 0 WHERE id = $5`,
-        [first, last, phone, label, existing.rows[0].id]
-      );
-      continue;
-    }
-    await pool.query(
-      `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, driver_route_label)
-       VALUES ($1,$2,$3,$4,$5,'driver', NOW()::text, $6)`,
-      [email, phone, pwd, first, last, label]
-    );
-  }
-}
-
-/** Переводит английские коды оплаты в подписи для интерфейса оператора. */
-async function normalizeDemoOrderPayments(pool) {
-  await pool.query(`UPDATE orders SET payment_method = 'Наличная' WHERE lower(trim(payment_method)) = 'cash'`);
-  await pool.query(`UPDATE orders SET payment_method = 'Безнал' WHERE lower(trim(payment_method)) = 'noncash'`);
-  await pool.query(`UPDATE orders SET payment_method = 'Карта' WHERE lower(trim(payment_method)) = 'card'`);
-}
-
-/** Равномерно назначает экспедиторов на демо-заказы (кроме новых/отменённых). */
-async function syncDemoOrderDrivers(pool) {
-  const labels = DEMO_DRIVER_ROUTE_LABELS;
-  if (!labels.length) return;
-  const rows = await pool.query(
-    `SELECT id, status FROM orders
-     WHERE position($1 IN coalesce(courier_note, '')) > 0
-        OR position($2 IN coalesce(courier_note, '')) > 0
-        OR position($3 IN coalesce(courier_note, '')) > 0
-     ORDER BY id ASC`,
-    [DEMO_SEED_TAG, DEMO_MONTH_NOTE_TAG, DEMO_OP_ORDER_NOTE_TAG]
-  );
-  for (let i = 0; i < rows.rows.length; i += 1) {
-    const id = rows.rows[i].id;
-    const st = String(rows.rows[i].status || '').trim();
-    if (['new', 'pending_operator', 'cancelled'].includes(st)) {
-      await pool.query(`UPDATE orders SET driver = NULL WHERE id = $1`, [id]);
-      continue;
-    }
-    await pool.query(`UPDATE orders SET driver = $1 WHERE id = $2`, [labels[i % labels.length], id]);
-  }
-}
 
 async function ensureDemoClientProfile(pool, profile) {
   const email = String(profile.email || '').trim();
@@ -1513,91 +1633,6 @@ function demoStatusForDay(deliveryDay, todayIso, index) {
  * Демо-заявки: ~100 заказов на каждый из последних DEMO_SEED_CALENDAR_DAYS дней доставки.
  * Маркер §ekva_seed в примечании (в UI скрывается).
  */
-/** События журнала оператора за последний месяц (действия оператора и водителя, не админа). */
-async function ensureDemoOperatorAuditEvents(pool) {
-  const minWanted = 450;
-  const existing = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM order_audit_events WHERE position($1 IN coalesce(detail, '')) > 0`,
-    [DEMO_AUDIT_TAG]
-  );
-  if (existing.rows[0].n >= minWanted) return;
-
-  const opRow = await pool.query(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`, [
-    'operatorekva@mail.ru',
-  ]);
-  if (!opRow.rowCount) return;
-  const operatorId = opRow.rows[0].id;
-
-  const drvRow = await pool.query(`SELECT id FROM users WHERE lower(role) = 'driver' ORDER BY id ASC LIMIT 1`);
-  const driverId = drvRow.rowCount ? drvRow.rows[0].id : null;
-
-  await pool.query(`DELETE FROM order_audit_events WHERE position($1 IN coalesce(detail, '')) > 0`, [DEMO_AUDIT_TAG]);
-
-  const ordersRes = await pool.query(
-    `SELECT id FROM orders
-     WHERE position($1 IN coalesce(courier_note, '')) > 0
-        OR position($2 IN coalesce(courier_note, '')) > 0
-     ORDER BY id DESC
-     LIMIT 4000`,
-    [DEMO_SEED_TAG, DEMO_MONTH_NOTE_TAG]
-  );
-  const orders = ordersRes.rows;
-  if (!orders.length) return;
-
-  const patchReasons = [
-    'Назначен экспедитор',
-    'Изменение заказа (без переноса/отмены)',
-    'Уточнён адрес доставки',
-    'Подтверждён оператором',
-  ];
-  const rescheduleReasons = ['Клиент просит перенести на вечер', 'Не успели в интервал — перенос'];
-  const cancelReasons = ['Клиент отказался', 'Дубль заказа', 'Нет связи с клиентом'];
-
-  const insertSql = `INSERT INTO order_audit_events (order_id, action, reason, actor_user_id, detail, created_at)
-    VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`;
-
-  const now = new Date();
-  for (let dayOff = 0; dayOff < 30; dayOff += 1) {
-    const day = isoCalendarDay(new Date(now.getTime() - dayOff * 86400000));
-    const eventsToday = 16 + (dayOff % 6);
-    for (let e = 0; e < eventsToday; e += 1) {
-      const order = orders[(dayOff * 19 + e * 13) % orders.length];
-      const pick = (dayOff + e) % 10;
-      let action;
-      let actor;
-      let reason;
-      if (pick <= 5) {
-        action = 'operator_patch';
-        actor = operatorId;
-        reason = patchReasons[e % patchReasons.length];
-      } else if (pick === 6 && driverId) {
-        action = 'driver_mark_delivered';
-        actor = driverId;
-        reason = 'Доставлен (водитель)';
-      } else if (pick === 7) {
-        action = 'order_reschedule';
-        actor = operatorId;
-        reason = rescheduleReasons[e % rescheduleReasons.length];
-      } else if (pick === 8) {
-        action = 'order_status_cancelled';
-        actor = operatorId;
-        reason = cancelReasons[e % cancelReasons.length];
-      } else {
-        action = 'operator_patch';
-        actor = operatorId;
-        reason = patchReasons[(e + 1) % patchReasons.length];
-      }
-      const hours = 8 + ((e * 37 + dayOff * 11) % 11);
-      const mins = (e * 19 + dayOff * 3) % 60;
-      const createdAt = new Date(
-        `${day}T${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:00`
-      );
-      const detail = JSON.stringify({ tag: DEMO_AUDIT_TAG });
-      await pool.query(insertSql, [order.id, action, reason, actor, detail, createdAt.toISOString()]);
-    }
-  }
-}
-
 async function ensureDemoOperatorOrders(pool) {
   await syncDemoOperatorOrderClients(pool);
 
@@ -1617,9 +1652,15 @@ async function ensureDemoOperatorOrders(pool) {
 
   const now = new Date();
   const todayIso = isoCalendarDay(now);
-  const zones = ['Центр', 'Степной', 'Доп. зона', 'Окраина', 'Подхват'];
-  const drivers = DEMO_DRIVER_ROUTE_LABELS;
-  const payments = ['Наличная', 'Безнал', 'Рассчетный счет', 'Наличная', 'Карта', 'Безнал'];
+  const zones = ['Центр', 'Степной', 'Доп. зона', 'Подхват'];
+  const drivers = [
+    'Петров Пётр Петрович',
+    'Сидоров Сергей Сергеевич',
+    'Казаченко Сергей',
+    'Комаров Сергей',
+    'Лукашин Евгений',
+  ];
+  const payments = ['cash', 'card', 'noncash', 'cash', 'card', 'noncash'];
   const slots = ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00', '09:00 – 17:00'];
   const addresses = [
     'Оренбург, ул. Чкалова, д. 15',
@@ -1661,7 +1702,7 @@ async function ensureDemoOperatorOrders(pool) {
   const title = String(prod.name || 'Вода 18.9л');
   const insertSql = `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method,
     bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum, created_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9,$10,$11,$12,$13::timestamptz,$13::timestamptz)`;
+    VALUES `;
 
   for (let dayOffset = 0; dayOffset < DEMO_SEED_CALENDAR_DAYS; dayOffset += 1) {
     const deliveryDay = isoCalendarDay(new Date(now.getTime() - dayOffset * 86400000));
@@ -1671,50 +1712,56 @@ async function ensureDemoOperatorOrders(pool) {
     const need = Math.max(0, DEMO_ORDERS_PER_DAY - onDay);
     if (need <= 0) continue;
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (let i = 0; i < need; i += 1) {
-        const globalIx = dayOffset * DEMO_ORDERS_PER_DAY + i;
-        const qty = 1 + (globalIx % 6);
-        const unit = demoWaterUnitPrice(qty);
-        const totalSum = Math.round(unit * qty);
-        const itemsJson = JSON.stringify([{ title, qty, unit_price: unit }]);
-        const status = demoStatusForDay(deliveryDay, todayIso, globalIx);
-        const zone = zones[globalIx % zones.length];
-        let driver = drivers[globalIx % drivers.length];
-        if (['new', 'pending_operator', 'cancelled'].includes(status)) driver = null;
-        const payment = payments[globalIx % payments.length];
-        const slot = slots[globalIx % slots.length];
-        const address = addresses[globalIx % addresses.length];
-        const note = noteWithDemoTags(notes[globalIx % notes.length], DEMO_SEED_TAG);
-        const createdAt = new Date(`${deliveryDay}T08:00:00`);
-        const minutes = 8 * 60 + (globalIx * 7) % (11 * 60);
-        createdAt.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-        const createdIso = createdAt.toISOString();
+    const chunks = [];
+    const params = [];
+    let p = 1;
+    for (let i = 0; i < need; i += 1) {
+      const globalIx = dayOffset * DEMO_ORDERS_PER_DAY + i;
+      const qty = 1 + (globalIx % 6);
+      const unit = demoWaterUnitPrice(qty);
+      const totalSum = Math.round(unit * qty);
+      const itemsJson = JSON.stringify([{ title, qty, unit_price: unit }]);
+      const status = demoStatusForDay(deliveryDay, todayIso, globalIx);
+      const zone = zones[globalIx % zones.length];
+      let driver = drivers[globalIx % drivers.length];
+      if (['new', 'pending_operator', 'cancelled'].includes(status)) driver = null;
+      const payment = payments[globalIx % payments.length];
+      const slot = slots[globalIx % slots.length];
+      const address = addresses[globalIx % addresses.length];
+      const note = noteWithDemoTags(notes[globalIx % notes.length], DEMO_SEED_TAG);
+      const createdAt = new Date(`${deliveryDay}T08:00:00`);
+      const minutes = 8 * 60 + (globalIx * 7) % (11 * 60);
+      createdAt.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+      const createdIso = createdAt.toISOString();
 
-        await client.query(insertSql, [
-          clientIds[globalIx % clientIds.length],
-          address,
-          deliveryDay,
-          slot,
-          status,
-          payment,
-          itemsJson,
-          note,
-          zone,
-          driver,
-          0,
-          totalSum,
-          createdIso,
-        ]);
-      }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
+      chunks.push(
+        `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},0,0,$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++}::timestamptz,$${p}::timestamptz)`
+      );
+      params.push(
+        clientIds[globalIx % clientIds.length],
+        address,
+        deliveryDay,
+        slot,
+        status,
+        payment,
+        itemsJson,
+        note,
+        zone,
+        driver,
+        0,
+        totalSum,
+        createdIso,
+        createdIso
+      );
+      p -= 1;
+    }
+
+    const batchSize = 25;
+    for (let start = 0; start < chunks.length; start += batchSize) {
+      const slice = chunks.slice(start, start + batchSize);
+      const sliceParams = params.splice(0, slice.length * 14);
+      if (!slice.length) continue;
+      await pool.query(insertSql + slice.join(','), sliceParams);
     }
   }
 }
@@ -1749,12 +1796,7 @@ async function checkPostgresConnection() {
 
 module.exports = {
   openDatabase,
-  ensureDemoDriverUsers,
-  ensureDemoOperatorAuditEvents,
-  normalizeDemoOrderPayments,
-  syncDemoOrderDrivers,
   ensureDemoOperatorOrders,
   syncDemoOperatorOrderClients,
   checkPostgresConnection,
-  DEMO_DRIVER_ROUTE_LABELS,
 };

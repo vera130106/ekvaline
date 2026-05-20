@@ -2,7 +2,8 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1b3f6d" />
     <title>ЭкваЛайн — Панель водителя</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,8 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
+    <link rel="stylesheet" href="styles.css?v=20260520drv" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260521client" />
   </head>
   <body class="driver-page">
     <header class="drv-topbar">
@@ -52,39 +53,33 @@
         </div>
       </section>
 
-      <section class="drv-card" id="drvMainCard" hidden>
-        <h1 class="drv-h1">Мои заказы</h1>
-        <p class="drv-muted" id="drvHint"></p>
-        <p class="drv-muted drv-intro">
-          Сверху — «В работе у вас»: заказ уже у вас на доставке. Ниже — назначены на вас, но ещё у оператора или в подготовке. Когда отдали клиенту,
-          нажмите «Доставлен».
-        </p>
-        <div class="drv-table-wrap">
-          <table class="drv-table">
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Клиент</th>
-                <th>Телефон</th>
-                <th>Адрес</th>
-                <th>Дата доставки</th>
-                <th>Интервал</th>
-                <th>Товар</th>
-                <th>Сумма</th>
-                <th>Статус</th>
-                <th>Действие</th>
-              </tr>
-            </thead>
-            <tbody id="drvOrdersBody"></tbody>
-          </table>
+      <section class="drv-card drv-card-route" id="drvMainCard" hidden>
+        <div class="drv-route-head">
+          <div>
+            <h1 class="drv-h1">Маршрут на сегодня</h1>
+            <p class="drv-muted drv-intro" id="drvHint"></p>
+          </div>
+          <div class="drv-stats" id="drvStats" aria-live="polite"></div>
         </div>
-        <div id="drvToast" class="drv-toast" hidden role="status">
-          <span id="drvToastText"></span>
+
+        <div class="drv-legend" aria-label="Подсветка заказов">
+          <span class="drv-legend-item drv-legend-item--way"><span class="drv-legend-dot"></span>В пути</span>
+          <span class="drv-legend-item drv-legend-item--done"><span class="drv-legend-dot"></span>Доставлен</span>
+          <span class="drv-legend-item drv-legend-item--wait"><span class="drv-legend-dot"></span>Ожидает этапа</span>
         </div>
+
+        <p class="drv-sync" id="drvSyncAt" aria-live="polite"></p>
+
+        <div id="drvOrdersList" class="drv-orders" role="list"></div>
       </section>
     </main>
 
+    <div id="drvToast" class="drv-toast" hidden role="status">
+      <span id="drvToastText"></span>
+    </div>
+
     <script src="api-client.js"></script>
-    <script src="driver.js"></script>
+    <script src="orders-sync.js?v=20260520sync"></script>
+    <script src="driver.js?v=20260520drv"></script>
   </body>
 </html>

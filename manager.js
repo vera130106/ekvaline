@@ -753,6 +753,151 @@
     `;
   }
 
+  async function syncBlogPollToServer(poll) {
+    const api = window.EkvalineAPI;
+    if (!api?.json) return;
+    try {
+      const payload = poll
+        ? {
+            poll: {
+              id: poll.id,
+              title: poll.title || 'Опрос дня',
+              question: poll.question,
+              active: !!poll.active,
+              options: (poll.options || []).map((opt) => ({
+                id: opt.id,
+                text: opt.text,
+              })),
+            },
+          }
+        : { poll: null };
+      await api.json('/api/manager/blog-poll', { method: 'PUT', body: payload });
+      api.resetCsrf?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function computeBlogQualityMetrics() {
+    const hidden = new Set(state.admin.hiddenPostIds || []);
+    const published = getPublishedIds();
+    const posts = sortByDateDesc(state.posts);
+    let totalReads = 0;
+    let totalComments = 0;
+    let totalReactions = 0;
+    let shortExcerpt = 0;
+    posts.forEach((post) => {
+      totalReads += effectivePostReads(post);
+      totalComments += (post.comments || []).length;
+      const reactions = post.reactions || {};
+      totalReactions +=
+        (Number(reactions.useful) || 0) + (Number(reactions.new) || 0) + (Number(reactions.tryIt) || 0);
+      if (String(post.excerpt || '').trim().length < 40) shortExcerpt += 1;
+    });
+    return {
+      totalPosts: posts.length,
+      visiblePosts: published.size,
+      hiddenPosts: posts.filter((p) => hidden.has(p.id)).length,
+      archivedPosts: Math.max(0, posts.length - published.size - posts.filter((p) => hidden.has(p.id)).length),
+      totalReads,
+      totalComments,
+      totalReactions,
+      shortExcerpt,
+    };
+  }
+
+  function renderQualityControl() {
+    const root = document.getElementById('managerQualityStats');
+    if (!(root instanceof HTMLElement)) return;
+    const m = computeBlogQualityMetrics();
+    const engagementScore = m.totalReads + m.totalComments * 2 + m.totalReactions;
+    const flags = [];
+    if (m.visiblePosts <= 0) {
+      flags.push({ kind: 'warn', text: 'Нет видимых постов в клиентской ленте — опубликуйте или покажите материалы.' });
+    } else {
+      flags.push({ kind: 'ok', text: `В клиентской ленте сейчас ${m.visiblePosts} из ${m.totalPosts} материалов.` });
+    }
+    if (m.shortExcerpt > 0) {
+      flags.push({
+        kind: 'warn',
+        text: `${m.shortExcerpt} пост(ов) с очень коротким описанием — проверьте качество анонса.`,
+      });
+    }
+    if (m.hiddenPosts > 0) {
+      flags.push({ kind: 'warn', text: `${m.hiddenPosts} материал(ов) скрыто от клиентов.` });
+    }
+    root.innerHTML = `
+      <div class="manager-quality-stat"><span>Материалов в архиве</span><strong>${m.totalPosts}</strong></div>
+      <div class="manager-quality-stat"><span>Видно клиентам</span><strong>${m.visiblePosts}</strong></div>
+      <div class="manager-quality-stat"><span>Открытий «Читать»</span><strong>${m.totalReads}</strong></div>
+      <div class="manager-quality-stat"><span>Комментариев</span><strong>${m.totalComments}</strong></div>
+      <div class="manager-quality-stat"><span>Реакций</span><strong>${m.totalReactions}</strong></div>
+      <div class="manager-quality-stat"><span>Индекс вовлечённости</span><strong>${engagementScore}</strong></div>
+      ${flags.map((f) => `<p class="manager-quality-flag is-${f.kind}">${escapeHtml(f.text)}</p>`).join('')}
+    `;
+  }
+
+  function renderPollResultCard(poll) {
+    const active = !!poll.active;
+    const badge = active
+      ? '<span class="manager-poll-result-badge is-active">активен</span>'
+      : '<span class="manager-poll-result-badge is-archived">архив</span>';
+    const sourceLabel = poll.source === 'blog' ? 'опрос блога' : 'клиентский опрос';
+    const bars = (poll.options || [])
+      .map(
+        (opt) => `
+        <div class="manager-poll-result-row">
+          <div class="manager-poll-result-row-top">
+            <span>${escapeHtml(opt.text || '')}</span>
+            <strong>${Number(opt.votes || 0)} (${Number(opt.percent || 0)}%)</strong>
+          </div>
+          <div class="manager-poll-result-bar"><span style="width:${Math.max(0, Math.min(100, Number(opt.percent || 0)))}%"></span></div>
+        </div>`
+      )
+      .join('');
+    return `
+      <article class="manager-poll-result-card">
+        <div class="manager-poll-result-head">
+          <h3>${escapeHtml(poll.title || 'Опрос')}</h3>
+          <div>${badge}<span class="manager-poll-result-badge">${escapeHtml(sourceLabel)}</span></div>
+        </div>
+        <p class="manager-poll-result-question">${escapeHtml(poll.question || '')}</p>
+        <div class="manager-poll-result-bars">${bars || '<p class="manager-note">Нет вариантов ответа.</p>'}</div>
+        <p class="manager-poll-result-meta">Всего голосов: <strong>${Number(poll.total_votes || 0)}</strong></p>
+      </article>
+    `;
+  }
+
+  async function renderPollResults() {
+    const root = document.getElementById('managerPollResults');
+    if (!(root instanceof HTMLElement)) return;
+    const api = window.EkvalineAPI;
+    if (!api?.json) {
+      root.innerHTML = '<p class="manager-note">Подключите сервер, чтобы видеть результаты опросов из базы данных.</p>';
+      return;
+    }
+    try {
+      const r = await api.json('/api/manager/content-insights');
+      if (!r.ok) {
+        root.innerHTML = '<p class="manager-note">Не удалось загрузить результаты опросов.</p>';
+        return;
+      }
+      const polls = Array.isArray(r.data?.polls) ? r.data.polls : [];
+      const engagement = r.data?.engagement || {};
+      if (!polls.length) {
+        root.innerHTML =
+          '<p class="manager-note">Опросов пока нет. Создайте опрос в блоке «Опрос» или в настройках админ-панели — голоса клиентов появятся здесь автоматически.</p>';
+        return;
+      }
+      root.innerHTML = `
+        <p class="manager-note">Активных опросов: <strong>${Number(engagement.active_polls || 0)}</strong> · Всего голосов в системе: <strong>${Number(engagement.total_poll_votes || 0)}</strong></p>
+        ${polls.map(renderPollResultCard).join('')}
+      `;
+    } catch {
+      root.innerHTML = '<p class="manager-note">Не удалось загрузить результаты опросов.</p>';
+    }
+  }
+
   function renderAll() {
     renderStorySelect();
     renderStoriesList();
@@ -762,6 +907,8 @@
     renderBlocksForm();
     renderBlocksPreview();
     renderBlogStats();
+    renderQualityControl();
+    void renderPollResults();
     updateArchiveArrowsState();
   }
 
@@ -1146,6 +1293,7 @@
           })),
         };
         saveAdminData();
+        void syncBlogPollToServer(state.admin.hydrationPoll);
         showSuccessModal('Опрос сохранен и опубликован.');
       });
     }
@@ -1155,6 +1303,8 @@
         if (!state.admin.hydrationPoll) return;
         state.admin.hydrationPoll = { ...state.admin.hydrationPoll, active: false };
         saveAdminData();
+        void syncBlogPollToServer(state.admin.hydrationPoll);
+        void renderPollResults();
         showSuccessModal('Опрос скрыт.');
       });
     }
@@ -1453,6 +1603,14 @@
     }
   }
 
+  function syncManagerHeadForRole(user) {
+    const backBtn = document.getElementById('managerBackToAdminBtn');
+    if (backBtn instanceof HTMLElement) {
+      const role = String(user?.role || '').toLowerCase();
+      backBtn.hidden = role !== 'admin';
+    }
+  }
+
   function enforceAccess() {
     const user = readCurrentUser();
     const role = String(user?.role || '').toLowerCase();
@@ -1466,6 +1624,7 @@
       window.location.href = 'index.html';
       return false;
     }
+    syncManagerHeadForRole(user);
     return true;
   }
 
@@ -1478,6 +1637,7 @@
     await hydrateManagerFromServerSession();
     if (!enforceAccess()) return;
     initState();
+    void syncBlogPollToServer(state.admin.hydrationPoll);
     renderAll();
     initLaunchFormModals();
     setupArchiveCarousel();

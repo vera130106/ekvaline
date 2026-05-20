@@ -2,7 +2,7 @@
   const BASE = '';
   const DEFAULT_CENTER = [51.7682, 55.0969];
   const MAP_UNAVAILABLE_MSG =
-    'Карта недоступна: на сервере не задан ключ YANDEX_MAPS_API_KEY (JavaScript API и HTTP Геокодер).';
+    'Карта недоступна: задайте YANDEX_MAPS_API_KEY в .env (ключ JavaScript API Яндекс.Карт).';
 
   let configCache = null;
   let configPromise = null;
@@ -115,15 +115,60 @@
     };
   }
 
+  const YMAP_CHROME_SELECTORS = [
+    '[class*="copyright"]',
+    '[class*="gotoymaps"]',
+    '[class*="gototech"]',
+    '[class*="open-block"]',
+    '[class*="map-open"]',
+  ];
+
+  function applyYandexMapChromeHide(container) {
+    if (!(container instanceof HTMLElement)) return;
+    YMAP_CHROME_SELECTORS.forEach((sel) => {
+      container.querySelectorAll(sel).forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        node.style.setProperty('display', 'none', 'important');
+        node.style.setProperty('visibility', 'hidden', 'important');
+        node.style.setProperty('opacity', '0', 'important');
+        node.style.setProperty('pointer-events', 'none', 'important');
+        node.setAttribute('aria-hidden', 'true');
+      });
+    });
+  }
+
+  /** Скрывает © и «Открыть в Яндекс.Картах» (классы меняются между версиями 2.1.x). */
+  function hideYandexMapChrome(container) {
+    if (!(container instanceof HTMLElement)) return () => {};
+    container.classList.add('ek-map-host');
+    const hide = () => applyYandexMapChromeHide(container);
+    hide();
+    const obs = new MutationObserver(() => hide());
+    obs.observe(container, { childList: true, subtree: true });
+    window.setTimeout(hide, 80);
+    window.setTimeout(hide, 400);
+    window.setTimeout(hide, 1200);
+    return () => obs.disconnect();
+  }
+
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
-    const map = new window.ymaps.Map(container, {
-      center: centerLatLng,
-      zoom,
-      controls: opts.controls || ['zoomControl'],
-    });
+    const map = new window.ymaps.Map(
+      container,
+      {
+        center: centerLatLng,
+        zoom,
+        controls: opts.controls || ['zoomControl'],
+      },
+      {
+        suppressMapOpenBlock: true,
+        suppressObsoleteBrowserNotifier: true,
+      }
+    );
     if (opts.disableScrollZoom) map.behaviors.disable('scrollZoom');
     else map.behaviors.enable('scrollZoom');
+
+    const stopChromeObserver = hideYandexMapChrome(container);
 
     function invalidateSize() {
       try {
@@ -131,9 +176,10 @@
       } catch (_) {
         /**/
       }
+      applyYandexMapChromeHide(container);
     }
 
-    return { map, invalidateSize };
+    return { map, invalidateSize, detachMapChrome: stopChromeObserver };
   }
 
   /** Демо-карта на странице «Доставка». */
@@ -165,7 +211,7 @@
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
-        const { map, invalidateSize } = createYandexMap(container, center, z, {
+        const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         let placemark = null;
@@ -210,6 +256,11 @@
           invalidateSize,
           destroy() {
             try {
+              detachMapChrome?.();
+            } catch (_) {
+              /**/
+            }
+            try {
               map.destroy();
             } catch (_) {
               /**/
@@ -220,9 +271,31 @@
       .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
   }
 
-  function attachOrdersLayer(engine, hostMap, onPopupActionClose) {
+  function bindOrdersMapPopupNav(rootEl, closePopupFn, popupRootHandler) {
+    if (!(rootEl instanceof HTMLElement) || rootEl._ekvalinePopupNav) return;
+    rootEl._ekvalinePopupNav = true;
+    rootEl.addEventListener('click', (event) => {
+      const btOrder = event.target.closest('[data-opx-zone-open-order]');
+      if (btOrder && rootEl.contains(btOrder)) {
+        event.preventDefault();
+        event.stopPropagation();
+        closePopupFn();
+        if (popupRootHandler) popupRootHandler({ type: 'order', btn: btOrder });
+        return;
+      }
+      const btn = event.target.closest('[data-opx-zone-open-client]');
+      if (btn && rootEl.contains(btn)) {
+        event.preventDefault();
+        event.stopPropagation();
+        closePopupFn();
+        if (popupRootHandler) popupRootHandler({ type: 'client', btn });
+      }
+    });
+  }
+
+  function attachOrdersLayer(hostMap, onPopupActionClose) {
     const closer = typeof onPopupActionClose === 'function' ? onPopupActionClose : () => {};
-    if (engine !== 'yandex' || !hostMap || !window.ymaps) return null;
+    if (!hostMap || !window.ymaps) return null;
 
     const collection = new window.ymaps.GeoObjectCollection();
     hostMap.geoObjects.add(collection);
@@ -258,7 +331,7 @@
     };
   }
 
-  /** Карта заказов оператора: маркеры + балуны. */
+  /** Карта заказов оператора: Яндекс.Карты, маркеры по статусу заказа. */
   function createOrdersMapHost(container, centerLatLng, zoom, popupRootHandler) {
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : [51.78, 55.11];
@@ -269,7 +342,7 @@
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
 
         container.innerHTML = '';
-        const { map, invalidateSize } = createYandexMap(container, center, z, {
+        const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: true,
         });
 
@@ -282,28 +355,9 @@
         }
 
         const containerEl = map.container.getElement();
-        if (containerEl instanceof HTMLElement && !map._ekvalinePopupNav) {
-          map._ekvalinePopupNav = true;
-          containerEl.addEventListener('click', (event) => {
-            const btOrder = event.target.closest('[data-opx-zone-open-order]');
-            if (btOrder && containerEl.contains(btOrder)) {
-              event.preventDefault();
-              event.stopPropagation();
-              closePopupFn();
-              if (popupRootHandler) popupRootHandler({ type: 'order', btn: btOrder });
-              return;
-            }
-            const btn = event.target.closest('[data-opx-zone-open-client]');
-            if (btn && containerEl.contains(btn)) {
-              event.preventDefault();
-              event.stopPropagation();
-              closePopupFn();
-              if (popupRootHandler) popupRootHandler({ type: 'client', btn });
-            }
-          });
-        }
+        bindOrdersMapPopupNav(containerEl, closePopupFn, popupRootHandler);
 
-        const layerBundle = attachOrdersLayer('yandex', map, closePopupFn);
+        const layerBundle = attachOrdersLayer(map, closePopupFn);
         if (!layerBundle) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
 
         return {
@@ -312,6 +366,11 @@
           invalidateSize,
           ...layerBundle,
           destroy() {
+            try {
+              detachMapChrome?.();
+            } catch (_) {
+              /**/
+            }
             try {
               map.destroy();
             } catch (_) {

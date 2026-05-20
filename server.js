@@ -12,6 +12,7 @@ const Tokens = require('csrf');
 const { openDatabase, checkPostgresConnection } = require('./db');
 const schemas = require('./schemas');
 const { estimateWaterConsumption } = require('./waterCalcEngine');
+const { aggregatePaymentRows } = require('./order-payment');
 const { mountGeocodeRoutes } = require('./geocode-proxy');
 const deliveryAvailability = require('./delivery-availability');
 const orenburgAddress = require('./orenburg-address');
@@ -25,6 +26,10 @@ const {
   createRateLimiter,
   assertProductionSessionSecret,
 } = require('./security-middleware');
+const mailer = require('./mailer');
+const bonusProgram = require('./bonusProgram');
+const pollVotes = require('./pollVotes');
+const clientNotifications = require('./clientNotifications');
 
 assertProductionSessionSecret();
 
@@ -122,11 +127,12 @@ const DEFAULT_ABOUT_CERTIFICATES = Object.freeze([
     description: 'Реквизиты организации, контакты, банковские данные и юридическая информация.',
   },
   {
-    image: 'assets/certificate-eac.jpg',
+    image: 'assets/certificate-declaration-eac-2025-preview.jpg',
     alt: 'Декларация о соответствии ЕАЭС',
-    badge: 'ЕАЭС',
+    badge: 'Документ',
     title: 'Декларация о соответствии',
     description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
+    pdf: 'assets/certificate-declaration-eac-2025.pdf',
   },
   {
     image: 'assets/certificate-lab.jpg',
@@ -209,12 +215,24 @@ function sitePollsForPublic(storedParsed) {
   return sanitizeSitePollsLoaded(storedParsed).filter((p) => p.active);
 }
 
+const pollVoteHelpers = {
+  sanitizeSitePolls: sanitizeSitePollsLoaded,
+  sitePollsForPublic,
+};
+
 function aboutCertImageAllowed(image) {
   const s = String(image ?? '').trim();
   if (!s) return false;
   if (/^(javascript:|vbscript:)/i.test(s)) return false;
   if (/^data:/i.test(s)) return /^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,/i.test(s);
   return true;
+}
+
+function aboutCertPdfAllowed(pdf) {
+  const s = String(pdf ?? '').trim();
+  if (!s) return true;
+  if (/^(javascript:|vbscript:|data:)/i.test(s)) return false;
+  return /^(assets\/|\/assets\/)[^?\s#]+\.pdf$/i.test(s);
 }
 
 function sanitizeAboutCertificatesLoaded(raw) {
@@ -229,7 +247,11 @@ function sanitizeAboutCertificatesLoaded(raw) {
     const title = String(item.title ?? '').trim().slice(0, 120);
     const description = String(item.description ?? '').trim().slice(0, 400);
     if (image.length < 3 || alt.length < 1 || title.length < 1 || description.length < 1) continue;
-    out.push({ image, alt, badge, title, description });
+    const pdfRaw = String(item.pdf ?? '').trim().slice(0, 280);
+    const pdf = aboutCertPdfAllowed(pdfRaw) ? pdfRaw.replace(/^\/+/, '') : '';
+    const row = { image, alt, badge, title, description };
+    if (pdf) row.pdf = pdf;
+    out.push(row);
     if (out.length >= 12) break;
   }
   return out;
@@ -424,6 +446,7 @@ function publicUser(row) {
     role: row.role,
     bonus_balance: row.bonus_balance,
     blocked: !!row.blocked,
+    email_verified: !!Number(row.email_verified),
   };
   if (row.role === 'driver') base.driver_route_label = drl || '';
   else if (drl) base.driver_route_label = drl;
@@ -643,6 +666,189 @@ async function findUserByCredential(cred) {
   return null;
 }
 
+async function findUserByEmail(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return null;
+  return db.prepare('SELECT * FROM users WHERE lower(email) = lower(?)').get(e);
+}
+
+function authToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function generateAuthCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function hashAuthCode(code) {
+  return bcrypt.hashSync(String(code), 10);
+}
+
+function verifyAuthCode(code, hash) {
+  if (!code || !hash) return false;
+  return bcrypt.compareSync(String(code), String(hash));
+}
+
+function emailCodeDeliveryPayload(mailResult, email) {
+  const addr = String(email || '').trim();
+  if (!mailer.isMailConfigured() && String(process.env.NODE_ENV || '').trim() === 'production') {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        'Отправка писем не настроена на сервере. Укажите SMTP в .env (SMTP_HOST, SMTP_USER, SMTP_PASS) и перезапустите сайт.',
+    };
+  }
+  if (mailResult?.dev && mailResult?.devCode) {
+    return {
+      ok: true,
+      message:
+        'Почта не настроена (SMTP): письмо на ящик не ушло. Введите код ниже — он сгенерирован для этой сессии (режим разработки).',
+      devMode: true,
+      devCode: String(mailResult.devCode),
+      email: addr,
+    };
+  }
+  return {
+    ok: true,
+    message: `Код отправлен на ${addr}. Проверьте входящие и папку «Спам».`,
+    email: addr,
+  };
+}
+
+async function sendEmailVerificationForUser(user) {
+  if (!user || !user.id) return null;
+  const code = generateAuthCode();
+  const codeHash = hashAuthCode(code);
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await db
+    .prepare(
+      `UPDATE users SET email_verify_token = ?, email_verify_expires = ?, email_verified = 0 WHERE id = ?`
+    )
+    .run(codeHash, expires, user.id);
+  const mailResult = await mailer.sendVerificationCodeEmail({
+    email: user.email,
+    code,
+    firstName: user.first_name,
+    lastName: user.last_name,
+  });
+  return { code, mailResult };
+}
+
+async function sendPasswordResetForUser(user) {
+  if (!user || !user.id) return null;
+  const code = generateAuthCode();
+  const codeHash = hashAuthCode(code);
+  const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  await db
+    .prepare(`UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?`)
+    .run(codeHash, expires, user.id);
+  const mailResult = await mailer.sendPasswordCodeEmail({
+    email: user.email,
+    code,
+    firstName: user.first_name,
+    lastName: user.last_name,
+  });
+  return { code, mailResult };
+}
+
+const CLIENT_SAVED_ADDRESS_LIMIT = 20;
+
+function publicClientSavedAddress(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    label: row.label || '',
+    address_line: row.address_line,
+    is_default: !!Number(row.is_default),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+async function listClientSavedAddresses(userId) {
+  return db
+    .prepare(
+      `SELECT * FROM client_saved_addresses WHERE user_id = ? ORDER BY is_default DESC, updated_at DESC, id DESC`
+    )
+    .all(userId);
+}
+
+async function backfillClientSavedAddressesFromOrders(userId) {
+  const countRow = await db
+    .prepare('SELECT COUNT(*) AS c FROM client_saved_addresses WHERE user_id = ?')
+    .get(userId);
+  if (Number(countRow?.c || 0) > 0) return;
+  const rows = await db
+    .prepare(
+      `SELECT address AS address_line FROM orders
+       WHERE user_id = ? AND trim(address) <> ''
+       GROUP BY address
+       ORDER BY MAX(id) DESC
+       LIMIT 10`
+    )
+    .all(userId);
+  let first = true;
+  for (const row of rows) {
+    const line = String(row.address_line || '').trim();
+    if (line.length < 8) continue;
+    await db
+      .prepare(
+        `INSERT INTO client_saved_addresses (user_id, label, address_line, is_default) VALUES (?, ?, ?, ?)`
+      )
+      .run(userId, '', line, first ? 1 : 0);
+    first = false;
+  }
+}
+
+async function rememberClientDeliveryAddress(userId, addressLine) {
+  const line = String(addressLine || '').trim();
+  if (line.length < 8) return;
+  const existing = await db
+    .prepare(
+      `SELECT id FROM client_saved_addresses WHERE user_id = ? AND lower(trim(address_line)) = lower(trim(?))`
+    )
+    .get(userId, line);
+  if (existing) {
+    await db.prepare(`UPDATE client_saved_addresses SET updated_at = NOW() WHERE id = ?`).run(existing.id);
+    return;
+  }
+  const countRow = await db
+    .prepare('SELECT COUNT(*) AS c FROM client_saved_addresses WHERE user_id = ?')
+    .get(userId);
+  const count = Number(countRow?.c || 0);
+  if (count >= CLIENT_SAVED_ADDRESS_LIMIT) return;
+  const isDefault = count === 0 ? 1 : 0;
+  await db
+    .prepare(
+      `INSERT INTO client_saved_addresses (user_id, label, address_line, is_default) VALUES (?, ?, ?, ?)`
+    )
+    .run(userId, '', line, isDefault);
+}
+
+async function setClientSavedAddressDefault(userId, addressId) {
+  await db.withTransaction(async (tx) => {
+    await tx.prepare('UPDATE client_saved_addresses SET is_default = 0 WHERE user_id = ?').run(userId);
+    await tx
+      .prepare(
+        'UPDATE client_saved_addresses SET is_default = 1, updated_at = NOW() WHERE id = ? AND user_id = ?'
+      )
+      .run(addressId, userId);
+  });
+}
+
+function authCodeExpired(expiresIso) {
+  const exp = expiresIso ? new Date(expiresIso).getTime() : 0;
+  return !exp || exp < Date.now();
+}
+
+function clientNeedsEmailVerification(user) {
+  const role = String(user?.role || '').toLowerCase();
+  if (role !== 'client') return false;
+  if (schemas.isPseudoClientEmail(user.email)) return false;
+  return !Number(user.email_verified);
+}
+
 function isLocked(row) {
   if (!row.locked_until) return false;
   const t = new Date(row.locked_until).getTime();
@@ -762,8 +968,49 @@ app.get('/api/public/settings', asyncHandler(async (req, res) => {
   out.aboutCertificates = aboutCertificatesForPublic(Array.isArray(out.aboutCertificates) ? out.aboutCertificates : []);
   const covRow = await stmt.get('deliveryCoverage');
   out.deliveryCoverage = deliveryCoverageForPublic(covRow?.value);
+  const blogPollRow = await stmt.get('blogHydrationPoll');
+  if (blogPollRow?.value) {
+    try {
+      const parsed = pollVotes.sanitizeBlogHydrationPoll(JSON.parse(blogPollRow.value));
+      if (parsed?.active) out.blogHydrationPoll = parsed;
+    } catch {
+      /* ignore */
+    }
+  }
   res.set('Cache-Control', 'no-store');
   res.json(out);
+}));
+
+app.get('/api/public/poll-aggregates', asyncHandler(async (req, res) => {
+  const polls = await pollVotes.loadPollDefinitions(db, pollVoteHelpers);
+  const pollIds = polls.map((p) => p.id);
+  const aggregates = await pollVotes.getPollAggregates(db, pollIds);
+  res.set('Cache-Control', 'no-store');
+  res.json({ aggregates });
+}));
+
+app.post('/api/polls/vote', csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.pollVoteSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const voterKey = pollVotes.getVoterKey(req);
+  const userId = req.session?.userId || null;
+  try {
+    const result = await pollVotes.castPollVote(
+      db,
+      v.value.poll_id,
+      v.value.option_id,
+      voterKey,
+      userId,
+      pollVoteHelpers
+    );
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    const status = Number(e?.status) || 500;
+    if (status >= 500) {
+      return res.status(500).json({ error: 'Не удалось сохранить голос.' });
+    }
+    return res.status(status).json({ error: String(e.message || 'Не удалось проголосовать.') });
+  }
 }));
 
 mountGeocodeRoutes(app, { asyncHandler });
@@ -801,9 +1048,15 @@ app.get('/api/public/checkout-options', asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/public/delivery-availability', asyncHandler(async (_req, res) => {
-  const availability = await loadDeliveryAvailability();
-  res.set('Cache-Control', 'no-store');
-  res.json(availability);
+  const record = await loadDeliveryAvailabilityRecord();
+  const availability = record.availability || deliveryAvailability.emptyAvailability();
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.json({
+    closedDays: availability.closedDays,
+    closedSlots: availability.closedSlots,
+    updatedAt: record.meta?.updatedAt || null,
+  });
 }));
 
 app.get('/api/products', asyncHandler(async (req, res) => {
@@ -821,10 +1074,15 @@ app.get('/api/products', asyncHandler(async (req, res) => {
 app.get('/api/auth/me', asyncHandler(async (req, res) => {
   const uid = req.session && req.session.userId;
   if (!uid) return res.json({ user: null });
-  const user = await getUserById(uid);
+  let user = await getUserById(uid);
   if (!user || user.blocked) {
     req.session.userId = null;
     return res.json({ user: null });
+  }
+  if (String(user.role || '').toLowerCase() === 'client') {
+    await bonusProgram.expireUserBonuses(db, uid);
+    await bonusProgram.syncBonusBalanceFromLots(db, uid);
+    user = await getUserById(uid);
   }
   res.json({ user: publicUser(user) });
 }));
@@ -840,14 +1098,17 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
   if (exists) return res.status(409).json({ error: 'Email или телефон уже зарегистрированы.' });
 
   const password_hash = bcrypt.hashSync(password, 12);
+  const verifyCode = generateAuthCode();
+  const verifyCodeHash = hashAuthCode(verifyCode);
+  const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   let info;
   try {
     info = await db
       .prepare(
-        `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at)
-         VALUES (?, ?, ?, ?, ?, 'client', NOW()::text)`
+        `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, email_verified, email_verify_token, email_verify_expires)
+         VALUES (?, ?, ?, ?, ?, 'client', NOW()::text, 0, ?, ?)`
       )
-      .run(email, phone, password_hash, first_name, last_name || '');
+      .run(email, phone, password_hash, first_name, last_name || '', verifyCodeHash, verifyExpires);
   } catch (e) {
     const code = e && e.code;
     // eslint-disable-next-line no-console
@@ -889,32 +1150,80 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
     });
   }
 
-  req.session.userId = user.id;
   audit(db, user.id, 'register', `email=${email}`, req.ip);
+  let registerMailResult = { dev: true };
+  try {
+    registerMailResult = await mailer.sendVerificationCodeEmail({
+      email,
+      code: verifyCode,
+      firstName: first_name,
+      lastName: last_name || '',
+    });
+  } catch (mailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[register] Не удалось отправить письмо:', mailErr && mailErr.message);
+    if (mailer.isMailConfigured()) {
+      return res.status(500).json({
+        error: 'Аккаунт создан, но письмо с кодом не отправилось. Проверьте SMTP или запросите код в кабинете.',
+      });
+    }
+  }
+  const registerMail = emailCodeDeliveryPayload(registerMailResult, email);
+
+  req.session.userId = user.id;
   try {
     await saveSessionPromise(req);
   } catch (sessErr) {
     // eslint-disable-next-line no-console
     console.error('[register] Ошибка сохранения сессии:', sessErr);
-    return res.status(500).json({
-      error:
-        'Учётная запись создана, но сессия не сохранилась (часто таблица express_session или права к БД). См. консоль сервера.',
-    });
   }
-  res.json({ user: publicUser(user) });
+
+  const out = {
+    user: publicUser(user),
+    needsEmailVerification: true,
+    email,
+    message: registerMail.ok
+      ? registerMail.message
+      : 'Аккаунт создан. Подтвердите email в личном кабинете.',
+    redirectCabinet: true,
+  };
+  if (registerMail.devMode) {
+    out.devMode = true;
+    out.devCode = registerMail.devCode;
+  }
+  if (!registerMail.ok) out.mailError = registerMail.error;
+  res.json(out);
 }));
 
 app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (req, res) => {
-  const v = schemas.validate(schemas.loginSchema, req.body);
+  const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
+  const hasEmailField = rawBody.email != null && String(rawBody.email).trim() !== '';
+  const v = hasEmailField
+    ? schemas.validate(schemas.clientLoginSchema, rawBody)
+    : schemas.validate(schemas.loginSchema, rawBody);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
-  const { credential, password } = v.value;
-  const credNorm = normalizeCredential(credential);
-  const user = await findUserByCredential(credential);
-  if (!user) return res.status(401).json({ error: 'Неверный логин или пароль.' });
+  const password = v.value.password;
+  let user = null;
+  if (hasEmailField) {
+    user = await findUserByEmail(v.value.email);
+  } else {
+    const { credential } = v.value;
+    const credNorm = normalizeCredential(credential);
+    user = await findUserByCredential(credential);
+    const roleLower = String(user?.role || '').toLowerCase();
+    if (user && roleLower === 'client' && credNorm.kind === 'phone') {
+      return res.status(401).json({ error: 'Вход в личный кабинет возможен только по email.' });
+    }
+    if (['operator', 'manager', 'admin'].includes(roleLower) && credNorm.kind === 'phone') {
+      return res.status(401).json({ error: 'Вход оператора, менеджера и администратора возможен только по email.' });
+    }
+  }
+
+  if (!user) return res.status(401).json({ error: 'Неверный email или пароль.' });
   const roleLower = String(user.role || '').toLowerCase();
-  if (['operator', 'manager', 'admin'].includes(roleLower) && credNorm.kind === 'phone') {
-    return res.status(401).json({ error: 'Вход оператора, менеджера и администратора возможен только по email.' });
+  if (roleLower === 'client' && schemas.isPseudoClientEmail(user.email)) {
+    return res.status(401).json({ error: 'Для этого номера оформите полную регистрацию с вашим email на сайте.' });
   }
   if (user.blocked) return res.status(403).json({ error: 'Учётная запись заблокирована.' });
   if (isLocked(user)) {
@@ -923,7 +1232,7 @@ app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (r
 
   if (!bcrypt.compareSync(password, user.password_hash)) {
     await recordLoginFail(user.id);
-    return res.status(401).json({ error: 'Неверный логин или пароль.' });
+    return res.status(401).json({ error: 'Неверный email или пароль.' });
   }
 
   await recordLoginOk(user.id);
@@ -941,6 +1250,361 @@ app.post('/api/auth/logout', csrfMiddleware, (req, res) => {
   });
 });
 
+app.get('/api/auth/verify-email', asyncHandler(async (req, res) => {
+  res.redirect('/cabinet.html#cabinet-verify-email');
+}));
+
+app.post('/api/auth/send-email-verify-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (String(user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Подтверждение email доступно только клиентам.' });
+  }
+  if (Number(user.email_verified)) {
+    return res.json({ ok: true, message: 'Email уже подтверждён.' });
+  }
+  if (schemas.isPseudoClientEmail(user.email)) {
+    return res.status(400).json({ error: 'Для этой учётной записи подтверждение недоступно.' });
+  }
+
+  let sent;
+  try {
+    sent = await sendEmailVerificationForUser(user);
+  } catch (mailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[send-email-verify-code]', mailErr && mailErr.message);
+    return res.status(500).json({ error: 'Не удалось отправить код. Попробуйте позже.' });
+  }
+
+  const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
+  if (!delivery.ok) {
+    return res.status(delivery.status || 503).json({ error: delivery.error });
+  }
+
+  const body = { ok: true, email: delivery.email, message: delivery.message };
+  if (delivery.devMode) {
+    body.devMode = true;
+    body.devCode = delivery.devCode;
+  }
+  res.json(body);
+}));
+
+app.post('/api/auth/confirm-email-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.confirmEmailCodeSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (Number(user.email_verified)) {
+    return res.json({ ok: true, user: publicUser(user), message: 'Email уже подтверждён.' });
+  }
+  if (!user.email_verify_token || authCodeExpired(user.email_verify_expires)) {
+    return res.status(400).json({ error: 'Код истёк. Запросите новый код на email.' });
+  }
+  if (!verifyAuthCode(v.value.code, user.email_verify_token)) {
+    return res.status(400).json({ error: 'Неверный код. Проверьте письмо и попробуйте снова.' });
+  }
+
+  await db
+    .prepare(
+      `UPDATE users SET email_verified = 1, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?`
+    )
+    .run(user.id);
+  const updated = await getUserById(user.id);
+  audit(db, user.id, 'email_verified', user.email, req.ip);
+  res.json({
+    ok: true,
+    user: publicUser(updated),
+    message: 'Email подтверждён и сохранён в базе данных.',
+  });
+}));
+
+app.post('/api/auth/resend-verification', authRateLimit, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.forgotPasswordSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await findUserByEmail(v.value.email);
+  if (user && String(user.role || '').toLowerCase() === 'client' && !Number(user.email_verified)) {
+    try {
+      await sendEmailVerificationForUser(user);
+    } catch (mailErr) {
+      // eslint-disable-next-line no-console
+      console.error('[resend-verification]', mailErr && mailErr.message);
+    }
+  }
+
+  res.json({
+    ok: true,
+    message: 'Если аккаунт с таким email зарегистрирован и ещё не подтверждён, мы отправили новый код.',
+  });
+}));
+
+app.post('/api/auth/forgot-password', authRateLimit, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.forgotPasswordSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await findUserByEmail(v.value.email);
+  if (!user) {
+    return res.status(404).json({
+      error: 'Аккаунт с таким email не найден. Проверьте адрес или зарегистрируйтесь.',
+    });
+  }
+  if (String(user.role || '').toLowerCase() !== 'client') {
+    return res.status(400).json({
+      error: 'Восстановление пароля доступно только для клиентских аккаунтов.',
+    });
+  }
+  if (!Number(user.email_verified)) {
+    return res.status(400).json({
+      error: 'Email не подтверждён. Подтвердите почту при входе или в личном кабинете.',
+    });
+  }
+  if (schemas.isPseudoClientEmail(user.email)) {
+    return res.status(400).json({
+      error: 'Для этой учётной записи восстановление по email недоступно. Зарегистрируйтесь с вашим email.',
+    });
+  }
+
+  let delivery;
+  try {
+    const sent = await sendPasswordResetForUser(user);
+    delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
+  } catch (mailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[forgot-password]', mailErr && mailErr.message);
+    return res.status(500).json({ error: 'Не удалось отправить письмо. Попробуйте позже.' });
+  }
+  if (!delivery?.ok) {
+    // eslint-disable-next-line no-console
+    console.error('[forgot-password] mail not sent:', delivery?.error);
+    return res.status(500).json({
+      error: delivery?.error || 'Не удалось отправить письмо. Проверьте SMTP на сервере.',
+    });
+  }
+
+  const body = {
+    ok: true,
+    message: 'Код отправлен на email. Введите его ниже.',
+  };
+  if (delivery.devMode && delivery.devCode) {
+    body.devMode = true;
+    body.devCode = delivery.devCode;
+    body.message = delivery.message;
+  }
+  res.json(body);
+}));
+
+app.post('/api/auth/send-password-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (String(user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
+  }
+  if (!Number(user.email_verified)) {
+    return res.status(403).json({ error: 'Сначала подтвердите email в блоке выше.' });
+  }
+  if (schemas.isPseudoClientEmail(user.email)) {
+    return res.status(400).json({ error: 'Для этой учётной записи смена пароля недоступна.' });
+  }
+
+  let sent;
+  try {
+    sent = await sendPasswordResetForUser(user);
+  } catch (mailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[send-password-code]', mailErr && mailErr.message);
+    return res.status(500).json({ error: 'Не удалось отправить письмо. Проверьте SMTP на сервере.' });
+  }
+
+  const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
+  if (!delivery.ok) {
+    return res.status(delivery.status || 503).json({ error: delivery.error });
+  }
+
+  audit(db, user.id, 'password_reset_requested', user.email, req.ip);
+  const body = { ok: true, email: delivery.email, message: delivery.message };
+  if (delivery.devMode) {
+    body.devMode = true;
+    body.devCode = delivery.devCode;
+  }
+  res.json(body);
+}));
+
+app.post('/api/auth/verify-password-reset-code', authRateLimit, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.checkPasswordResetByEmailSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await findUserByEmail(v.value.email);
+  if (
+    !user ||
+    String(user.role || '').toLowerCase() !== 'client' ||
+    !Number(user.email_verified) ||
+    schemas.isPseudoClientEmail(user.email)
+  ) {
+    return res.status(400).json({ error: 'Неверный код или email. Запросите новый код.' });
+  }
+  if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
+    return res.status(400).json({ error: 'Код истёк. Нажмите «Отправить код» ещё раз.' });
+  }
+  if (!verifyAuthCode(v.value.code, user.password_reset_token)) {
+    return res.status(400).json({ error: 'Неверный код. Действует только последний код из письма.' });
+  }
+
+  res.json({
+    ok: true,
+    message: 'Код принят. Задайте новый пароль.',
+  });
+}));
+
+app.post('/api/auth/verify-password-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.confirmEmailCodeSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (String(user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
+  }
+  if (!Number(user.email_verified)) {
+    return res.status(403).json({ error: 'Сначала подтвердите email в личном кабинете.' });
+  }
+  if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
+    return res.status(400).json({ error: 'Код истёк. Нажмите «Отправить код на email» ещё раз.' });
+  }
+  if (!verifyAuthCode(v.value.code, user.password_reset_token)) {
+    return res.status(400).json({ error: 'Неверный код. Действует только последний код из письма.' });
+  }
+
+  res.json({
+    ok: true,
+    message: 'Код верный. Задайте новый пароль на шаге 3.',
+  });
+}));
+
+app.post('/api/auth/change-password-with-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.changePasswordWithCodeSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
+    return res.status(400).json({ error: 'Код истёк. Запросите новый код на email.' });
+  }
+  if (!verifyAuthCode(v.value.code, user.password_reset_token)) {
+    return res.status(400).json({ error: 'Неверный код. Проверьте письмо и попробуйте снова.' });
+  }
+
+  const password_hash = bcrypt.hashSync(v.value.password, 12);
+  await db
+    .prepare(
+      `UPDATE users SET password_hash = ?, password_changed_at = NOW()::text, password_reset_token = NULL, password_reset_expires = NULL, login_attempts = 0, locked_until = NULL WHERE id = ?`
+    )
+    .run(password_hash, user.id);
+
+  audit(db, user.id, 'password_reset', '', req.ip);
+  res.json({ ok: true, message: 'Пароль обновлён и сохранён в базе данных.' });
+}));
+
+app.post('/api/auth/request-password-reset', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (String(user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Смена пароля через email доступна только клиентам.' });
+  }
+  if (!Number(user.email_verified)) {
+    return res.status(403).json({ error: 'Сначала подтвердите email в личном кабинете.' });
+  }
+  if (schemas.isPseudoClientEmail(user.email)) {
+    return res.status(400).json({ error: 'Для этой учётной записи смена пароля по email недоступна.' });
+  }
+
+  let sent;
+  try {
+    sent = await sendPasswordResetForUser(user);
+  } catch (mailErr) {
+    // eslint-disable-next-line no-console
+    console.error('[request-password-reset]', mailErr && mailErr.message);
+    return res.status(500).json({ error: 'Не удалось отправить письмо. Проверьте SMTP на сервере.' });
+  }
+
+  const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
+  if (!delivery.ok) {
+    return res.status(delivery.status || 503).json({ error: delivery.error });
+  }
+
+  audit(db, user.id, 'password_reset_requested', user.email, req.ip);
+  const body = {
+    ok: true,
+    email: delivery.email,
+    message: delivery.message,
+  };
+  if (delivery.devMode) {
+    body.devMode = true;
+    body.devCode = delivery.devCode;
+  }
+  res.json(body);
+}));
+
+async function handleResetPasswordByEmail(req, res) {
+  const v = schemas.validate(schemas.resetPasswordByEmailSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const user = await findUserByEmail(v.value.email);
+  if (
+    !user ||
+    String(user.role || '').toLowerCase() !== 'client' ||
+    !Number(user.email_verified) ||
+    schemas.isPseudoClientEmail(user.email)
+  ) {
+    return res.status(400).json({ error: 'Неверный код или email. Запросите новый код на email.' });
+  }
+  if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
+    return res.status(400).json({ error: 'Код истёк. Запросите новый код на email.' });
+  }
+  if (!verifyAuthCode(v.value.code, user.password_reset_token)) {
+    return res.status(400).json({ error: 'Неверный код. Проверьте письмо и попробуйте снова.' });
+  }
+
+  const password_hash = bcrypt.hashSync(v.value.password, 12);
+  await db
+    .prepare(
+      `UPDATE users SET password_hash = ?, password_changed_at = NOW()::text, password_reset_token = NULL, password_reset_expires = NULL, login_attempts = 0, locked_until = NULL WHERE id = ?`
+    )
+    .run(password_hash, user.id);
+  audit(db, user.id, 'password_reset', 'by_email', req.ip);
+  res.json({ ok: true, message: 'Пароль обновлён. Войдите с новым паролем.' });
+}
+
+app.post('/api/auth/reset-password-by-email', authRateLimit, asyncHandler(handleResetPasswordByEmail));
+
+app.post('/api/auth/reset-password', authRateLimit, asyncHandler(async (req, res) => {
+  const byEmail = schemas.validate(schemas.resetPasswordByEmailSchema, req.body);
+  if (byEmail.ok) {
+    req.body = byEmail.value;
+    return handleResetPasswordByEmail(req, res);
+  }
+
+  const legacy = schemas.validate(schemas.resetPasswordSchema, req.body);
+  if (legacy.ok) {
+    const { token, password } = legacy.value;
+    const user = await db.prepare('SELECT * FROM users WHERE password_reset_token = ?').get(token);
+    if (!user || authCodeExpired(user.password_reset_expires)) {
+      return res.status(400).json({ error: 'Код или ссылка недействительны. Запросите новый код.' });
+    }
+    const password_hash = bcrypt.hashSync(password, 12);
+    await db
+      .prepare(
+        `UPDATE users SET password_hash = ?, password_changed_at = NOW()::text, password_reset_token = NULL, password_reset_expires = NULL WHERE id = ?`
+      )
+      .run(password_hash, user.id);
+    return res.json({ ok: true, message: 'Пароль обновлён.' });
+  }
+
+  return res.status(400).json({
+    error: 'Укажите email, 6-значный код из письма и новый пароль (страница reset-password.html).',
+  });
+}));
+
 app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.profileSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
@@ -953,13 +1617,216 @@ app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, 
     .get(email, phone, req.user.id);
   if (dup) return res.status(409).json({ error: 'Этот email или телефон уже заняты.' });
 
-  await db.prepare(
-    `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE id = ?`
-  ).run(first_name, last_name || '', email, phone, req.user.id);
+  const prev = await getUserById(req.user.id);
+  const emailChanged = prev && String(prev.email || '').toLowerCase() !== String(email).toLowerCase();
+  const isClient = String(prev?.role || '').toLowerCase() === 'client';
+
+  let profileVerifySent = null;
+  if (emailChanged && isClient) {
+    await db
+      .prepare(
+        `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ?, email_verified = 0, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?`
+      )
+      .run(first_name, last_name || '', email, phone, req.user.id);
+    const afterEmailChange = await getUserById(req.user.id);
+    try {
+      profileVerifySent = await sendEmailVerificationForUser(afterEmailChange);
+    } catch (mailErr) {
+      // eslint-disable-next-line no-console
+      console.error('[profile] verify mail', mailErr && mailErr.message);
+    }
+  } else {
+    await db.prepare(
+      `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE id = ?`
+    ).run(first_name, last_name || '', email, phone, req.user.id);
+  }
 
   const user = await getUserById(req.user.id);
-  audit(db, req.user.id, 'profile_update', '', req.ip);
-  res.json({ user: publicUser(user) });
+  audit(db, req.user.id, 'profile_update', emailChanged ? `email_changed=${email}` : '', req.ip);
+  const out = { user: publicUser(user) };
+  if (emailChanged && isClient) {
+    out.emailVerificationRequired = true;
+    let verifyDelivery = {
+      ok: true,
+      message: `Email изменён. Запросите код в блоке «Подтверждение email» или нажмите «Отправить код на email».`,
+    };
+    if (profileVerifySent) {
+      verifyDelivery = emailCodeDeliveryPayload(profileVerifySent.mailResult, email);
+    }
+    if (verifyDelivery.ok) {
+      out.message = verifyDelivery.message;
+      if (verifyDelivery.devMode) {
+        out.devMode = true;
+        out.devCode = verifyDelivery.devCode;
+      }
+    } else {
+      out.message = verifyDelivery.error || out.message;
+      out.mailError = verifyDelivery.error;
+    }
+  }
+  res.json(out);
+}));
+
+app.get('/api/profile/addresses', requireAuth, asyncHandler(async (req, res) => {
+  if (String(req.user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Раздел доступен только клиентам.' });
+  }
+  await backfillClientSavedAddressesFromOrders(req.user.id);
+  const rows = await listClientSavedAddresses(req.user.id);
+  res.json({ addresses: rows.map(publicClientSavedAddress) });
+}));
+
+app.post('/api/profile/addresses', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  if (String(req.user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Раздел доступен только клиентам.' });
+  }
+  const v = schemas.validate(schemas.clientSavedAddressCreateSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const addrCheck = orenburgAddress.validateDeliveryAddressLine(v.value.address_line);
+  if (!addrCheck.ok) return res.status(400).json({ error: addrCheck.error });
+
+  const countRow = await db
+    .prepare('SELECT COUNT(*) AS c FROM client_saved_addresses WHERE user_id = ?')
+    .get(req.user.id);
+  if (Number(countRow?.c || 0) >= CLIENT_SAVED_ADDRESS_LIMIT) {
+    return res.status(400).json({ error: `Можно сохранить не более ${CLIENT_SAVED_ADDRESS_LIMIT} адресов.` });
+  }
+
+  const dup = await db
+    .prepare(
+      `SELECT id FROM client_saved_addresses WHERE user_id = ? AND lower(trim(address_line)) = lower(trim(?))`
+    )
+    .get(req.user.id, v.value.address_line);
+  if (dup) return res.status(409).json({ error: 'Такой адрес уже есть в списке.' });
+
+  const wantDefault = !!v.value.is_default || Number(countRow?.c || 0) === 0;
+  if (wantDefault) {
+    await db.prepare('UPDATE client_saved_addresses SET is_default = 0 WHERE user_id = ?').run(req.user.id);
+  }
+
+  const info = await db
+    .prepare(
+      `INSERT INTO client_saved_addresses (user_id, label, address_line, is_default) VALUES (?, ?, ?, ?)`
+    )
+    .run(req.user.id, v.value.label || '', v.value.address_line, wantDefault ? 1 : 0);
+  const row = await db.prepare('SELECT * FROM client_saved_addresses WHERE id = ?').get(info.lastInsertRowid);
+  audit(db, req.user.id, 'client_address_create', `id=${row.id}`, req.ip);
+  res.json({ address: publicClientSavedAddress(row) });
+}));
+
+app.patch('/api/profile/addresses/:id', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  if (String(req.user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Раздел доступен только клиентам.' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Некорректный адрес.' });
+
+  const cur = await db
+    .prepare('SELECT * FROM client_saved_addresses WHERE id = ? AND user_id = ?')
+    .get(id, req.user.id);
+  if (!cur) return res.status(404).json({ error: 'Адрес не найден.' });
+
+  const v = schemas.validate(schemas.clientSavedAddressPatchSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const label = v.value.label != null ? v.value.label : cur.label;
+  const address_line = v.value.address_line != null ? v.value.address_line : cur.address_line;
+  if (v.value.address_line != null) {
+    const addrCheck = orenburgAddress.validateDeliveryAddressLine(address_line);
+    if (!addrCheck.ok) return res.status(400).json({ error: addrCheck.error });
+  }
+
+  if (v.value.address_line != null && v.value.address_line !== cur.address_line) {
+    const dup = await db
+      .prepare(
+        `SELECT id FROM client_saved_addresses WHERE user_id = ? AND lower(trim(address_line)) = lower(trim(?)) AND id != ?`
+      )
+      .get(req.user.id, address_line, id);
+    if (dup) return res.status(409).json({ error: 'Такой адрес уже есть в списке.' });
+  }
+
+  if (v.value.is_default === true) {
+    await setClientSavedAddressDefault(req.user.id, id);
+  }
+
+  await db
+    .prepare(
+      `UPDATE client_saved_addresses SET label = ?, address_line = ?, updated_at = NOW() WHERE id = ? AND user_id = ?`
+    )
+    .run(label || '', address_line, id, req.user.id);
+
+  if (v.value.is_default === false && Number(cur.is_default)) {
+    await db.prepare('UPDATE client_saved_addresses SET is_default = 0 WHERE id = ?').run(id);
+    const next = await db
+      .prepare(
+        `SELECT id FROM client_saved_addresses WHERE user_id = ? AND id != ? ORDER BY updated_at DESC, id DESC LIMIT 1`
+      )
+      .get(req.user.id, id);
+    if (next) {
+      await db.prepare('UPDATE client_saved_addresses SET is_default = 1 WHERE id = ?').run(next.id);
+    }
+  }
+
+  const row = await db.prepare('SELECT * FROM client_saved_addresses WHERE id = ?').get(id);
+  audit(db, req.user.id, 'client_address_patch', `id=${id}`, req.ip);
+  res.json({ address: publicClientSavedAddress(row) });
+}));
+
+app.delete('/api/profile/addresses/:id', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  if (String(req.user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Раздел доступен только клиентам.' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Некорректный адрес.' });
+
+  const cur = await db
+    .prepare('SELECT * FROM client_saved_addresses WHERE id = ? AND user_id = ?')
+    .get(id, req.user.id);
+  if (!cur) return res.status(404).json({ error: 'Адрес не найден.' });
+
+  await db.prepare('DELETE FROM client_saved_addresses WHERE id = ? AND user_id = ?').run(id, req.user.id);
+
+  if (Number(cur.is_default)) {
+    const next = await db
+      .prepare(
+        `SELECT id FROM client_saved_addresses WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1`
+      )
+      .get(req.user.id);
+    if (next) {
+      await db.prepare('UPDATE client_saved_addresses SET is_default = 1 WHERE id = ?').run(next.id);
+    }
+  }
+
+  audit(db, req.user.id, 'client_address_delete', `id=${id}`, req.ip);
+  res.json({ ok: true });
+}));
+
+app.get('/api/manager/content-insights', requireAuth, requireRole('manager', 'admin'), asyncHandler(async (req, res) => {
+  const insights = await pollVotes.buildManagerContentInsights(db, pollVoteHelpers);
+  res.json(insights);
+}));
+
+app.put('/api/manager/blog-poll', requireAuth, requireRole('manager', 'admin'), csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.blogHydrationPollPutSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const sanitized = v.value.poll ? pollVotes.sanitizeBlogHydrationPoll(v.value.poll) : null;
+  if (v.value.poll && !sanitized) {
+    return res.status(400).json({ error: 'Некорректные данные опроса блога.' });
+  }
+  await db
+    .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
+    .run('blogHydrationPoll', JSON.stringify(sanitized));
+  audit(db, req.user.id, 'manager_blog_poll', sanitized?.id || 'cleared', req.ip);
+  res.json({ ok: true, poll: sanitized });
+}));
+
+app.get('/api/profile/bonus-program', requireAuth, asyncHandler(async (req, res) => {
+  if (String(req.user.role || '').toLowerCase() !== 'client') {
+    return res.status(403).json({ error: 'Бонусная программа доступна только клиентам.' });
+  }
+  const summary = await bonusProgram.getBonusProgramSummary(db, req.user.id);
+  res.json(summary);
 }));
 
 /** Анонимная форма: страница может быть с file:// или с другого порта — без этого браузер блокирует POST. */
@@ -990,6 +1857,23 @@ app.get('/api/orders/my', requireAuth, asyncHandler(async (req, res) => {
   res.json({ orders: rows });
 }));
 
+app.get('/api/notifications/my', requireAuth, asyncHandler(async (req, res) => {
+  const notifications = await clientNotifications.listClientNotifications(db, req.user.id);
+  res.json({ notifications });
+}));
+
+app.patch('/api/notifications/:id/read', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id.' });
+  await clientNotifications.markClientNotificationRead(db, req.user.id, id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/notifications/read-all', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  await clientNotifications.markAllClientNotificationsRead(db, req.user.id);
+  res.json({ ok: true });
+}));
+
 app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.orderCreateSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
@@ -1011,10 +1895,11 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
     lineItems.push({ ...it, unit_price: p.price });
   }
 
-  let bonusSpend = Math.min(bonuses_used || 0, req.user.bonus_balance, Math.floor(subtotal));
+  const freshBalance = await bonusProgram.getAvailableBonusBalance(db, req.user.id);
+  const bonusSpend = Math.min(bonuses_used || 0, freshBalance, Math.floor(subtotal));
   let payable = Math.max(0, subtotal - bonusSpend);
 
-  const earn = Math.floor(subtotal * 0.05);
+  const earn = bonusProgram.computeOrderBonusEarn(subtotal, bonusSpend);
   const itemsJson = JSON.stringify({ lines: lineItems, subtotal, payable, bonusSpend });
 
   let orderId;
@@ -1044,25 +1929,34 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
       }
 
       if (bonusSpend > 0) {
-        await tx.prepare('UPDATE users SET bonus_balance = bonus_balance - ? WHERE id = ?').run(bonusSpend, req.user.id);
-        await tx.prepare(
-          'INSERT INTO bonus_operations (user_id, type, amount, description) VALUES (?, ?, ?, ?)'
-        ).run(req.user.id, 'spend', -bonusSpend, `Заказ #${orderId}`);
+        await bonusProgram.spendUserBonuses(db, req.user.id, bonusSpend, orderId, tx);
       }
       if (earn > 0) {
-        await tx.prepare('UPDATE users SET bonus_balance = bonus_balance + ? WHERE id = ?').run(earn, req.user.id);
-        await tx.prepare(
-          'INSERT INTO bonus_operations (user_id, type, amount, description) VALUES (?, ?, ?, ?)'
-        ).run(req.user.id, 'accrual', earn, `Начисление за заказ #${orderId}`);
+        await bonusProgram.accrueUserBonuses(db, req.user.id, earn, orderId, tx);
       }
     });
   } catch (e) {
+    if (Number(e?.status) === 400) {
+      return res.status(400).json({ error: String(e.message || 'Не удалось списать бонусы.') });
+    }
     return res.status(500).json({ error: 'Не удалось сохранить заказ.' });
   }
 
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   await insertOrderAuditEvent(db, order.id, 'order_create', 'Заказ оформлен клиентом', req.user.id, '');
   audit(db, req.user.id, 'order_create', `id=${order.id}`, req.ip);
+  try {
+    await clientNotifications.notifyOrderCreated(db, order);
+  } catch (notifErr) {
+    // eslint-disable-next-line no-console
+    console.error('[order] client notification', notifErr && notifErr.message);
+  }
+  try {
+    await rememberClientDeliveryAddress(req.user.id, address);
+  } catch (addrErr) {
+    // eslint-disable-next-line no-console
+    console.error('[order] save client address', addrErr && addrErr.message);
+  }
   const user = await getUserById(req.user.id);
   res.json({ order, user: publicUser(user) });
 }));
@@ -1125,6 +2019,12 @@ app.post(
     const orderRow = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
     await insertOrderAuditEvent(db, orderId, 'order_operator_create', 'Создан оператором', req.user.id, '');
     audit(db, req.user.id, 'order_operator_create', `id=${orderId}`, req.ip);
+    try {
+      await clientNotifications.notifyOrderCreated(db, orderRow);
+    } catch (notifErr) {
+      // eslint-disable-next-line no-console
+      console.error('[order] operator create notification', notifErr && notifErr.message);
+    }
     res.json({ order: orderRow });
   })
 );
@@ -1294,17 +2194,29 @@ app.post('/api/orders/:id/cancel', requireAuth, csrfMiddleware, asyncHandler(asy
   if (!['processing', 'confirmed'].includes(order.status)) {
     return res.status(400).json({ error: 'Этот заказ уже нельзя отменить.' });
   }
-  await db.prepare("UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(id);
+  const prevStatus = order.status;
+  await db.withTransaction(async (tx) => {
+    await tx.prepare("UPDATE orders SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(id);
+    await bonusProgram.reverseBonusesForCancelledOrder(tx, order, tx);
+  });
   const reason = String(vr.value.reason || '').trim();
   await insertOrderAuditEvent(db, id, 'order_cancel', reason, req.user.id, JSON.stringify({ source: 'cabinet_cancel' }));
   audit(db, req.user.id, 'order_cancel', `id=${id}`, req.ip);
-  res.json({ order: await db.prepare('SELECT * FROM orders WHERE id = ?').get(id) });
+  const updated = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+  try {
+    await clientNotifications.notifyOrderStatusChange(db, updated, prevStatus, 'cancelled');
+  } catch (notifErr) {
+    // eslint-disable-next-line no-console
+    console.error('[order] cancel notification', notifErr && notifErr.message);
+  }
+  res.json({ order: updated });
 }));
 
 /** Маршруты до параметрических `/api/orders/:id`. */
 app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(async (req, res) => {
   const label = driverAssignedLabel(req.user);
   if (!label) return res.json({ orders: [], warn: 'Администратор не указал вашу метку экспедитора.' });
+  const orderDaySql = `COALESCE(NULLIF(trim(o.delivery_date), ''), to_char(o.created_at, 'YYYY-MM-DD'))`;
   const rows = await db
     .prepare(
       `SELECT o.*,
@@ -1315,8 +2227,15 @@ app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(a
        JOIN users u ON u.id = o.user_id
        WHERE trim(COALESCE(o.driver, '')) = trim(?)
          AND trim(COALESCE(o.driver, '')) <> ''
-         AND o.status IN ('pending_operator', 'confirmed', 'processing', 'courier', 'on_way')
-       ORDER BY CASE WHEN trim(COALESCE(o.delivery_date, '')) <> '' THEN 0 ELSE 1 END,
+         AND o.status IN ('pending_operator', 'confirmed', 'processing', 'courier', 'on_way', 'delivered')
+         AND (
+           ${orderDaySql} = to_char(CURRENT_DATE, 'YYYY-MM-DD')
+           OR (
+             ${orderDaySql} < to_char(CURRENT_DATE, 'YYYY-MM-DD')
+             AND o.status NOT IN ('delivered', 'cancelled')
+           )
+         )
+       ORDER BY CASE WHEN o.status = 'delivered' THEN 2 WHEN o.status IN ('courier', 'on_way', 'processing') THEN 0 ELSE 1 END,
               o.delivery_date ASC NULLS LAST,
               o.created_at DESC,
               o.id DESC`
@@ -1354,9 +2273,17 @@ app.post(
         error: 'Заказ уже доставлен, отменён или ещё не передан водителю оператором.',
       });
     }
+    const prevStatus = order.status;
     await db
       .prepare(`UPDATE orders SET status = 'delivered', updated_at = datetime('now') WHERE id = ?`)
       .run(id);
+    const updatedOrder = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    try {
+      await clientNotifications.notifyOrderStatusChange(db, updatedOrder, prevStatus, 'delivered');
+    } catch (notifErr) {
+      // eslint-disable-next-line no-console
+      console.error('[order] delivered notification', notifErr && notifErr.message);
+    }
     await insertOrderAuditEvent(
       db,
       id,
@@ -1434,9 +2361,16 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
       return res.json({ order: unchanged });
     }
     values.push(id);
-    await db.prepare(`UPDATE orders SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+    const prevStatus = order.status;
+    const toCancelled = v.value.status === 'cancelled' && order.status !== 'cancelled';
+    await db.withTransaction(async (tx) => {
+      await tx.prepare(`UPDATE orders SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+      if (toCancelled) {
+        await bonusProgram.reverseBonusesForCancelledOrder(tx, order, tx);
+      }
+    });
     let evtAction = 'operator_patch';
-    if (v.value.status === 'cancelled' && order.status !== 'cancelled') evtAction = 'order_status_cancelled';
+    if (toCancelled) evtAction = 'order_status_cancelled';
     else if (
       (v.value.delivery_date != null &&
         deliveryDateStoredChanged(order.delivery_date, v.value.delivery_date)) ||
@@ -1449,6 +2383,14 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
     await insertOrderAuditEvent(db, id, evtAction, reasonForLog, req.user.id, JSON.stringify({ changed: changedKeys }));
     audit(db, req.user.id, 'order_patch', `id=${id}`, req.ip);
     const updated = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (v.value.status != null && String(v.value.status) !== String(prevStatus)) {
+      try {
+        await clientNotifications.notifyOrderStatusChange(db, updated, prevStatus, v.value.status);
+      } catch (notifErr) {
+        // eslint-disable-next-line no-console
+        console.error('[order] status notification', notifErr && notifErr.message);
+      }
+    }
     return res.json({ order: updated });
   }
 
@@ -1502,6 +2444,14 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
 
 /** Дата заказа для отчётов: доставка или дата создания. */
 const ADMIN_ORDER_DATE_EXPR = `COALESCE(NULLIF(trim(o.delivery_date), ''), to_char(o.created_at, 'YYYY-MM-DD'))`;
+/** В статистику админа — только реальные заказы оператора (без демо-маркеров и demo-клиентов). */
+const ADMIN_STATS_DEMO_EXCLUDE = `(
+  COALESCE(o.courier_note, '') NOT LIKE '%§ekva_seed%'
+  AND COALESCE(o.courier_note, '') NOT LIKE '%§demo_op%'
+  AND COALESCE(o.courier_note, '') NOT LIKE '%§demo_mo%'
+  AND lower(COALESCE(u.email, '')) NOT LIKE 'demo.%@ekvaline.local'
+  AND lower(COALESCE(u.email, '')) <> 'clienteekva@mail.ru'
+)`;
 
 function todayIsoLocal() {
   const d = new Date();
@@ -1526,7 +2476,7 @@ function parseAdminStatsPeriodQuery(req) {
 }
 
 function adminStatsOrderPeriodClause(from, to) {
-  const parts = [];
+  const parts = [ADMIN_STATS_DEMO_EXCLUDE];
   const vals = [];
   if (from) {
     parts.push(`${ADMIN_ORDER_DATE_EXPR} >= ?`);
@@ -1536,7 +2486,7 @@ function adminStatsOrderPeriodClause(from, to) {
     parts.push(`${ADMIN_ORDER_DATE_EXPR} <= ?`);
     vals.push(to);
   }
-  const where = parts.length ? `WHERE ${parts.join(' AND ')}` : '';
+  const where = `WHERE ${parts.join(' AND ')}`;
   return { where, vals };
 }
 
@@ -1546,9 +2496,22 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
   const { from, to } = parsed;
   const { where, vals } = adminStatsOrderPeriodClause(from, to);
 
-  const byRoleRows = await db.prepare(`SELECT role, COUNT(*)::int AS c FROM users GROUP BY role ORDER BY role`).all();
+  const byRoleRows = await db
+    .prepare(
+      `SELECT role, COUNT(*)::int AS c FROM users
+       WHERE lower(COALESCE(role, '')) IN ('admin', 'operator', 'manager', 'driver')
+          OR (
+            lower(role) = 'client'
+            AND lower(COALESCE(email, '')) NOT LIKE 'demo.%@ekvaline.local'
+            AND lower(COALESCE(email, '')) <> 'clienteekva@mail.ru'
+          )
+       GROUP BY role ORDER BY role`
+    )
+    .all();
   const usersByRole = {};
   for (const row of byRoleRows || []) usersByRole[String(row.role)] = Number(row.c) || 0;
+
+  const statsFrom = `FROM orders o JOIN users u ON u.id = o.user_id ${where}`;
 
   const summaryRow =
     (await db
@@ -1558,7 +2521,7 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
                 COUNT(*) FILTER (WHERE o.status = 'delivered')::int AS delivered_count,
                 COALESCE(SUM(o.total_sum) FILTER (WHERE o.status = 'delivered'), 0)::float AS delivered_sum,
                 COUNT(*) FILTER (WHERE o.status = 'cancelled')::int AS cancelled_count
-         FROM orders o ${where}`
+         ${statsFrom}`
       )
       .get(...vals)) || {};
 
@@ -1567,7 +2530,7 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
       `SELECT o.status AS status,
               COUNT(*)::int AS c,
               COALESCE(SUM(o.total_sum), 0)::float AS sum
-       FROM orders o ${where}
+       ${statsFrom}
        GROUP BY o.status
        ORDER BY c DESC, o.status`
     )
@@ -1578,29 +2541,28 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
       `SELECT COALESCE(NULLIF(trim(o.zone), ''), 'Не указана') AS label,
               COUNT(*)::int AS c,
               COALESCE(SUM(o.total_sum), 0)::float AS sum
-       FROM orders o ${where}
+       ${statsFrom}
        GROUP BY 1
        ORDER BY c DESC, label`
     )
     .all(...vals);
 
-  const ordersByPayment = await db
+  const ordersByPaymentRaw = await db
     .prepare(
-      `SELECT COALESCE(NULLIF(trim(o.payment_method), ''), 'Не указан') AS label,
-              COUNT(*)::int AS c,
-              COALESCE(SUM(o.total_sum), 0)::float AS sum
-       FROM orders o ${where}
-       GROUP BY 1
-       ORDER BY c DESC, label`
+      `SELECT o.payment_method,
+              o.total_sum::float AS sum
+       ${statsFrom}`
     )
     .all(...vals);
+
+  const ordersByPayment = aggregatePaymentRows(ordersByPaymentRaw);
 
   const ordersByDriver = await db
     .prepare(
       `SELECT COALESCE(NULLIF(trim(o.driver), ''), 'Не назначен') AS label,
               COUNT(*)::int AS c,
               COALESCE(SUM(o.total_sum), 0)::float AS sum
-       FROM orders o ${where}
+       ${statsFrom}
        GROUP BY 1
        ORDER BY c DESC, label
        LIMIT 20`
@@ -1640,7 +2602,11 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
       sum: x.sum,
     })),
     ordersByZone: mapRows(ordersByZone),
-    ordersByPayment: mapRows(ordersByPayment),
+    ordersByPayment: ordersByPayment.map((x) => ({
+      label: x.label,
+      count: x.count,
+      sum: x.sum,
+    })),
     ordersByDriver: mapRows(ordersByDriver),
     productsTotal: Number(prodRow.total ?? 0),
     productsVisible: Number(prodRow.visible ?? prodRow.total ?? 0),
@@ -2064,8 +3030,39 @@ server.on('listening', () => {
   if (!String(process.env.YANDEX_MAPS_API_KEY || '').trim()) {
     // eslint-disable-next-line no-console
     console.warn(
-      'Карты: задайте YANDEX_MAPS_API_KEY в .env (см. .env.example) — без ключа Яндекс.Карты не загрузятся.'
+      'Карты: задайте YANDEX_MAPS_API_KEY в .env (JavaScript API) — без ключа карта не загрузится.'
     );
+  }
+  const geocoderKey = String(
+    process.env.YANDEX_GEOCODER_API_KEY || process.env.YANDEX_MAPS_API_KEY || ''
+  ).trim();
+  if (!geocoderKey) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Геокодер: задайте YANDEX_GEOCODER_API_KEY в .env (HTTP API Геокодера) — поиск адресов не будет работать.'
+    );
+  }
+  if (!mailer.isMailConfigured()) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Почта (SMTP): не настроена — коды подтверждения выводятся в консоль и в кабинете (режим разработки). Задайте SMTP_HOST, SMTP_USER, SMTP_PASS в .env.'
+    );
+  } else {
+    mailer
+      .verifySmtpConnection()
+      .then((check) => {
+        if (check.ok) {
+          // eslint-disable-next-line no-console
+          console.log('Почта (SMTP): подключение проверено, письма уходят на реальные ящики.');
+        } else {
+          // eslint-disable-next-line no-console
+          console.error('Почта (SMTP): ошибка проверки —', check.error);
+        }
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('Почта (SMTP):', err && err.message);
+      });
   }
 
   checkPostgresConnection();

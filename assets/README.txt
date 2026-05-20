@@ -13,4 +13,8 @@
 - product-18-9-white.png, product-2-4.png, product-5.png
 - дополнительно: кулеры, помпы, тара — см. catalog.html
 
+Сертификаты (about.html, блок «Декларация о соответствии»):
+- certificate-declaration-eac-2025.pdf
+- certificate-declaration-eac-2025-preview.jpg  — превью на карточке (можно заменить в админке)
+
 После добавления файлов запустите: npm start

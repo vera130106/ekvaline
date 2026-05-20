@@ -32,6 +32,14 @@ const PUBLIC_WITH_TOPBAR = [
   'community.html',
 ];
 
+const CLIENT_PAGES_RESPONSIVE = [
+  ...PUBLIC_WITH_TOPBAR,
+  'cabinet.html',
+  'reset-password.html',
+];
+
+const STAFF_PAGES_RESPONSIVE = ['operator.html', 'admin.html', 'manager.html', 'driver.html'];
+
 const ROOT_JS = [
   'server.js',
   'db.js',
@@ -52,6 +60,11 @@ const ROOT_JS = [
   'admin.js',
   'driver.js',
   'cabinet-pg.js',
+  'reset-password-page.js',
+  'auth-password.js',
+  'notifications-client.js',
+  'clientNotifications.js',
+  'mailer.js',
   'waterCalcEngine.js',
 ];
 
@@ -258,5 +271,108 @@ function checkDockerFiles() {
 
 checkDockerFiles();
 checkCatalogImages();
+
+function checkResponsiveCss() {
+  for (const name of CLIENT_PAGES_RESPONSIVE) {
+    const html = read(name);
+    if (!html.includes('responsive-mobile.css')) {
+      fail(`${name}: нет responsive-mobile.css`);
+    }
+    if (!html.includes('width=device-width')) {
+      fail(`${name}: нет meta viewport`);
+    }
+  }
+  for (const name of STAFF_PAGES_RESPONSIVE) {
+    const html = read(name);
+    if (!html.includes('responsive-mobile.css')) {
+      fail(`${name}: нет responsive-mobile.css (адаптив staff)`);
+    }
+  }
+  ok('HTML: viewport + responsive-mobile на клиенте и staff');
+}
+
+function checkAuthEmailPassword() {
+  const cab = read('cabinet-pg.js');
+  if (!cab.includes('applyEmailCodeDeliveryResponse')) {
+    fail('cabinet-pg.js: нет applyEmailCodeDeliveryResponse');
+  }
+  if (!cab.includes('change-password-with-code')) {
+    fail('cabinet-pg.js: нет вызова change-password-with-code');
+  }
+  if (!cab.includes('verify-password-code')) {
+    fail('cabinet-pg.js: нет вызова verify-password-code');
+  }
+  if (!read('cabinet.html').includes('cabinet-password-blocked')) {
+    fail('cabinet.html: нет блока cabinet-password-blocked');
+  }
+  const rst = read('reset-password-page.js');
+  if (!rst.includes('reset-password-by-email')) {
+    fail('reset-password-page.js: нет reset-password-by-email');
+  }
+  const mail = read('mailer.js');
+  if (!mail.includes('isMailConfigured')) {
+    fail('mailer.js: нет isMailConfigured');
+  }
+  const srv = read('server.js');
+  for (const route of [
+    'confirm-email-code',
+    'verify-password-code',
+    'verify-password-reset-code',
+    'change-password-with-code',
+    'reset-password-by-email',
+    'send-email-verify-code',
+  ]) {
+    if (!srv.includes(route)) {
+      fail(`server.js: нет маршрута ${route}`);
+    }
+  }
+  if (!srv.includes('Аккаунт с таким email не найден')) {
+    fail('server.js: forgot-password должен отклонять несуществующий email');
+  }
+  const bp = read('bonusProgram.js');
+  if (!bp.includes('reverseBonusesForCancelledOrder')) {
+    fail('bonusProgram.js: нет reverseBonusesForCancelledOrder');
+  }
+  if (!bp.includes('computeOrderBonusEarn')) {
+    fail('bonusProgram.js: нет computeOrderBonusEarn');
+  }
+  if (!srv.includes('reverseBonusesForCancelledOrder')) {
+    fail('server.js: отмена заказа должна откатывать бонусы');
+  }
+  const ap = read('auth-password.js');
+  if (!ap.includes('validatePassword')) {
+    fail('auth-password.js: нет validatePassword');
+  }
+  if (!mail.includes('mailRecipientGreeting') || !mail.includes("'Клиент'")) {
+    fail('mailer.js: приветствие в письме — имя клиента или «Клиент»');
+  }
+  const scr = read('script.js');
+  for (const needle of [
+    'authForgotPanel',
+    'verify-password-reset-code',
+    'openForgotPasswordMode',
+    'authForgotPasswordForm',
+  ]) {
+    if (!scr.includes(needle)) {
+      fail(`script.js: нет ${needle} (восстановление пароля во входе)`);
+    }
+  }
+  if (!read('index.html').includes('auth-password.js')) {
+    fail('index.html: нет auth-password.js перед script.js');
+  }
+  if (!read('cabinet.html').includes('cabinetAddressesEmpty')) {
+    fail('cabinet.html: нет блока пустых адресов');
+  }
+  if (!scr.includes('checkoutSavedAddressesWrap')) {
+    fail('script.js: нет выбора сохранённых адресов при оформлении');
+  }
+  if (!scr.includes('EkvalineMapPicker')) {
+    fail('script.js: нет EkvalineMapPicker для кабинета');
+  }
+  ok('Почта и пароли: API, mailer, кабинет, auth-password.js');
+}
+
+checkResponsiveCss();
+checkAuthEmailPassword();
 
 console.log('\n\x1b[32mПроверки пройдены.\x1b[0m');

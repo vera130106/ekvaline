@@ -1,26 +1,12 @@
 'use strict';
 
 const orenburgAddress = require('./orenburg-address');
-const YKEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
-
-/** Подложка Leaflet (XYZ), если ключ Яндекса не задан: свои тайлы вместо openstreetmap.org */
-const LEAFLET_TILE_URL = String(
-  process.env.LEAFLET_TILE_URL || process.env.EKVALINE_LEAFLET_TILE_URL || ''
+/** Ключ JavaScript API — только для загрузки карты в браузере (maps-config). */
+const YMAPS_KEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
+/** Ключ HTTP Геокодера — поиск и обратное геокодирование на сервере. */
+const YGEO_KEY = String(
+  process.env.YANDEX_GEOCODER_API_KEY || process.env.YANDEX_MAPS_API_KEY || ''
 ).trim();
-const LEAFLET_TILE_ATTRIBUTION = String(
-  process.env.LEAFLET_TILE_ATTRIBUTION || process.env.EKVALINE_LEAFLET_ATTRIBUTION || ''
-).trim();
-
-function parseLeafletSubdomains(raw) {
-  const t = String(raw == null ? 'abc' : raw).trim();
-  if (!t) return ['a', 'b', 'c'];
-  if (t.includes(',')) return t.split(',').map((x) => x.trim()).filter(Boolean);
-  return t.split('').filter(Boolean);
-}
-
-const LEAFLET_TILE_SUBDOMAINS = parseLeafletSubdomains(
-  process.env.LEAFLET_TILE_SUBDOMAINS || process.env.EKVALINE_LEAFLET_TILE_SUBDOMAINS
-);
 
 /** Очередь для лимита Nominatim (общий интервал между запросами). */
 let nominatimQueueTail = Promise.resolve();
@@ -123,8 +109,9 @@ function yandexResponseToRows(data) {
 }
 
 async function yandexGeocode(geocodeQuery, limit) {
+  if (!YGEO_KEY) return [];
   const u = new URL('https://geocode-maps.yandex.ru/1.x/');
-  u.searchParams.set('apikey', YKEY);
+  u.searchParams.set('apikey', YGEO_KEY);
   u.searchParams.set('format', 'json');
   u.searchParams.set('geocode', geocodeQuery);
   u.searchParams.set('results', String(Math.min(20, Math.max(1, limit || 10))));
@@ -261,8 +248,8 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
   app.get('/api/public/maps-config', (req, res) => {
     res.set('Cache-Control', 'private, max-age=120');
     res.json({
-      provider: YKEY ? 'yandex' : 'none',
-      yandexMapsKey: YKEY || null,
+      provider: YMAPS_KEY ? 'yandex' : 'none',
+      yandexMapsKey: YMAPS_KEY || null,
     });
   });
 
@@ -292,7 +279,7 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
       }
 
       let rows = [];
-      if (YKEY) {
+      if (YGEO_KEY) {
         try {
           const yq = buildYandexGeocodeQuery(q, city, street, house, bounded);
           rows = await yandexGeocode(yq, limit);
@@ -322,7 +309,7 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
       if (!rows.length && q && !city && !street) {
         const parsed = parseFreeformAddressQuery(q);
         if (parsed?.street) {
-          if (YKEY) {
+          if (YGEO_KEY) {
             try {
               const yq = buildYandexGeocodeQuery(
                 '',
@@ -374,7 +361,7 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         return;
       }
 
-      if (YKEY) {
+      if (YGEO_KEY) {
         try {
           const rows = await yandexGeocode(`${lon},${lat}`, 1);
           const row = rows[0];

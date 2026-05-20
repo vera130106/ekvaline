@@ -6,12 +6,15 @@
     "start": "node server.js",
     "start:checked": "npm run verify && node server.js",
     "verify": "node scripts/verify.mjs",
+    "verify:bonus": "node scripts/verify-bonus-program.mjs",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
     "verify:operator": "node scripts/verify-operator-flow.mjs",
     "pg:setup": "node scripts/setup-postgres.js",
     "pg:seed-demo-orders": "node scripts/seed-demo-operator-orders.js",
-    "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force"
+    "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force",
+    "pg:clean-production": "node scripts/cleanup-production-data.js --yes",
+    "test:smtp": "node scripts/test-smtp.mjs"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -22,6 +25,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "joi": "^17.13.3",
+    "nodemailer": "^6.10.1",
     "pg": "^8.20.0"
   }
 }

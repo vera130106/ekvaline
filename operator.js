@@ -3,6 +3,9 @@
   const ORDERS_LOCAL_KEY = 'ekvaline_orders_by_user';
   const USERS_LOCAL_KEY = 'ekvaline_users';
   const BODY = document.getElementById('opxOrdersBody');
+  function notifyOrdersChanged() {
+    window.EkvalineOrdersSync?.notifyOrdersDataChanged?.();
+  }
   const BULK_SELECT_ALL = document.getElementById('opxBulkSelectAll');
   const BULK_STATUS_SELECT = document.getElementById('opxBulkStatusSelect');
   const BULK_APPLY_BTN = document.getElementById('opxBulkApplyBtn');
@@ -41,6 +44,7 @@
   const SETTINGS_CLOSE = document.getElementById('opxCloseSettings');
   const TOAST = document.getElementById('opxToast');
   const TOAST_TEXT = document.getElementById('opxToastText');
+  const TOAST_CLOSE = document.getElementById('opxToastClose');
   const CONFIRM_MODAL = document.getElementById('opxConfirmModal');
   const CONFIRM_TITLE = document.getElementById('opxConfirmTitle');
   const CONFIRM_MESSAGE = document.getElementById('opxConfirmMessage');
@@ -76,6 +80,7 @@
   const ORDER_MODAL = document.getElementById('opxOrderModal');
   const ORDER_TAB_BTNS = Array.from(document.querySelectorAll('[data-opx-ord-tab]'));
   const ORDER_PANELS = Array.from(document.querySelectorAll('[data-opx-ord-panel]'));
+  const ORDER_PANELS_WRAP = document.getElementById('opxOrdPanels');
   const ORDER_JOURNAL_LIST = document.getElementById('opxOrderJournalList');
   const ORDER_MODAL_CLOSE = document.getElementById('opxModalClose');
   const ORDER_MODAL_TITLE = document.getElementById('opxModalTitle');
@@ -101,10 +106,8 @@
   const MODAL_SUM = document.getElementById('opxModalSum');
   const ORDER_CART_LIST = document.getElementById('opxOrderCartList');
   const ORDER_CART_ADD_BTN = document.getElementById('opxOrderCartAddBtn');
-  const ORDER_CART_FROM_SITE_BTN = document.getElementById('opxOrderCartFromSiteBtn');
   const ORDER_CART_TOTAL = document.getElementById('opxOrderCartTotal');
   const ORDER_CART_EMPTY = document.getElementById('opxOrderCartEmpty');
-  const SITE_CART_LS_KEY = 'ekvaline_cart_items';
   const MODAL_DRIVER = document.getElementById('opxModalDriver');
   const MODAL_NOTE = document.getElementById('opxModalNote');
   const ORDER_REASON_OVERLAY = document.getElementById('opxOrderReasonOverlay');
@@ -293,8 +296,18 @@
     { value: 'delete_reason', label: 'Причина удаления клиента' },
     { value: 'order_pinned', label: 'Закреплённое примечание к заказу' },
   ];
-  const products = ['Вода', 'Тара', 'Помпа электрическая', 'Помпа механическая', 'Кулер верхний', 'Кулер нижний', 'Стаканчики'];
-  const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона', 'Окраина'];
+  /** Канонические позиции каталога сайта (catalog.html) для оператора. */
+  const OPERATOR_SITE_CATALOG = [
+    { name: 'Вода', match: (n) => /вода|эквалайн|18\.?9/i.test(n), water: true, defaultPrice: 220 },
+    { name: 'Тара', match: (n) => /пуст.*тар|(^|\s)тара(\s|$)/i.test(n), defaultPrice: 400 },
+    { name: 'Помпа механическая', match: (n) => /механ.*помп|помп.*механ/i.test(n), defaultPrice: 600 },
+    { name: 'Помпа электрическая', match: (n) => /электр.*помп|помп.*электр/i.test(n), defaultPrice: 2100 },
+    { name: 'Кулер верхний', match: (n) => /ael|lk-ael|кулер.*верх|напольн.*кулер/i.test(n), defaultPrice: 7450 },
+    { name: 'Кулер нижний', match: (n) => /vatten|l\s*45|кулер.*ниж/i.test(n), defaultPrice: 29900 },
+    { name: 'Стаканчики', match: (n) => /стакан|одноразов/i.test(n), defaultPrice: 0 },
+  ];
+  let products = OPERATOR_SITE_CATALOG.map((entry) => entry.name);
+  const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона'];
   const streetFallback = [
     'Салмышская', 'Родимцева', 'Пролетарская', 'Просторная', 'Терешковой', 'Чкалова', 'Советская',
     'Туркестанская', 'Брестская', 'Комсомольская', 'Победы', 'Донгузская', 'Монтажников', 'Новая',
@@ -368,7 +381,6 @@
     Степной: '#ef6c00',
     Центр: '#1565c0',
     'доп.зона': '#7b1fa2',
-    Окраина: '#5d4037',
     delivered: '#2e7d32',
   };
   const ZONE_CENTERS = {
@@ -376,7 +388,6 @@
     Степной: [51.838, 55.165],
     Центр: [51.772, 55.102],
     'доп.зона': [51.815, 55.145],
-    Окраина: [51.79, 55.18],
   };
 
   /** Статусы «в пути» (жёлтая строка при назначенном водителе). */
@@ -430,16 +441,42 @@
     return '';
   }
 
-  /** Совпадает с ценами в catalog.html (вода — поштучно через baseUnitPrice: 220 / 190 / 175). */
-  const PRODUCT_PRICE_MAP = {
-    'Вода': 220,
-    'Тара': 400,
-    'Помпа электрическая': 2100,
-    'Помпа механическая': 600,
-    'Кулер верхний': 7450,
-    'Кулер нижний': 29900,
-    'Стаканчики': 0,
-  };
+  /** Базовые цены каталога; вода — поштучно через baseUnitPrice (220 / 190 / 175). */
+  const PRODUCT_PRICE_MAP = Object.fromEntries(
+    OPERATOR_SITE_CATALOG.map((entry) => [entry.name, entry.defaultPrice])
+  );
+
+  function applyCatalogPriceFromApi(entry, apiPrice) {
+    if (!entry || entry.water) return;
+    const price = Number(apiPrice);
+    if (entry.name === 'Стаканчики') {
+      PRODUCT_PRICE_MAP[entry.name] = Number.isFinite(price) && price > 0 ? Math.round(price) : 0;
+      return;
+    }
+    if (Number.isFinite(price) && price >= 0) PRODUCT_PRICE_MAP[entry.name] = Math.round(price);
+  }
+
+  async function loadOperatorCatalogFromApi() {
+    const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
+    if (!api) return;
+    try {
+      const response = await api.json('/api/products');
+      if (!response.ok || !Array.isArray(response.data?.products)) return;
+      const rows = response.data.products;
+      OPERATOR_SITE_CATALOG.forEach((entry) => {
+        const hit = rows.find((row) => entry.match(String(row?.name || '').trim()));
+        if (!hit) return;
+        applyCatalogPriceFromApi(entry, hit.price);
+        if (entry.water) {
+          const base = Number(hit.price);
+          if (Number.isFinite(base) && base > 0) PRODUCT_PRICE_MAP[entry.name] = Math.round(base);
+        }
+      });
+      ensureProductOptions();
+    } catch {
+      /* остаются значения по умолчанию из catalog.html */
+    }
+  }
 
   /** Как сохраняется в order.payment при выборе в #opxModalPayment («Рассчетный счет») */
   const PAYMENT_SETTLEMENT_INVOICE_VALUE = 'Рассчетный счет';
@@ -979,7 +1016,11 @@
     TOAST.hidden = false;
     TOAST.classList.remove('is-visible');
     const ms =
-      typeof hideAfterMs === 'number' && hideAfterMs > 0 ? hideAfterMs : 2800;
+      typeof hideAfterMs === 'number' && hideAfterMs > 0
+        ? hideAfterMs
+        : v === 'error'
+          ? 5200
+          : 3200;
     if (state.toastTimer) window.clearTimeout(state.toastTimer);
     window.requestAnimationFrame(() => {
       TOAST.classList.add('is-visible');
@@ -1447,10 +1488,19 @@
     return nowMins >= slotEndMinutes(slotKey);
   }
 
+  function isModalSlotUnavailable(slotKey, deliveryDateIso) {
+    const key = normalizeDeliverySlotStored(slotKey);
+    if (!key) return true;
+    if (isSlotExpiredForDate(key, deliveryDateIso)) return true;
+    if (isBookingDayClosed(deliveryDateIso)) return true;
+    if (isBookingSlotClosed(deliveryDateIso, key)) return true;
+    return false;
+  }
+
   function firstAvailableModalSlot(deliveryDateIso) {
     for (const btn of MODAL_SLOT_BTNS) {
       const key = normalizeDeliverySlotStored(btn.getAttribute('data-opx-slot'));
-      if (!isSlotExpiredForDate(key, deliveryDateIso)) return key;
+      if (!isModalSlotUnavailable(key, deliveryDateIso)) return key;
     }
     return null;
   }
@@ -1469,20 +1519,20 @@
 
   function syncModalSlotAvailability() {
     const deliveryDate = modalDeliveryDateIso();
-    const today = isoDate(new Date());
     MODAL_SLOT_BTNS.forEach((btn) => {
       const key = normalizeDeliverySlotStored(btn.getAttribute('data-opx-slot'));
-      const expired = isSlotExpiredForDate(key, deliveryDate);
-      btn.disabled = expired;
-      btn.classList.toggle('is-disabled', expired);
-      btn.setAttribute('aria-disabled', expired ? 'true' : 'false');
+      const unavailable = isModalSlotUnavailable(key, deliveryDate);
+      btn.disabled = unavailable;
+      btn.classList.toggle('is-disabled', unavailable);
+      btn.setAttribute('aria-disabled', unavailable ? 'true' : 'false');
     });
     const current = normalizeDeliverySlotStored(
       String(MODAL_SLOT instanceof HTMLInputElement ? MODAL_SLOT.value : '')
     );
-    if (deliveryDate === today && isSlotExpiredForDate(current, deliveryDate)) {
+    if (isModalSlotUnavailable(current, deliveryDate)) {
       const next = firstAvailableModalSlot(deliveryDate);
       if (next) applyModalSlot(next);
+      else applyModalSlot(current);
     } else {
       applyModalSlot(current);
     }
@@ -1505,11 +1555,11 @@
     const silent = Boolean(options.silent);
     const deliveryDate = modalDeliveryDateIso();
     let slot = normalizeDeliverySlotStored(slotValue);
-    if (isSlotExpiredForDate(slot, deliveryDate)) {
+    if (isModalSlotUnavailable(slot, deliveryDate)) {
       const next = firstAvailableModalSlot(deliveryDate);
       if (next) {
         slot = next;
-        if (!silent) showToast('Этот интервал уже недоступен для выбранной даты');
+        if (!silent) showToast('Этот интервал недоступен на выбранную дату');
       }
     }
     applyModalSlot(slot);
@@ -1534,6 +1584,32 @@
     if (tabId === 'notes') hydrateOrderNotesPanel();
   }
 
+  /** Фиксируем высоту тела модалки по вкладке «Основное», чтобы при смене вкладок окно не прыгало. */
+  function syncOrderModalPanelsHeight() {
+    const wrap = ORDER_PANELS_WRAP;
+    const basic = ORDER_PANELS.find((p) => p.getAttribute('data-opx-ord-panel') === 'basic');
+    if (!(wrap instanceof HTMLElement) || !(basic instanceof HTMLElement)) return;
+    if (!(ORDER_MODAL instanceof HTMLElement) || ORDER_MODAL.hidden || !ORDER_MODAL.classList.contains('is-open')) {
+      return;
+    }
+    const savedTab = state.orderModalTab || 'basic';
+    ORDER_PANELS.forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-opx-ord-panel') !== 'basic';
+    });
+    basic.hidden = false;
+    const h = Math.ceil(basic.scrollHeight);
+    ORDER_PANELS.forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-opx-ord-panel') !== savedTab;
+    });
+    if (h > 0) wrap.style.setProperty('--opx-ord-panels-min-h', `${h}px`);
+  }
+
+  function scheduleOrderModalPanelsHeightSync() {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => syncOrderModalPanelsHeight());
+    });
+  }
+
   function ensureProductOptions() {
     if (MODAL_PRODUCT instanceof HTMLSelectElement) {
       MODAL_PRODUCT.innerHTML = products.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
@@ -1550,21 +1626,23 @@
   function normalizeProductName(rawName) {
     const name = String(rawName || '').trim().toLowerCase();
     if (!name) return products[0];
-    if (name.includes('вода')) return 'Вода';
+    if (name.includes('вода') || /18\.?9/.test(name)) return 'Вода';
+    if (name.includes('пуст') && name.includes('тар')) return 'Тара';
     if (name.includes('тара')) return 'Тара';
     if (name.includes('электр') && name.includes('помп')) return 'Помпа электрическая';
     if (name.includes('механ') && name.includes('помп')) return 'Помпа механическая';
     if (name.includes('кулер')) {
-      if (name.includes('vatten') || name.includes('l 45') || name.includes('ниж') || name.includes('aquaos')) return 'Кулер нижний';
+      if (name.includes('vatten') || name.includes('l 45') || name.includes('l45') || name.includes('ниж')) return 'Кулер нижний';
       if (name.includes('ael') || name.includes('lk-ael') || name.includes('верх') || name.includes('напольн')) return 'Кулер верхний';
     }
-    if (name.includes('стакан')) return 'Стаканчики';
+    if (name.includes('стакан') || name.includes('одноразов')) return 'Стаканчики';
     return products.includes(rawName) ? rawName : products[0];
   }
 
   function baseUnitPrice(productName, qty) {
     if (productName === 'Вода') {
-      if (qty <= 1) return 220;
+      const single = PRODUCT_PRICE_MAP['Вода'] || 220;
+      if (qty <= 1) return single;
       if (qty <= 4) return 190;
       if (qty <= 50) return 175;
       return 175;
@@ -1775,39 +1853,6 @@
     renderOrderModalCart(order);
   }
 
-  function readSiteCartForOperator() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(SITE_CART_LS_KEY) || '[]');
-      if (!Array.isArray(raw)) return [];
-      const merged = new Map();
-      raw.forEach((item) => {
-        if (!item || typeof item !== 'object') return;
-        const title = normalizeProductName(String(item.title || 'Товар').trim());
-        const qty = Math.min(50, Math.max(1, Number(item.qty) || 0));
-        if (!qty || item.preorder) return;
-        const unit_price = Math.max(0, Math.round(Number(item.price) || PRODUCT_PRICE_MAP[title] || 0));
-        const key = title.toLowerCase();
-        const prev = merged.get(key);
-        if (prev) prev.qty = Math.min(50, prev.qty + qty);
-        else merged.set(key, { title, qty, unit_price: unit_price || baseUnitPrice(title, qty) });
-      });
-      return Array.from(merged.values());
-    } catch {
-      return [];
-    }
-  }
-
-  function importSiteCartIntoOrderModal() {
-    const fromSite = readSiteCartForOperator();
-    if (!fromSite.length) {
-      showToast('Корзина на сайте пуста — добавьте товары в каталоге');
-      return;
-    }
-    setOrderModalCartLines(fromSite, getActiveOrder());
-    setOrderModalTab('goods');
-    showToast(`Подставлено позиций: ${fromSite.length}`);
-  }
-
   function formatOrderProductsLabel(itemsJson, fallbackIndex) {
     const items = parseOrderItemsFromJson(itemsJson);
     if (!items.length) return parseProduct(itemsJson, fallbackIndex);
@@ -1852,7 +1897,7 @@
     if (z.includes('доп')) return 'доп.зона';
     if (z.includes('степ')) return 'Степной';
     if (z.includes('центр')) return 'Центр';
-    if (z.includes('окраин')) return 'Окраина';
+    if (z.includes('окраин')) return 'доп.зона';
     if (z.includes('подхват')) return 'Подхват';
     return String(value || '').trim() || 'Подхват';
   }
@@ -2137,7 +2182,63 @@
   let settingsSlotDefs = BOOKING_SLOT_UI.slice();
   let settingsDaysList = [];
   let settingsAvailabilityDraft = { closedDays: [], closedSlots: [] };
+  /** Актуальные закрытые дни/интервалы для модалки заказа и проверки при сохранении. */
+  let bookingAvailability = { closedDays: [], closedSlots: [] };
   let settingsLastChangeMeta = null;
+
+  function applyBookingAvailability(av) {
+    const parsed =
+      av && typeof av === 'object'
+        ? {
+            closedDays: Array.isArray(av.closedDays) ? av.closedDays.slice() : [],
+            closedSlots: Array.isArray(av.closedSlots) ? av.closedSlots.map((r) => ({ ...r })) : [],
+          }
+        : { closedDays: [], closedSlots: [] };
+    bookingAvailability = parsed;
+    settingsAvailabilityDraft = {
+      closedDays: parsed.closedDays.slice(),
+      closedSlots: parsed.closedSlots.map((r) => ({ ...r })),
+    };
+  }
+
+  function isBookingDayClosed(iso) {
+    const d = String(iso || '').trim();
+    return bookingAvailability.closedDays.includes(d);
+  }
+
+  function isBookingSlotClosed(iso, slotKey) {
+    const d = String(iso || '').trim();
+    const slot = normalizeDeliverySlotStored(slotKey);
+    if (!d || !slot) return false;
+    if (isBookingDayClosed(d)) return true;
+    return bookingAvailability.closedSlots.some((r) => r.date === d && r.slot === slot);
+  }
+
+  async function loadBookingAvailabilityFromServer() {
+    const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
+    if (!api) return;
+    try {
+      const response = await api.json(`/api/orders/operator/delivery-availability?_=${Date.now()}`, {
+        method: 'GET',
+      });
+      if (response.ok && response.data?.availability) {
+        applyBookingAvailability(response.data.availability);
+        return;
+      }
+      const pub = await fetch(`/api/public/delivery-availability?_=${Date.now()}`, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (pub.ok) {
+        const data = await pub.json();
+        const root = data?.availability && typeof data.availability === 'object' ? data.availability : data;
+        applyBookingAvailability(root);
+      }
+    } catch (e) {
+      console.warn('[operator] delivery availability', e);
+    }
+  }
 
   function formatSettingsLastChangeText(meta) {
     if (!meta || typeof meta !== 'object') return '';
@@ -2233,10 +2334,7 @@
 
   function applySettingsAvailabilityPayload(payload) {
     const av = payload?.availability;
-    settingsAvailabilityDraft = {
-      closedDays: Array.isArray(av?.closedDays) ? av.closedDays.slice() : [],
-      closedSlots: Array.isArray(av?.closedSlots) ? av.closedSlots.map((r) => ({ ...r })) : [],
-    };
+    applyBookingAvailability(av);
     if (Array.isArray(payload?.slotDefs) && payload.slotDefs.length) {
       settingsSlotDefs = payload.slotDefs.map((s) => ({
         key: String(s.key || ''),
@@ -2350,10 +2448,12 @@
         showToast(err, 3200, 'error');
         return;
       }
-      settingsAvailabilityDraft = response.data?.availability || payload;
+      applyBookingAvailability(response.data?.availability || payload);
       settingsLastChangeMeta = response.data?.lastChange || settingsLastChangeMeta;
       renderSettingsDaysList();
+      syncModalSlotAvailability();
       renderSettingsLastChange(settingsLastChangeMeta);
+      notifyOrdersChanged();
       showToast('Настройки приёма заказов сохранены.', 3600, 'success');
       if (SETTINGS_STATUS instanceof HTMLElement) {
         const who = formatSettingsLastChangeText(settingsLastChangeMeta);
@@ -3737,29 +3837,8 @@
     const dock = ORDER_NOTES_DOCK;
     const ul = ORDER_NOTES_DOCK_LIST;
     if (!(dock instanceof HTMLElement) || !(ul instanceof HTMLElement)) return;
-
-    if (!(ORDER_MODAL instanceof HTMLElement) || !ORDER_MODAL.classList.contains('is-open')) {
-      ul.innerHTML = '';
-      dock.hidden = true;
-      return;
-    }
-
-    const bucket = operatorClientNotesBucketKey();
-    if (bucket === '__none') {
-      ul.innerHTML = '';
-      dock.hidden = true;
-      return;
-    }
-
-    const rows = getOrderNotesPreviewRows();
-    if (!rows.length) {
-      ul.innerHTML = '';
-      dock.hidden = true;
-      return;
-    }
-
-    ul.innerHTML = orderNotesPreviewListMarkup(rows, undefined);
-    dock.hidden = false;
+    ul.innerHTML = '';
+    dock.hidden = true;
   }
 
   function refreshOrderNotesPreviews() {
@@ -5508,6 +5587,7 @@
         toastMsg = serverSaved ? 'Заказ сохранён.' : `Заказ сохранён${savedSuffix}.`;
       }
       window.requestAnimationFrame(() => showToast(toastMsg, 3600, 'success'));
+      if (serverSaved) notifyOrdersChanged();
     } finally {
       orderModalSaveBusy = false;
       setOrderModalSaveBusy(false);
@@ -5550,6 +5630,8 @@
     refreshBodyBackdropClass();
     fillOrderModal(order, index);
     renderOrderJournal(order);
+    scheduleOrderModalPanelsHeightSync();
+    void loadBookingAvailabilityFromServer().then(() => syncModalSlotAvailability());
   }
 
   function openCreateOrderModal() {
@@ -5588,9 +5670,13 @@
     ORDER_MODAL.hidden = false;
     ORDER_MODAL.setAttribute('aria-hidden', 'false');
     refreshBodyBackdropClass();
-    refreshOrderNotesPreviews();
     syncOrderModalCommitButtonsVisibility();
-    window.setTimeout(() => MODAL_CLIENT?.focus(), 80);
+    window.requestAnimationFrame(() => {
+      refreshOrderNotesPreviews();
+      MODAL_CLIENT?.focus();
+      scheduleOrderModalPanelsHeightSync();
+      void loadBookingAvailabilityFromServer().then(() => syncModalSlotAvailability());
+    });
   }
 
   async function saveNewOperatorOrder() {
@@ -5674,6 +5760,7 @@
           return;
         }
         api.resetCsrf?.();
+        notifyOrdersChanged();
         const created = response.data?.order;
         newIdStr = created != null && created.id != null ? String(created.id) : '';
         if (!newIdStr) {
@@ -6170,7 +6257,6 @@
 
   function paintZoneMapMarkersFromCache(source, generation) {
     if (!zoneMapCtl || generation !== zoneMarkersBuildGeneration) return 0;
-    const isYandexZone = zoneMapCtl.engine === 'yandex';
     zoneMapCtl.clear();
     const duplicateIndexByKey = Object.create(null);
     let placed = 0;
@@ -6200,7 +6286,7 @@
 
     if (placed && bounds.length) {
       try {
-        if (isYandexZone && zoneMapCtl.map && window.ymaps) {
+        if (zoneMapCtl.map && window.ymaps) {
           zoneMapCtl.map.setBounds(bounds, { checkZoomRange: true, zoomMargin: 40 });
         }
       } catch {
@@ -6674,6 +6760,7 @@
         if (response.ok) {
           api.resetCsrf?.();
           order.status = newStatus;
+          notifyOrdersChanged();
           return { outcome: 'ok' };
         }
         const st = Number(response.status || 0);
@@ -6881,6 +6968,12 @@
   }
 
   function bind() {
+    TOAST_CLOSE?.addEventListener('click', () => {
+      if (!(TOAST instanceof HTMLElement)) return;
+      if (state.toastTimer) window.clearTimeout(state.toastTimer);
+      TOAST.classList.remove('is-visible');
+      TOAST.hidden = true;
+    });
     ensureProductOptions();
     ensureFiltersModalStaticSelects();
     opxLimits()?.bindOperatorFormLimits?.({
@@ -7174,6 +7267,11 @@
       openOrderModalById(orderId);
     });
     ORDER_MODAL_CLOSE?.addEventListener('click', closeOrderModal);
+    window.addEventListener('resize', () => {
+      if (ORDER_MODAL instanceof HTMLElement && !ORDER_MODAL.hidden && ORDER_MODAL.classList.contains('is-open')) {
+        scheduleOrderModalPanelsHeightSync();
+      }
+    });
     MODAL_SAVE_BTN?.addEventListener('click', () => {
       void saveOrderModalChanges().catch((e) => {
         console.error(e);
@@ -7289,7 +7387,6 @@
       addOrderModalCartLine(null, getActiveOrder());
       setOrderModalTab('goods');
     });
-    ORDER_CART_FROM_SITE_BTN?.addEventListener('click', () => importSiteCartIntoOrderModal());
     ORDER_CART_LIST?.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
@@ -7659,7 +7756,12 @@
     }
 
     try {
-      await Promise.all([hydratePromise, loadOrders()]);
+      await Promise.all([
+        hydratePromise,
+        loadOrders(),
+        loadOperatorCatalogFromApi(),
+        loadBookingAvailabilityFromServer(),
+      ]);
     } catch {
       emptyOrdersFallback();
       showToast('Сбой при загрузке — проверьте консоль или сеть.');

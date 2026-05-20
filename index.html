@@ -11,9 +11,9 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260519mobile" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260521client" />
   </head>
-  <body>
+  <body class="client-site">
     <header class="topbar">
       <div class="container topbar-inner">
         <a class="brand" href="index.html" aria-label="ЭкваЛайн">
@@ -53,8 +53,8 @@
               <span class="text-green">вода</span>
             </h1>
             <p class="hero-note">
-              Мы доставляем идеально сбалансированную воду прямо к вашему порогу.
-              Почувствуйте свежесть и энергию каждый день.
+              Доставка питьевой воды по Оренбургу.
+              Подходит для ежедневного потребления дома и в офисе.
             </p>
           </div>
 
@@ -86,7 +86,6 @@
               <div class="catalog-bottom">
                 <p class="catalog-price">1 бутыль — 220 ₽</p>
                 <div class="catalog-actions">
-                  <button type="button" class="cart-btn">В корзину</button>
                   <a href="catalog.html" class="details-link">Подробнее</a>
                 </div>
               </div>
@@ -101,7 +100,6 @@
               <div class="catalog-bottom">
                 <p class="catalog-price">от 2-4 бутылок по 190 ₽</p>
                 <div class="catalog-actions">
-                  <button type="button" class="cart-btn">В корзину</button>
                   <a href="catalog.html" class="details-link">Подробнее</a>
                 </div>
               </div>
@@ -116,7 +114,6 @@
               <div class="catalog-bottom">
                 <p class="catalog-price">от 5 бутылей по 175 ₽</p>
                 <div class="catalog-actions">
-                  <button type="button" class="cart-btn">В корзину</button>
                   <a href="catalog.html" class="details-link">Подробнее</a>
                 </div>
               </div>
@@ -338,11 +335,14 @@
       </div>
     </footer>
 
-    <script src="mobile-nav.js?v=20260519mobile"></script>
+    <script src="mobile-nav.js?v=20260521client"></script>
     <script src="app-core.js"></script>
     <script src="api-client.js"></script>
-    <script src="maps-runtime.js"></script>
+    <script src="notifications-client.js?v=20260520notif"></script>
+    <script src="maps-runtime.js?v=20260520mapchrome"></script>
     <script src="/ekvaline-runtime.js"></script>
-    <script src="script.js?v=20260519login"></script>
+    <script src="orders-sync.js?v=20260520sync"></script>
+    <script src="auth-password.js?v=20260520pwd"></script>
+    <script src="script.js?v=20260521forgotflow"></script>
   </body>
 </html>

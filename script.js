@@ -48,26 +48,73 @@
         </div>
 
         <form id="authLoginForm" class="auth-form" novalidate>
-          <label>Email или телефон
-            <input type="text" id="authLoginValue" placeholder="Сотрудники: xxxekva@mail.ru (см. консоль npm start); клиент — телефон или email" autocomplete="username" />
-          </label>
-          <label>Пароль
-            <span class="auth-password-wrap">
-              <input type="password" id="authLoginPassword" placeholder="Введите пароль" autocomplete="current-password" />
-              <button type="button" class="auth-password-toggle" id="authLoginPasswordToggle" aria-label="Показать пароль" aria-pressed="false">
-                <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-                </svg>
-                <svg class="auth-pw-icon auth-pw-icon-slash" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
+          <div id="authLoginFields">
+            <label>Email
+              <input type="email" id="authLoginValue" placeholder="example@mail.ru" autocomplete="username" />
+            </label>
+            <label>Пароль
+              <span class="auth-password-wrap">
+                <input type="password" id="authLoginPassword" placeholder="Введите пароль" autocomplete="current-password" />
+                <button type="button" class="auth-password-toggle" id="authLoginPasswordToggle" aria-label="Показать пароль" aria-pressed="false">
+                  <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                  <svg class="auth-pw-icon auth-pw-icon-slash" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </button>
+              </span>
+            </label>
+            <p class="auth-error" id="authLoginError"></p>
+            <p class="auth-info" id="authLoginInfo" hidden></p>
+            <button type="submit" class="auth-submit">Войти</button>
+            <p><button type="button" class="auth-forgot-link" id="authForgotToggle">Забыли пароль?</button></p>
+          </div>
+
+          <div class="auth-forgot-panel" id="authForgotPanel" hidden>
+            <p class="auth-forgot-hint">Укажите email, подтвердите код из письма — затем задайте новый пароль. Действует только последний код.</p>
+            <label>Email
+              <input type="email" id="authForgotEmail" placeholder="example@mail.ru" autocomplete="email" />
+            </label>
+            <p class="auth-step-label">Шаг 1. Код на email</p>
+            <button type="button" class="ghost-btn auth-btn-loading" id="authForgotSendCode">
+              <span class="auth-btn-label">Отправить код на email</span>
+              <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
+            </button>
+            <p class="auth-error" id="authForgotError"></p>
+            <p class="auth-info" id="authForgotInfo" hidden></p>
+            <div class="auth-dev-code-box" id="authForgotDevCode" hidden></div>
+            <form id="authForgotVerifyForm" class="auth-forgot-step" hidden novalidate>
+              <p class="auth-step-label">Шаг 2. Проверка кода</p>
+              <label>Код из письма
+                <input type="text" id="authForgotCode" class="auth-code-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+              </label>
+              <button type="submit" class="auth-submit auth-btn-loading" id="authForgotCheckCode">
+                <span class="auth-btn-label">Проверить код</span>
+                <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
               </button>
-            </span>
-          </label>
-          <p class="auth-error" id="authLoginError"></p>
-          <button type="submit" class="auth-submit">Войти</button>
+            </form>
+            <form id="authForgotPasswordForm" class="auth-forgot-step" hidden novalidate>
+              <p class="auth-step-label">Шаг 3. Новый пароль</p>
+              <p class="auth-forgot-hint auth-password-rules-hint" id="authForgotPasswordRulesHint">
+                Поля откроются после проверки кода. Пароль по правилам системы: заглавная и строчная буквы, цифра, спецсимвол (!@#$…), от 8 символов.
+              </p>
+              <label>Новый пароль
+                <input type="password" id="authForgotNewPassword" minlength="8" maxlength="128" autocomplete="new-password" disabled />
+              </label>
+              <p class="auth-password-strength-line" id="authForgotPasswordStrengthLine" aria-live="polite"></p>
+              <label>Повторите пароль
+                <input type="password" id="authForgotNewPasswordConfirm" minlength="8" maxlength="128" autocomplete="new-password" disabled />
+              </label>
+              <button type="submit" class="auth-submit auth-btn-loading" id="authForgotSavePassword" disabled>
+                <span class="auth-btn-label">Сохранить пароль</span>
+                <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
+              </button>
+            </form>
+            <button type="button" class="auth-forgot-link" id="authForgotBack">← Вернуться ко входу</button>
+          </div>
         </form>
 
         <form id="authRegisterForm" class="auth-form hidden" novalidate>
@@ -115,6 +162,7 @@
             </span>
           </label>
           <p class="auth-error" id="authRegisterError"></p>
+          <p class="auth-info" id="authRegisterInfo" hidden></p>
           <button type="submit" class="auth-submit">Создать аккаунт</button>
         </form>
       </div>
@@ -157,6 +205,23 @@
   const authLoginValue = document.getElementById('authLoginValue');
   const authLoginPassword = document.getElementById('authLoginPassword');
   const authLoginError = document.getElementById('authLoginError');
+  const authLoginInfo = document.getElementById('authLoginInfo');
+  const authLoginFields = document.getElementById('authLoginFields');
+  const authForgotToggle = document.getElementById('authForgotToggle');
+  const authForgotPanel = document.getElementById('authForgotPanel');
+  const authForgotEmail = document.getElementById('authForgotEmail');
+  const authForgotError = document.getElementById('authForgotError');
+  const authForgotInfo = document.getElementById('authForgotInfo');
+  const authForgotDevCode = document.getElementById('authForgotDevCode');
+  const authForgotSendCode = document.getElementById('authForgotSendCode');
+  const authForgotVerifyForm = document.getElementById('authForgotVerifyForm');
+  const authForgotCode = document.getElementById('authForgotCode');
+  const authForgotPasswordForm = document.getElementById('authForgotPasswordForm');
+  const authForgotNewPassword = document.getElementById('authForgotNewPassword');
+  const authForgotNewPasswordConfirm = document.getElementById('authForgotNewPasswordConfirm');
+  const authForgotBack = document.getElementById('authForgotBack');
+  let forgotSendSeq = 0;
+  let forgotCodeAccepted = '';
 
   const authRegName = document.getElementById('authRegName');
   const authRegEmail = document.getElementById('authRegEmail');
@@ -164,6 +229,7 @@
   const authRegPassword = document.getElementById('authRegPassword');
   const authRegPasswordConfirm = document.getElementById('authRegPasswordConfirm');
   const authRegisterError = document.getElementById('authRegisterError');
+  const authRegisterInfo = document.getElementById('authRegisterInfo');
   const authPasswordStrength = document.getElementById('authPasswordStrength');
   const authPasswordStrengthLine = document.getElementById('authPasswordStrengthLine');
   const authPasswordStrengthMissing = document.getElementById('authPasswordStrengthMissing');
@@ -254,6 +320,11 @@
 
   function isValidEmail(value) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(value.trim());
+  }
+
+  function isPseudoClientEmail(value) {
+    const e = String(value || '').trim().toLowerCase();
+    return e.endsWith('@phone.ekvaline.local') || e.endsWith('@ekvaline.local');
   }
 
   const PASSWORD_MIN = 8;
@@ -404,6 +475,7 @@
   }
 
   function closeAuthModal() {
+    closeForgotPasswordMode();
     authModal.classList.remove('open');
     authModal.setAttribute('aria-hidden', 'true');
     if (!cabinet.classList.contains('open')) {
@@ -573,8 +645,140 @@
     document.getElementById('authModalTitle').textContent = isLogin ? 'Вход в аккаунт' : 'Регистрация аккаунта';
     authLoginError.textContent = '';
     authRegisterError.textContent = '';
+    if (authLoginInfo) {
+      authLoginInfo.hidden = true;
+      authLoginInfo.textContent = '';
+    }
+    if (authRegisterInfo) {
+      authRegisterInfo.hidden = true;
+      authRegisterInfo.textContent = '';
+    }
+    closeForgotPasswordMode();
     if (!isLogin) {
       syncRegisterPasswordStrength();
+    }
+  }
+
+  function normalizeAuthCode(value) {
+    return String(value || '').replace(/\D/g, '').slice(0, 6);
+  }
+
+  function setAuthButtonLoading(btn, loading) {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const spinner = btn.querySelector('.auth-btn-spinner');
+    btn.classList.toggle('is-loading', !!loading);
+    btn.disabled = !!loading;
+    btn.setAttribute('aria-busy', loading ? 'true' : 'false');
+    if (spinner instanceof HTMLElement) spinner.hidden = !loading;
+  }
+
+  async function runAuthButtonLoading(btn, task) {
+    if (btn instanceof HTMLButtonElement && btn.disabled) return null;
+    setAuthButtonLoading(btn, true);
+    try {
+      return await task();
+    } finally {
+      setAuthButtonLoading(btn, false);
+    }
+  }
+
+  function validateAuthPasswordForSubmit(password) {
+    const api = window.EkvalineAuthPassword;
+    if (api?.validatePassword) return api.validatePassword(password);
+    const p = String(password || '');
+    if (p.length < 8) return { ok: false, error: 'Пароль: минимум 8 символов.' };
+    return {
+      ok: false,
+      error: api?.PASSWORD_RULES_HINT || 'Пароль: нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).',
+    };
+  }
+
+  function setForgotPasswordFieldsEnabled(enabled) {
+    if (authForgotNewPassword instanceof HTMLInputElement) authForgotNewPassword.disabled = !enabled;
+    if (authForgotNewPasswordConfirm instanceof HTMLInputElement) {
+      authForgotNewPasswordConfirm.disabled = !enabled;
+    }
+    const saveBtn = document.getElementById('authForgotSavePassword');
+    const line = document.getElementById('authForgotPasswordStrengthLine');
+    if (!enabled) {
+      if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+      if (line instanceof HTMLElement) line.textContent = '';
+      return;
+    }
+    syncForgotPasswordSubmitState();
+  }
+
+  function syncForgotPasswordSubmitState() {
+    const saveBtn = document.getElementById('authForgotSavePassword');
+    const line = document.getElementById('authForgotPasswordStrengthLine');
+    if (!(saveBtn instanceof HTMLButtonElement)) return;
+    if (!forgotCodeAccepted) {
+      saveBtn.disabled = true;
+      return;
+    }
+    const password = String(authForgotNewPassword?.value || '');
+    const passwordConfirm = String(authForgotNewPasswordConfirm?.value || '');
+    const st = window.EkvalineAuthPassword?.getPasswordStrength?.(password);
+    if (line instanceof HTMLElement && st?.line) {
+      line.textContent = st.line;
+      line.className = `auth-password-strength-line is-${st.level || 'weak'}`;
+    }
+    const pwdCheck = validateAuthPasswordForSubmit(password);
+    saveBtn.disabled = !pwdCheck.ok || password !== passwordConfirm;
+  }
+
+  function resetForgotPasswordFlow() {
+    forgotCodeAccepted = '';
+    forgotSendSeq = 0;
+    if (authForgotVerifyForm instanceof HTMLElement) authForgotVerifyForm.hidden = true;
+    if (authForgotPasswordForm instanceof HTMLElement) authForgotPasswordForm.hidden = true;
+    if (authForgotCode instanceof HTMLInputElement) {
+      authForgotCode.value = '';
+      authForgotCode.readOnly = false;
+    }
+    if (authForgotPasswordForm instanceof HTMLFormElement) authForgotPasswordForm.reset();
+    setForgotPasswordFieldsEnabled(false);
+    if (authForgotDevCode instanceof HTMLElement) {
+      authForgotDevCode.hidden = true;
+      authForgotDevCode.innerHTML = '';
+    }
+    const checkBtn = document.getElementById('authForgotCheckCode');
+    if (checkBtn instanceof HTMLButtonElement) checkBtn.disabled = false;
+  }
+
+  function openForgotPasswordMode() {
+    resetForgotPasswordFlow();
+    if (authLoginFields instanceof HTMLElement) authLoginFields.hidden = true;
+    if (authForgotPanel instanceof HTMLElement) authForgotPanel.hidden = false;
+    if (authForgotError) authForgotError.textContent = '';
+    if (authForgotInfo) {
+      authForgotInfo.hidden = true;
+      authForgotInfo.textContent = '';
+    }
+    const loginEmail = authLoginValue.value.trim().toLowerCase();
+    if (authForgotEmail instanceof HTMLInputElement && loginEmail) {
+      authForgotEmail.value = loginEmail;
+    }
+    document.getElementById('authModalTitle').textContent = 'Восстановление пароля';
+    authTabs.forEach((btn) => {
+      btn.disabled = true;
+    });
+  }
+
+  function closeForgotPasswordMode() {
+    if (authLoginFields instanceof HTMLElement) authLoginFields.hidden = false;
+    if (authForgotPanel instanceof HTMLElement) authForgotPanel.hidden = true;
+    if (authForgotError) authForgotError.textContent = '';
+    if (authForgotInfo) {
+      authForgotInfo.hidden = true;
+      authForgotInfo.textContent = '';
+    }
+    resetForgotPasswordFlow();
+    authTabs.forEach((btn) => {
+      btn.disabled = false;
+    });
+    if (authLoginForm && !authLoginForm.classList.contains('hidden')) {
+      document.getElementById('authModalTitle').textContent = 'Вход в аккаунт';
     }
   }
 
@@ -683,24 +887,31 @@
       first_name: u.first_name,
       last_name: u.last_name,
       bonus_balance: u.bonus_balance,
+      email_verified: u.email_verified,
     });
   }
 
   authLoginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authLoginError.textContent = '';
+    if (authLoginInfo) {
+      authLoginInfo.hidden = true;
+      authLoginInfo.textContent = '';
+    }
 
-    const credential = authLoginValue.value.trim();
+    const email = authLoginValue.value.trim().toLowerCase();
     const password = authLoginPassword.value;
-    const byEmail = credential.toLowerCase();
-    const byPhone = normalizePhoneDigits(credential);
+    const byEmail = email;
 
-    if (!credential || !password) {
-      authLoginError.textContent = 'Укажите логин (email организации или телефон/email для клиента) и пароль.';
+    if (!email || !password) {
+      authLoginError.textContent = 'Укажите email и пароль.';
+      return;
+    }
+    if (!isValidEmail(email)) {
+      authLoginError.textContent = 'Введите корректный email.';
       return;
     }
 
-    const looksLikeEmail = /\S@\S/.test(credential);
     const apiCli = window.EkvalineAPI;
 
     /** Сначала всегда сервер (пароль из БД — в т.ч. учётки, созданные админом). */
@@ -709,7 +920,7 @@
       try {
         rApi = await apiCli.json('/api/auth/login', {
           method: 'POST',
-          body: { credential, password },
+          body: { email, password },
         });
       } catch {
         rApi = null;
@@ -731,11 +942,21 @@
           return;
         }
         if (rApi.status === 401) {
-          authLoginError.textContent = String(rApi.data?.error || 'Неверный логин или пароль.');
+          authLoginError.textContent = String(rApi.data?.error || 'Неверный email или пароль.');
           return;
         }
         if (rApi.status === 423) {
           authLoginError.textContent = String(rApi.data?.error || 'Вход временно заблокирован.');
+          return;
+        }
+        if (rApi.status === 403 && rApi.data?.needsEmailVerification) {
+          authLoginError.textContent = String(rApi.data?.error || 'Подтвердите email в личном кабинете.');
+          if (authLoginInfo) {
+            authLoginInfo.hidden = false;
+            authLoginInfo.textContent =
+              'Войдите в кабинет и введите код в блоке «Подтверждение email». Не пришло письмо? Запросите код повторно.';
+          }
+          if (authForgotEmail instanceof HTMLInputElement) authForgotEmail.value = email;
           return;
         }
         if (rApi.status === 403) {
@@ -752,16 +973,16 @@
       }
     }
 
-    if (looksLikeEmail && STAFF_RESERVED_EMAILS.has(byEmail)) {
+    if (STAFF_RESERVED_EMAILS.has(byEmail)) {
       authLoginError.textContent =
         'Вход сотрудника только через сервер (npm start). Пароль проверяется в базе данных.';
       return;
     }
 
-    const user = readUsers().find((item) => item.email === byEmail || item.phone === byPhone);
+    const user = readUsers().find((item) => item.email === byEmail);
     if (!user || user.password !== password) {
       authLoginError.textContent = apiCli?.json
-        ? 'Неверный логин или пароль.'
+        ? 'Неверный email или пароль.'
         : 'Неверные данные для входа. Запустите сервер для входа по учётке из админ-панели.';
       return;
     }
@@ -772,9 +993,225 @@
     openCabinet();
   });
 
+  if (authForgotToggle instanceof HTMLButtonElement) {
+    authForgotToggle.addEventListener('click', () => {
+      openForgotPasswordMode();
+    });
+  }
+
+  if (authForgotBack instanceof HTMLButtonElement) {
+    authForgotBack.addEventListener('click', () => {
+      closeForgotPasswordMode();
+    });
+  }
+
+  if (authForgotCode instanceof HTMLInputElement) {
+    authForgotCode.addEventListener('input', () => {
+      authForgotCode.value = normalizeAuthCode(authForgotCode.value);
+    });
+  }
+
+  if (authForgotSendCode instanceof HTMLButtonElement) {
+    authForgotSendCode.addEventListener('click', async () => {
+      const apiCli = window.EkvalineAPI;
+      if (!apiCli?.json) {
+        if (authForgotError) authForgotError.textContent = 'Сервер недоступен.';
+        return;
+      }
+      const email = String(authForgotEmail?.value || '').trim().toLowerCase();
+      if (!isValidEmail(email)) {
+        if (authForgotError) authForgotError.textContent = 'Введите корректный email.';
+        return;
+      }
+      const seq = ++forgotSendSeq;
+      await runAuthButtonLoading(authForgotSendCode, async () => {
+        if (authForgotError) authForgotError.textContent = '';
+        if (authForgotInfo) {
+          authForgotInfo.hidden = true;
+          authForgotInfo.textContent = '';
+        }
+        resetForgotPasswordFlow();
+        forgotSendSeq = seq;
+        const r = await apiCli.json('/api/auth/forgot-password', { method: 'POST', body: { email } });
+        if (seq !== forgotSendSeq) return;
+        if (!r.ok) {
+          if (authForgotError) {
+            authForgotError.textContent =
+              r.data?.error ||
+              (r.status === 404
+                ? 'Аккаунт с таким email не найден.'
+                : 'Не удалось отправить код.');
+          }
+          return;
+        }
+        apiCli.resetCsrf?.();
+        if (authForgotInfo) {
+          authForgotInfo.hidden = false;
+          authForgotInfo.textContent =
+            (r.data?.message || 'Код отправлен на email.') +
+            ' Если нажимали повторно — введите код из последнего письма.';
+        }
+        if (r.data?.devMode && r.data?.devCode && authForgotDevCode instanceof HTMLElement) {
+          authForgotDevCode.hidden = false;
+          authForgotDevCode.innerHTML = `<p class="auth-dev-code-title">Код (режим разработки)</p><p class="auth-dev-code-value">${r.data.devCode}</p>`;
+          if (authForgotCode instanceof HTMLInputElement) authForgotCode.value = String(r.data.devCode);
+        }
+        if (authForgotVerifyForm instanceof HTMLElement) {
+          authForgotVerifyForm.hidden = false;
+          authForgotCode?.focus();
+        }
+      });
+    });
+  }
+
+  if (authForgotVerifyForm instanceof HTMLFormElement) {
+    authForgotVerifyForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const apiCli = window.EkvalineAPI;
+      if (!apiCli?.json) return;
+      const email = String(authForgotEmail?.value || '').trim().toLowerCase();
+      const code = normalizeAuthCode(authForgotCode?.value || '');
+      if (!isValidEmail(email)) {
+        if (authForgotError) authForgotError.textContent = 'Введите корректный email.';
+        return;
+      }
+      if (code.length !== 6) {
+        if (authForgotError) authForgotError.textContent = 'Введите 6-значный код.';
+        return;
+      }
+      const checkBtn = document.getElementById('authForgotCheckCode');
+      await runAuthButtonLoading(checkBtn, async () => {
+        if (authForgotError) authForgotError.textContent = '';
+        const r = await apiCli.json('/api/auth/verify-password-reset-code', {
+          method: 'POST',
+          body: { email, code },
+        });
+        if (!r.ok) {
+          if (authForgotError) authForgotError.textContent = r.data?.error || 'Код не принят.';
+          return;
+        }
+        apiCli.resetCsrf?.();
+        forgotCodeAccepted = code;
+        if (authForgotInfo) {
+          authForgotInfo.hidden = false;
+          authForgotInfo.textContent = r.data?.message || 'Код принят. Задайте новый пароль.';
+        }
+        if (authForgotCode instanceof HTMLInputElement) authForgotCode.readOnly = true;
+        if (checkBtn instanceof HTMLButtonElement) checkBtn.disabled = true;
+        if (authForgotPasswordForm instanceof HTMLElement) {
+          authForgotPasswordForm.hidden = false;
+          setForgotPasswordFieldsEnabled(true);
+          authForgotNewPassword?.focus();
+        }
+      });
+    });
+  }
+
+  if (authForgotNewPassword instanceof HTMLInputElement) {
+    authForgotNewPassword.addEventListener('input', () => syncForgotPasswordSubmitState());
+  }
+  if (authForgotNewPasswordConfirm instanceof HTMLInputElement) {
+    authForgotNewPasswordConfirm.addEventListener('input', () => syncForgotPasswordSubmitState());
+  }
+
+  if (authForgotPasswordForm instanceof HTMLFormElement) {
+    authForgotPasswordForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const apiCli = window.EkvalineAPI;
+      if (!apiCli?.json) return;
+      if (!forgotCodeAccepted) {
+        if (authForgotError) authForgotError.textContent = 'Сначала проверьте код из письма.';
+        return;
+      }
+      const email = String(authForgotEmail?.value || '').trim().toLowerCase();
+      const password = String(authForgotNewPassword?.value || '');
+      const passwordConfirm = String(authForgotNewPasswordConfirm?.value || '');
+      const pwdCheck = validateAuthPasswordForSubmit(password);
+      if (!pwdCheck.ok) {
+        if (authForgotError) authForgotError.textContent = pwdCheck.error;
+        return;
+      }
+      if (password !== passwordConfirm) {
+        if (authForgotError) authForgotError.textContent = 'Пароли не совпадают.';
+        return;
+      }
+      const saveBtn = document.getElementById('authForgotSavePassword');
+      await runAuthButtonLoading(saveBtn, async () => {
+        if (authForgotError) authForgotError.textContent = '';
+        const r = await apiCli.json('/api/auth/reset-password-by-email', {
+          method: 'POST',
+          body: { email, code: forgotCodeAccepted, password },
+        });
+        if (!r.ok) {
+          if (authForgotError) authForgotError.textContent = r.data?.error || 'Не удалось сохранить пароль.';
+          return;
+        }
+        apiCli.resetCsrf?.();
+        if (authForgotInfo) {
+          authForgotInfo.hidden = false;
+          authForgotInfo.textContent = (r.data?.message || 'Пароль обновлён.') + ' Войдите с новым паролем.';
+        }
+        closeForgotPasswordMode();
+        switchAuthTab('login');
+        authLoginValue.value = email;
+        authLoginPassword.value = '';
+        authLoginPassword.focus();
+      });
+    });
+  }
+
+  async function submitForgotOrResend(endpoint, email, errEl, okEl) {
+    const apiCli = window.EkvalineAPI;
+    if (!apiCli?.json) {
+      if (errEl) errEl.textContent = 'Восстановление доступно только при работающем сервере.';
+      return;
+    }
+    if (errEl) errEl.textContent = '';
+    if (okEl) {
+      okEl.hidden = true;
+      okEl.textContent = '';
+    }
+    if (!isValidEmail(email)) {
+      if (errEl) errEl.textContent = 'Введите корректный email.';
+      return;
+    }
+    let r;
+    try {
+      r = await apiCli.json(endpoint, { method: 'POST', body: { email } });
+    } catch {
+      if (errEl) errEl.textContent = 'Не удалось отправить запрос. Попробуйте позже.';
+      return;
+    }
+    if (r.ok) {
+      if (okEl) {
+        okEl.hidden = false;
+        okEl.textContent = r.data?.message || 'Если аккаунт найден, код отправлен на email.';
+      }
+      return;
+    }
+    if (errEl) errEl.textContent = r.data?.error || 'Не удалось отправить письмо.';
+  }
+
+  const authResendVerifyBtn = document.createElement('button');
+  authResendVerifyBtn.type = 'button';
+  authResendVerifyBtn.className = 'ghost-btn';
+  authResendVerifyBtn.textContent = 'Отправить код подтверждения повторно';
+  authResendVerifyBtn.style.marginTop = '0.45rem';
+  authResendVerifyBtn.addEventListener('click', () => {
+    const email = authLoginValue.value.trim().toLowerCase();
+    void submitForgotOrResend('/api/auth/resend-verification', email, authLoginError, authLoginInfo);
+  });
+  if (authLoginInfo?.parentElement) {
+    authLoginInfo.parentElement.insertBefore(authResendVerifyBtn, authLoginInfo.nextSibling);
+  }
+
   authRegisterForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authRegisterError.textContent = '';
+    if (authRegisterInfo) {
+      authRegisterInfo.hidden = true;
+      authRegisterInfo.textContent = '';
+    }
 
     const name = normalizeName(authRegName.value);
     const email = authRegEmail.value.trim().toLowerCase();
@@ -796,6 +1233,10 @@
     }
     if (!isValidEmail(email)) {
       authRegisterError.textContent = 'Введите корректный email.';
+      return;
+    }
+    if (isPseudoClientEmail(email)) {
+      authRegisterError.textContent = 'Укажите ваш настоящий email — служебные адреса не принимаются.';
       return;
     }
     if (STAFF_RESERVED_EMAILS.has(email)) {
@@ -847,6 +1288,41 @@
       if (!rReg || typeof rReg !== 'object') {
         authRegisterError.textContent =
           'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
+        return;
+      }
+      if (rReg.ok && rReg.data?.needsEmailVerification) {
+        apiReg.resetCsrf?.();
+        if (rReg.data.user) {
+          persistLoggedInUserFromApi(rReg.data.user);
+          updateHeaderAuth();
+          closeAuthModal();
+          if (rReg.data.redirectCabinet) {
+            if (rReg.data.devMode && rReg.data.devCode) {
+              try {
+                sessionStorage.setItem(
+                  'ekvaline_email_verify_dev',
+                  JSON.stringify({
+                    devMode: true,
+                    devCode: rReg.data.devCode,
+                    message: rReg.data.message,
+                  })
+                );
+              } catch {
+                /* ignore */
+              }
+            }
+            window.location.href = 'cabinet.html#cabinet-verify-email';
+            return;
+          }
+        }
+        switchAuthTab('login');
+        if (authLoginValue instanceof HTMLInputElement) authLoginValue.value = email;
+        if (authLoginInfo) {
+          authLoginInfo.hidden = false;
+          authLoginInfo.textContent =
+            rReg.data.message ||
+            'Аккаунт создан. Войдите в личный кабинет и введите код из письма в блоке «Подтверждение email».';
+        }
         return;
       }
       if (rReg.ok && rReg.data?.user) {
@@ -1105,7 +1581,139 @@
   normalizeAllOrderIds();
 
   function isWaterProduct(title) {
-    return /вода\s*18\.?9л/i.test(String(title || ''));
+    return /вода\s*18\.?9\s*л/i.test(String(title || ''));
+  }
+
+  function isWaterCartItem(item) {
+    if (!item || typeof item !== 'object') return false;
+    if (item.water === true) return true;
+    if (isWaterProduct(item.title)) return true;
+    return String(item.id || '')
+      .toLowerCase()
+      .includes('water');
+  }
+
+  /** В БД вода — «ЭкваЛайн 19 л», в корзине — «Вода 18.9л». */
+  function findWaterProductId(products) {
+    if (!Array.isArray(products) || !products.length) return null;
+    let bestId = null;
+    let bestScore = 0;
+    products.forEach((p) => {
+      const name = String(p.name || '').toLowerCase();
+      const cat = String(p.category_name || '').toLowerCase();
+      const vol = Number(p.volume_liters);
+      let score = 0;
+      if (/вода/.test(cat)) score += 2;
+      if (/вода|эквалайн|ekva/i.test(name)) score += 2;
+      if (/18\.?9|19\s*л/.test(name)) score += 3;
+      if (Number.isFinite(vol) && vol >= 18 && vol <= 20) score += 5;
+      const id = Number(p.id);
+      if (score > bestScore && Number.isFinite(id) && id > 0) {
+        bestScore = score;
+        bestId = id;
+      }
+    });
+    if (bestId) return bestId;
+    const fallback = products.find((p) => /вода/i.test(String(p.name || '')));
+    return fallback && Number.isFinite(Number(fallback.id)) ? Number(fallback.id) : null;
+  }
+
+  function catalogTitleKey(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+smart\b/g, '')
+      .replace(/[^a-z\u0430-\u044f\u04510-9\s]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function findCatalogProductId(item, products) {
+    if (!item || !Array.isArray(products) || !products.length) return null;
+    const pid = Number(item.productId);
+    if (Number.isFinite(pid) && pid > 0 && products.some((p) => Number(p.id) === pid)) return pid;
+    if (isWaterCartItem(item)) {
+      const waterId = findWaterProductId(products);
+      if (waterId) return waterId;
+    }
+    const title = String(item.title || '').trim().toLowerCase();
+    const exact = products.find((p) => String(p.name || '').trim().toLowerCase() === title);
+    if (exact) return Number(exact.id);
+
+    const key = catalogTitleKey(item.title);
+    if (key) {
+      let bestId = null;
+      let bestScore = 0;
+      products.forEach((p) => {
+        const n = catalogTitleKey(p.name);
+        if (!n) return;
+        if (n === key) {
+          bestId = Number(p.id);
+          bestScore = 1000;
+          return;
+        }
+        if (n.includes(key) || key.includes(n)) {
+          const score = Math.min(n.length, key.length);
+          if (score > bestScore && Number.isFinite(Number(p.id))) {
+            bestScore = score;
+            bestId = Number(p.id);
+          }
+        }
+      });
+      if (bestId) return bestId;
+    }
+
+    const aliasPairs = [
+      [/пуст.*тар|(^|\s)тара(\s|$)|empty/i, /пуст|тара/i],
+      [/механ.*помп|помп.*механ/i, /механ.*помп|помп.*механ/i],
+      [/электр.*помп|помп.*электр/i, /электр.*помп|помп.*электр/i],
+      [/стакан|одноразов/i, /стакан|одноразов/i],
+      [/vatten|кулер.*ниж/i, /vatten|l\s*45/i],
+      [/ael|кулер.*верх|lk-ael/i, /ael|lk-ael|напольн/i],
+    ];
+    for (const [titleRe, nameRe] of aliasPairs) {
+      if (!titleRe.test(String(item.title || ''))) continue;
+      const hit = products.find((p) => nameRe.test(String(p.name || '')));
+      if (hit) return Number(hit.id);
+    }
+    return null;
+  }
+
+  async function fetchCatalogProducts() {
+    try {
+      const api = window.EkvalineAPI;
+      if (api && typeof api.json === 'function') {
+        const pr = await api.json('/api/products');
+        if (pr.ok && Array.isArray(pr.data?.products) && pr.data.products.length) return pr.data.products;
+      }
+    } catch {
+      /* fallback fetch */
+    }
+    try {
+      const r = await fetch(`/api/products?_=${Date.now()}`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (Array.isArray(data.products)) return data.products;
+      }
+    } catch {
+      /* noop */
+    }
+    return [];
+  }
+
+  async function hydrateCatalogProductIds() {
+    const products = await fetchCatalogProducts();
+    if (!products.length) return;
+    document.querySelectorAll('.full-catalog-card').forEach((card) => {
+      if (!(card instanceof HTMLElement)) return;
+      const title = card.querySelector('h3')?.textContent?.trim() || '';
+      if (!title) return;
+      const pid = findCatalogProductId({ title, water: isWaterProduct(title) }, products);
+      if (pid) card.setAttribute('data-product-id', String(pid));
+    });
   }
 
   function getWaterUnitPrice(qty) {
@@ -1170,8 +1778,63 @@
   }
 
   const isCatalogPage = document.body.classList.contains('catalog-page');
+  const isCabinetPage = document.body.classList.contains('cabinet-page-full');
   const contactArea = document.querySelector('.contact-area');
-  if (!isCatalogPage || !contactArea) return;
+  if (!isCatalogPage && !isCabinetPage) return;
+
+  const MAP_PICKER_HTML = `
+    <div class="cart-modal" id="mapPickerModal" aria-hidden="true">
+      <div class="cart-modal-overlay" data-map-close="true"></div>
+      <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
+        <button type="button" class="cart-modal-close" data-map-close="true">×</button>
+        <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
+        <p class="checkout-subtitle">Укажите точку на карте или заполните поля — адрес должен быть в Оренбурге.</p>
+        <div class="checkout-map-form">
+          <label class="checkout-field">Город
+            <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
+          </label>
+          <label class="checkout-field">Улица
+            <div class="address-suggest-wrap">
+              <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Салмышская" autocomplete="off" />
+              <button type="button" id="clearMapStreetBtn" class="address-input-clear" aria-label="Очистить улицу" title="Очистить">×</button>
+              <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
+            </div>
+          </label>
+          <label class="checkout-field">Дом
+            <input type="text" id="mapHouseInput" maxlength="20" placeholder="Например: 12" />
+          </label>
+          <label class="checkout-field">Квартира
+            <input type="text" id="mapApartmentInput" maxlength="10" placeholder="Например: 45" />
+          </label>
+          <label class="checkout-field">Этаж
+            <input type="text" id="mapFloorInput" maxlength="10" placeholder="Например: 6" />
+          </label>
+          <label class="checkout-field">Подъезд
+            <input type="text" id="mapEntranceInput" maxlength="10" placeholder="Например: 2" />
+          </label>
+        </div>
+        <p id="mapApartmentRequirementsHint" class="checkout-map-validation-hint" hidden>
+          Если указана квартира, обязательно заполните этаж и подъезд.
+        </p>
+        <datalist id="mapCitySuggestions"></datalist>
+        <div id="checkoutMapRoot" class="checkout-map-root"></div>
+        <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
+        <p class="checkout-map-picker-hint">Если адрес не находится, выберите точку на карте.</p>
+        <div class="checkout-map-actions">
+          <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
+          <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
+        </div>
+      </div>
+    </div>`;
+
+  if (isCabinetPage && !document.getElementById('mapPickerModal')) {
+    document.body.insertAdjacentHTML('beforeend', MAP_PICKER_HTML);
+  }
+
+  if (!isCatalogPage || !contactArea) {
+    /* Кабинет: ниже инициализируется только карта, корзина не подключается. */
+  } else {
+  void hydrateCatalogProductIds();
   const cartBtn = document.createElement('button');
   cartBtn.type = 'button';
   cartBtn.className = 'cart-floating-btn cart-trigger-btn';
@@ -1201,13 +1864,17 @@
         <h3 id="checkoutModalTitle">Оформление заказа</h3>
         <p class="checkout-subtitle">Проверьте данные перед подтверждением заказа.</p>
         <form id="checkoutForm" class="checkout-form" novalidate>
+          <div id="checkoutSavedAddressesWrap" class="checkout-saved-addresses-wrap" hidden>
+            <p class="checkout-saved-addresses-title">Сохранённые адреса из личного кабинета</p>
+            <div id="checkoutSavedAddressesList" class="checkout-saved-addresses-list" role="listbox" aria-label="Сохранённые адреса"></div>
+          </div>
           <label class="checkout-field">Адрес доставки
             <input type="text" id="checkoutAddressInput" name="address" maxlength="${CHECKOUT_ADDRESS_MAX}" required placeholder="Сначала выберите адрес на карте" readonly />
             <button type="button" class="checkout-map-btn" id="openMapPickerBtn">Выбрать на карте</button>
           </label>
           <label class="checkout-field">Дата доставки
             <input type="date" id="checkoutDeliveryDate" name="deliveryDate" required />
-            <span class="checkout-field-hint" id="checkoutDeliveryDateHint">Доставка с завтрашнего дня (сегодня выбрать нельзя)</span>
+            <span class="checkout-field-hint" id="checkoutDeliveryDateHint">Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя).</span>
           </label>
           <label class="checkout-field">Интервал доставки
             <select id="checkoutDeliverySlot" name="deliverySlot" required>
@@ -1222,7 +1889,7 @@
             <span class="checkout-field-hint" id="checkoutCommentCounter">0/${CHECKOUT_COMMENT_MAX}</span>
           </label>
           <label class="checkout-field">Списать бонусы
-            <input type="number" name="bonusSpend" min="0" step="1" value="0" />
+            <input type="number" id="checkoutBonusSpend" name="bonusSpend" min="0" step="1" value="0" inputmode="numeric" />
           </label>
           <p class="checkout-meta" id="checkoutMetaText"></p>
           <button type="submit" class="auth-submit">Подтвердить заказ</button>
@@ -1273,24 +1940,45 @@
         </div>
       </div>
     </div>
-    <div id="appToast" class="app-toast" hidden>
-      <div class="app-toast-card" role="status" aria-live="polite">
-        <p id="appToastText" class="app-toast-text"></p>
-        <button type="button" id="appToastClose" class="app-toast-close" aria-label="Закрыть уведомление">×</button>
+    <div id="appToast" class="ek-notify" hidden role="status" aria-live="polite" aria-atomic="true">
+      <div class="ek-notify-card">
+        <span class="ek-notify-icon" aria-hidden="true"></span>
+        <p id="appToastText" class="ek-notify-text"></p>
+        <button type="button" id="appToastClose" class="ek-notify-close" aria-label="Закрыть">×</button>
+      </div>
+    </div>
+    <div id="orderSuccessModal" class="order-success-modal" aria-hidden="true">
+      <div class="order-success-backdrop" data-order-success-close="true"></div>
+      <div class="order-success-card" role="dialog" aria-modal="true" aria-labelledby="orderSuccessTitle">
+        <p class="order-success-kicker">Заказ оформлен</p>
+        <h3 id="orderSuccessTitle">Заявка принята</h3>
+        <dl class="order-success-details" id="orderSuccessDetails"></dl>
+        <p class="order-success-note" id="orderSuccessNote"></p>
+        <div class="order-success-actions">
+          <a href="cabinet.html" class="solid-btn" id="orderSuccessCabinetBtn">Личный кабинет</a>
+          <button type="button" class="ghost-btn" id="orderSuccessContinueBtn" data-order-success-close="true">Продолжить покупки</button>
+        </div>
       </div>
     </div>
   `
   );
+  }
 
-  const cartModal = document.getElementById('cartModal');
-  const checkoutModal = document.getElementById('checkoutModal');
-  const cartItemsList = document.getElementById('cartItemsList');
-  const cartTotalPrice = document.getElementById('cartTotalPrice');
-  const cartErrorText = document.getElementById('cartErrorText');
-  const openCheckoutBtn = document.getElementById('openCheckoutBtn');
-  const checkoutForm = document.getElementById('checkoutForm');
-  const checkoutAddressInput = document.getElementById('checkoutAddressInput');
-  const openMapPickerBtn = document.getElementById('openMapPickerBtn');
+  let mapPickerOnApply = null;
+  let mapPickerMaxLength = CHECKOUT_ADDRESS_MAX;
+  let pickedAddress = '';
+
+  const cartModal = isCatalogPage ? document.getElementById('cartModal') : null;
+  const checkoutModal = isCatalogPage ? document.getElementById('checkoutModal') : null;
+  const cartItemsList = isCatalogPage ? document.getElementById('cartItemsList') : null;
+  const cartTotalPrice = isCatalogPage ? document.getElementById('cartTotalPrice') : null;
+  const cartErrorText = isCatalogPage ? document.getElementById('cartErrorText') : null;
+  const openCheckoutBtn = isCatalogPage ? document.getElementById('openCheckoutBtn') : null;
+  const checkoutForm = isCatalogPage ? document.getElementById('checkoutForm') : null;
+  const checkoutAddressInput = isCatalogPage ? document.getElementById('checkoutAddressInput') : null;
+  const checkoutSavedAddressesWrap = isCatalogPage ? document.getElementById('checkoutSavedAddressesWrap') : null;
+  const checkoutSavedAddressesList = isCatalogPage ? document.getElementById('checkoutSavedAddressesList') : null;
+  const openMapPickerBtn = isCatalogPage ? document.getElementById('openMapPickerBtn') : null;
   const checkoutDeliveryDate = document.getElementById('checkoutDeliveryDate');
   const checkoutDeliverySlot = document.getElementById('checkoutDeliverySlot');
   const checkoutMetaText = document.getElementById('checkoutMetaText');
@@ -1327,17 +2015,73 @@
   let remoteOrenburgStreetsPromise = null;
   let appToastTimer = null;
 
+  function formatOrderSlotLabel(raw) {
+    const s = String(raw || '')
+      .trim()
+      .replace(/\u2013|\u2014|\u2212/g, '-');
+    const m = /(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/.exec(s);
+    if (m) return `${m[1]}–${m[2]}`;
+    return s || '—';
+  }
+
+  function hideOrderSuccessModal() {
+    const modal = document.getElementById('orderSuccessModal');
+    if (!(modal instanceof HTMLElement)) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function showOrderSuccessModal(order, extras) {
+    const modal = document.getElementById('orderSuccessModal');
+    const details = document.getElementById('orderSuccessDetails');
+    const note = document.getElementById('orderSuccessNote');
+    const title = document.getElementById('orderSuccessTitle');
+    if (!(modal instanceof HTMLElement) || !(details instanceof HTMLElement)) return;
+
+    const orderId = order?.id != null ? String(order.id) : '—';
+    const dateRu = order?.delivery_date
+      ? String(order.delivery_date).split('-').reverse().join('.')
+      : '—';
+    const slot = formatOrderSlotLabel(order?.delivery_slot);
+    const total = Number(order?.total_sum || 0);
+    const bonusEarned = Number(extras?.bonusEarned ?? order?.bonuses_earned ?? 0);
+
+    if (title instanceof HTMLElement) {
+      title.textContent = `Заявка №${orderId}`;
+    }
+    details.innerHTML = `
+      <div><dt>Номер заявки</dt><dd>№${orderId}</dd></div>
+      <div><dt>Дата доставки</dt><dd>${dateRu}</dd></div>
+      <div><dt>Интервал</dt><dd>${slot}</dd></div>
+      <div><dt>Итого к оплате</dt><dd><strong>${total} ₽</strong></dd></div>
+    `;
+    if (note instanceof HTMLElement) {
+      note.textContent = `Статус «В обработке» — оператор подтвердит доставку. Начислено бонусов: ${bonusEarned}. Следите за статусом в личном кабинете и в уведомлениях на сайте.`;
+    }
+
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
   function showAppToast(message, variant = 'success') {
-    if (!(appToast instanceof HTMLElement) || !(appToastText instanceof HTMLElement)) return;
-    appToastText.textContent = String(message || '').trim();
-    appToast.dataset.variant = variant === 'error' ? 'error' : 'success';
+    const msg = String(message || '').trim();
+    if (!msg) return;
+    if (!(appToast instanceof HTMLElement) || !(appToastText instanceof HTMLElement)) {
+      window.alert(msg);
+      return;
+    }
+    appToastText.textContent = msg;
+    const v = variant === 'error' ? 'error' : variant === 'info' ? 'info' : 'success';
+    appToast.dataset.variant = v;
+    if (appToast.parentElement !== document.body) document.body.appendChild(appToast);
     appToast.hidden = false;
-    appToast.classList.add('is-visible');
+    appToast.classList.remove('is-visible');
+    window.requestAnimationFrame(() => appToast.classList.add('is-visible'));
     if (appToastTimer) window.clearTimeout(appToastTimer);
     appToastTimer = window.setTimeout(() => {
       appToast.classList.remove('is-visible');
       appToast.hidden = true;
-    }, 4200);
+    }, v === 'error' ? 5200 : 4200);
   }
 
   function updateCheckoutCommentCounter() {
@@ -1377,6 +2121,33 @@
   ];
 
   let checkoutAvailability = { closedDays: [], closedSlots: [] };
+  let checkoutAvailPollTimer = null;
+  const CHECKOUT_AVAIL_POLL_MS = 20000;
+  const PUBLIC_DATA_POLL_MS = 45000;
+  const CHECKOUT_DELIVERY_HINT_DEFAULT =
+    'Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя).';
+
+  function parseCheckoutAvailabilityPayload(data) {
+    const root =
+      data && typeof data === 'object' && data.availability && typeof data.availability === 'object'
+        ? data.availability
+        : data;
+    if (!root || typeof root !== 'object') {
+      return { closedDays: [], closedSlots: [] };
+    }
+    const closedDays = Array.isArray(root.closedDays)
+      ? root.closedDays.map((d) => String(d).trim()).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      : [];
+    const closedSlots = Array.isArray(root.closedSlots)
+      ? root.closedSlots
+          .map((r) => ({
+            date: String(r?.date ?? r?.delivery_date ?? '').trim(),
+            slot: normalizeCheckoutSlotKey(r?.slot ?? r?.delivery_slot),
+          }))
+          .filter((r) => r.date && r.slot)
+      : [];
+    return { closedDays, closedSlots };
+  }
 
   function normalizeCheckoutSlotKey(raw) {
     const flat = String(raw || '')
@@ -1441,26 +2212,35 @@
 
   async function loadCheckoutAvailability() {
     try {
-      const res = await fetch('/api/public/delivery-availability', {
+      const res = await fetch(`/api/public/delivery-availability?_=${Date.now()}`, {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
+        cache: 'no-store',
       });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const data = await res.json();
-      checkoutAvailability = {
-        closedDays: Array.isArray(data.closedDays) ? data.closedDays.map((d) => String(d).trim()).filter(Boolean) : [],
-        closedSlots: Array.isArray(data.closedSlots)
-          ? data.closedSlots
-              .map((r) => ({
-                date: String(r?.date || '').trim(),
-                slot: normalizeCheckoutSlotKey(r?.slot),
-              }))
-              .filter((r) => r.date && r.slot)
-          : [],
-      };
+      checkoutAvailability = parseCheckoutAvailabilityPayload(data);
+      return true;
     } catch {
       checkoutAvailability = { closedDays: [], closedSlots: [] };
+      return false;
     }
+  }
+
+  function stopCheckoutAvailabilityPoll() {
+    if (checkoutAvailPollTimer) {
+      window.clearInterval(checkoutAvailPollTimer);
+      checkoutAvailPollTimer = null;
+    }
+  }
+
+  function startCheckoutAvailabilityPoll() {
+    stopCheckoutAvailabilityPoll();
+    checkoutAvailPollTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      if (!checkoutModal?.classList.contains('open')) return;
+      void loadCheckoutAvailability().then(() => refreshCheckoutDeliveryUi());
+    }, CHECKOUT_AVAIL_POLL_MS);
   }
 
   function refreshCheckoutDeliveryUi() {
@@ -1498,7 +2278,7 @@
     } else if (!slots.length) {
       setCheckoutDeliveryHint('На эту дату все интервалы закрыты — выберите другой день.');
     } else {
-      setCheckoutDeliveryHint('Доставка с завтрашнего дня (сегодня выбрать нельзя)');
+      setCheckoutDeliveryHint(CHECKOUT_DELIVERY_HINT_DEFAULT);
     }
   }
 
@@ -2216,17 +2996,48 @@
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize()));
   }
 
-  async function openMapPicker() {
-    const currentAddress = String(checkoutAddressInput instanceof HTMLInputElement ? checkoutAddressInput.value : '').trim();
+  function parseFormattedAddressLine(line) {
+    const s = String(line || '').trim();
+    const parts = {
+      city: DEFAULT_CITY,
+      street: '',
+      house: '',
+      apartment: '',
+      floor: '',
+      entrance: '',
+    };
+    if (!s) return parts;
+    const streetM = /ул\.?\s*([^,]+)/i.exec(s);
+    const houseM = /д\.?\s*([^,]+)/i.exec(s);
+    const entranceM = /подъезд\s+([^,]+)/i.exec(s);
+    const floorM = /этаж\s+([^,]+)/i.exec(s);
+    const aptM = /кв\.?\s*([^,]+)/i.exec(s);
+    if (streetM) parts.street = String(streetM[1] || '').trim();
+    if (houseM) parts.house = String(houseM[1] || '').trim();
+    if (entranceM) parts.entrance = String(entranceM[1] || '').trim();
+    if (floorM) parts.floor = String(floorM[1] || '').trim();
+    if (aptM) parts.apartment = String(aptM[1] || '').trim();
+    return parts;
+  }
+
+  function applyAddressPartsToMapInputs(parts) {
+    if (mapCityInput instanceof HTMLInputElement) mapCityInput.value = parts.city || DEFAULT_CITY;
+    if (mapStreetInput instanceof HTMLInputElement) mapStreetInput.value = parts.street || '';
+    if (mapHouseInput instanceof HTMLInputElement) mapHouseInput.value = parts.house || '';
+    if (mapApartmentInput instanceof HTMLInputElement) mapApartmentInput.value = parts.apartment || '';
+    if (mapFloorInput instanceof HTMLInputElement) mapFloorInput.value = parts.floor || '';
+    if (mapEntranceInput instanceof HTMLInputElement) mapEntranceInput.value = parts.entrance || '';
+  }
+
+  async function openMapPicker(initialAddress = '') {
+    const fromArg = String(initialAddress || '').trim();
+    const currentAddress = String(
+      fromArg || (checkoutAddressInput instanceof HTMLInputElement ? checkoutAddressInput.value : '')
+    ).trim();
     if (!currentAddress) {
-      if (mapCityInput instanceof HTMLInputElement) mapCityInput.value = DEFAULT_CITY;
-      if (mapStreetInput instanceof HTMLInputElement) mapStreetInput.value = '';
-      if (mapHouseInput instanceof HTMLInputElement) mapHouseInput.value = '';
-      if (mapApartmentInput instanceof HTMLInputElement) mapApartmentInput.value = '';
-      if (mapFloorInput instanceof HTMLInputElement) mapFloorInput.value = '';
-      if (mapEntranceInput instanceof HTMLInputElement) mapEntranceInput.value = '';
-    } else if (mapCityInput instanceof HTMLInputElement && !mapCityInput.value.trim()) {
-      mapCityInput.value = DEFAULT_CITY;
+      applyAddressPartsToMapInputs(parseFormattedAddressLine(''));
+    } else {
+      applyAddressPartsToMapInputs(parseFormattedAddressLine(currentAddress));
     }
     updatePickedAddressLabel();
     mapPickerModal?.classList.add('open');
@@ -2321,6 +3132,73 @@
     return total;
   }
 
+  function computeCartSubtotal(items) {
+    const list = Array.isArray(items) ? items : [];
+    return list.reduce((sum, item) => {
+      if (item?.preorder) return sum;
+      const unitPrice = item?.water ? getWaterUnitPrice(item.qty || 0) : item?.price || 0;
+      return sum + unitPrice * (item?.qty || 0);
+    }, 0);
+  }
+
+  function getUserBonusBalance(user) {
+    if (!user) return 0;
+    const fromProfile = Number(user.bonus_balance);
+    if (Number.isFinite(fromProfile) && fromProfile >= 0) return Math.floor(fromProfile);
+    if (window.EkvalineAPI?.json) return 0;
+    return Math.max(0, Math.floor(Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0));
+  }
+
+  /** Нельзя списать больше суммы заказа и больше баланса бонусов. */
+  function maxCheckoutBonusSpend(subtotal, balance) {
+    const orderSum = Math.max(0, Math.floor(Number(subtotal) || 0));
+    const avail = Math.max(0, Math.floor(Number(balance) || 0));
+    return Math.min(orderSum, avail);
+  }
+
+  function checkoutBonusInputEl() {
+    if (!(checkoutForm instanceof HTMLFormElement)) return null;
+    const el = checkoutForm.elements.namedItem('bonusSpend');
+    return el instanceof HTMLInputElement ? el : null;
+  }
+
+  function syncCheckoutBonusUi(user, items) {
+    const cartItems = Array.isArray(items) ? items : readCart();
+    const subtotal = computeCartSubtotal(cartItems);
+    const preorderCount = cartItems.filter((item) => item?.preorder).length;
+    const balance = getUserBonusBalance(user);
+    const maxSpend = maxCheckoutBonusSpend(subtotal, balance);
+    const bonusEl = checkoutBonusInputEl();
+
+    if (bonusEl) {
+      bonusEl.min = '0';
+      bonusEl.max = String(maxSpend);
+      bonusEl.step = '1';
+      if (maxSpend <= 0) {
+        bonusEl.value = '0';
+        bonusEl.disabled = true;
+      } else {
+        bonusEl.disabled = false;
+        const raw = Math.floor(Number(bonusEl.value) || 0);
+        bonusEl.value = String(Math.min(maxSpend, Math.max(0, raw)));
+      }
+    }
+
+    const spent = bonusEl && !bonusEl.disabled ? Math.floor(Number(bonusEl.value) || 0) : 0;
+    const payable = Math.max(0, subtotal - spent);
+
+    if (!(checkoutMetaText instanceof HTMLElement)) return;
+    if (preorderCount > 0) {
+      checkoutMetaText.textContent = `В корзине есть товары "под заказ". Укажите свою почту в примечании к заказу: компания пришлет всю необходимую информацию и дату доставки. Текущая сумма оплачиваемых позиций: ${subtotal} ₽.`;
+      return;
+    }
+    if (balance <= 0) {
+      checkoutMetaText.textContent = `Сумма к оплате: ${payable} ₽. Бонусов нет — списание недоступно.`;
+      return;
+    }
+    checkoutMetaText.textContent = `Сумма: ${subtotal} ₽. Доступно бонусов: ${balance}. К оплате: ${payable} ₽ (можно списать до ${maxSpend}).`;
+  }
+
   function openCartModal() {
     const user = readCurrentUser();
     if (!user || user.role === 'manager') {
@@ -2341,24 +3219,80 @@
     if (!checkoutModal?.classList.contains('open')) document.body.style.overflow = '';
   }
 
+  let checkoutSavedAddresses = [];
+
+  function renderCheckoutSavedAddresses() {
+    if (!(checkoutSavedAddressesWrap instanceof HTMLElement) || !(checkoutSavedAddressesList instanceof HTMLElement)) {
+      return;
+    }
+    const rows = Array.isArray(checkoutSavedAddresses) ? checkoutSavedAddresses : [];
+    if (!rows.length) {
+      checkoutSavedAddressesWrap.hidden = true;
+      checkoutSavedAddressesList.innerHTML = '';
+      return;
+    }
+    checkoutSavedAddressesWrap.hidden = false;
+    checkoutSavedAddressesList.innerHTML = rows
+      .map((addr) => {
+        const line = String(addr.address_line || '').trim();
+        const title = String(addr.label || '').trim() || line;
+        const def = addr.is_default ? ' is-default' : '';
+        const selected =
+          checkoutAddressInput instanceof HTMLInputElement &&
+          checkoutAddressInput.value.trim() === line
+            ? ' is-selected'
+            : '';
+        return `<button type="button" class="checkout-saved-address-chip${def}${selected}" data-saved-address-id="${Number(addr.id) || 0}" role="option">
+          <span class="checkout-saved-address-chip-title">${escapeHtmlLocal(title)}</span>
+          <span class="checkout-saved-address-chip-line">${escapeHtmlLocal(line)}</span>
+        </button>`;
+      })
+      .join('');
+  }
+
+  async function loadCheckoutSavedAddresses() {
+    checkoutSavedAddresses = [];
+    const api = window.EkvalineAPI;
+    if (!api?.json) {
+      renderCheckoutSavedAddresses();
+      return;
+    }
+    try {
+      const response = await api.json('/api/profile/addresses');
+      if (response.ok && Array.isArray(response.data?.addresses)) {
+        checkoutSavedAddresses = response.data.addresses.slice().sort((a, b) => {
+          if (a.is_default && !b.is_default) return -1;
+          if (!a.is_default && b.is_default) return 1;
+          return Number(b.id || 0) - Number(a.id || 0);
+        });
+      }
+    } catch {
+      checkoutSavedAddresses = [];
+    }
+    renderCheckoutSavedAddresses();
+    const primary = checkoutSavedAddresses.find((a) => a.is_default) || checkoutSavedAddresses[0];
+    if (primary && checkoutAddressInput instanceof HTMLInputElement && !checkoutAddressInput.value.trim()) {
+      checkoutAddressInput.value = String(primary.address_line || '').trim().slice(0, CHECKOUT_ADDRESS_MAX);
+      renderCheckoutSavedAddresses();
+    }
+  }
+
+  function selectCheckoutSavedAddress(addressId) {
+    const id = Number(addressId);
+    const row = checkoutSavedAddresses.find((a) => Number(a.id) === id);
+    const value = String(row?.address_line || '').trim();
+    if (!value || !(checkoutAddressInput instanceof HTMLInputElement)) return;
+    checkoutAddressInput.value = value.slice(0, CHECKOUT_ADDRESS_MAX);
+    renderCheckoutSavedAddresses();
+  }
+
   function openCheckout() {
     const user = readCurrentUser();
     if (!user || user.role === 'manager') return;
     const items = readCart();
     if (!items.length) return;
-    const preorderCount = items.filter((item) => item.preorder).length;
-    const subtotal = items.reduce((sum, item) => {
-      if (item.preorder) return sum;
-      const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
-      return sum + unitPrice * (item.qty || 0);
-    }, 0);
-    const bonuses = Number(readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
-    if (checkoutMetaText) {
-      checkoutMetaText.textContent =
-        preorderCount > 0
-          ? `В корзине есть товары "под заказ". Укажите свою почту в примечании к заказу: компания пришлет всю необходимую информацию и дату доставки. Текущая сумма оплачиваемых позиций: ${subtotal} ₽.`
-          : `Сумма: ${subtotal} ₽. Доступно бонусов: ${bonuses}.`;
-    }
+    syncCheckoutBonusUi(user, items);
+    void loadCheckoutSavedAddresses();
     void (async () => {
       await loadCheckoutAvailability();
       if (checkoutDeliveryDate instanceof HTMLInputElement) {
@@ -2372,14 +3306,18 @@
     })();
     checkoutModal?.classList.add('open');
     checkoutModal?.setAttribute('aria-hidden', 'false');
+    startCheckoutAvailabilityPoll();
     updateCheckoutCommentCounter();
   }
 
   function closeCheckout() {
     checkoutModal?.classList.remove('open');
     checkoutModal?.setAttribute('aria-hidden', 'true');
+    stopCheckoutAvailabilityPoll();
     if (!cartModal?.classList.contains('open')) document.body.style.overflow = '';
   }
+
+  if (isCabinetPage) return;
 
   cartBtn.addEventListener('click', openCartModal);
   document.addEventListener('click', (event) => {
@@ -2404,7 +3342,14 @@
       return;
     }
     if (target.closest('#openMapPickerBtn')) {
-      openMapPicker();
+      mapPickerOnApply = null;
+      mapPickerMaxLength = CHECKOUT_ADDRESS_MAX;
+      void openMapPicker();
+      return;
+    }
+    const savedAddrChip = target.closest('.checkout-saved-address-chip');
+    if (savedAddrChip instanceof HTMLElement) {
+      selectCheckoutSavedAddress(savedAddrChip.getAttribute('data-saved-address-id'));
       return;
     }
     const streetSuggestBtn = target.closest('[data-street-suggest]');
@@ -2489,12 +3434,40 @@
   });
 
   checkoutDeliveryDate?.addEventListener('change', () => {
-    refreshCheckoutDeliveryUi();
+    void (async () => {
+      await loadCheckoutAvailability();
+      refreshCheckoutDeliveryUi();
+    })();
   });
+
+  void loadCheckoutAvailability().then(() => refreshCheckoutDeliveryUi());
+
+  window.setInterval(() => {
+    if (document.hidden) return;
+    void loadCheckoutAvailability().then(() => {
+      if (checkoutModal?.classList.contains('open')) refreshCheckoutDeliveryUi();
+    });
+  }, PUBLIC_DATA_POLL_MS);
+
+  if (typeof window.EkvalineOrdersSync?.subscribeOrdersDataChanged === 'function') {
+    window.EkvalineOrdersSync.subscribeOrdersDataChanged(() => {
+      void loadCheckoutAvailability().then(() => {
+        if (checkoutModal?.classList.contains('open')) refreshCheckoutDeliveryUi();
+      });
+    });
+  }
 
   if (checkoutForm instanceof HTMLFormElement) {
     updateCheckoutCommentCounter();
     checkoutCommentField?.addEventListener('input', updateCheckoutCommentCounter);
+    checkoutBonusInputEl()?.addEventListener('input', () => {
+      const user = readCurrentUser();
+      if (user) syncCheckoutBonusUi(user);
+    });
+    checkoutBonusInputEl()?.addEventListener('change', () => {
+      const user = readCurrentUser();
+      if (user) syncCheckoutBonusUi(user);
+    });
     checkoutForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const user = readCurrentUser();
@@ -2506,7 +3479,6 @@
       const comment = String(checkoutForm.elements.namedItem('comment')?.value || '').trim();
       const deliveryDate = String(checkoutForm.elements.namedItem('deliveryDate')?.value || '').trim();
       const deliverySlot = String(checkoutDeliverySlot instanceof HTMLSelectElement ? checkoutDeliverySlot.value : '').trim();
-      const bonusSpendRaw = Number(checkoutForm.elements.namedItem('bonusSpend')?.value || 0);
       const hasFloor = /этаж\s+\S+/i.test(address);
       const hasEntrance = /подъезд\s+\S+/i.test(address);
       const hasApartment = /кв\.\s*\S+/i.test(address);
@@ -2539,29 +3511,15 @@
         return;
       }
 
-      let products = [];
-      try {
-        const pr = await api.json('/api/products');
-        if (pr.ok && Array.isArray(pr.data?.products)) products = pr.data.products;
-      } catch {
-        showAppToast('Не удалось загрузить каталог товаров.', 'error');
+      const products = await fetchCatalogProducts();
+      if (!products.length) {
+        showAppToast('Не удалось загрузить каталог товаров. Обновите страницу или перезапустите сервер.', 'error');
         return;
       }
 
-      const resolveProductId = (item) => {
-        if (item.productId && Number.isFinite(Number(item.productId))) return Number(item.productId);
-        if (item.water) {
-          const w = products.find((p) => /вода|18\.?9/i.test(String(p.name || '')));
-          if (w) return Number(w.id);
-        }
-        const t = String(item.title || '').trim().toLowerCase();
-        const hit = products.find((p) => String(p.name || '').trim().toLowerCase() === t);
-        return hit ? Number(hit.id) : null;
-      };
-
       const lineItems = [];
       for (const item of items) {
-        const pid = resolveProductId(item);
+        const pid = findCatalogProductId(item, products);
         if (!pid) {
           showAppToast(`Не найден товар в каталоге: ${item.title || 'позиция'}`, 'error');
           return;
@@ -2569,12 +3527,21 @@
         lineItems.push({ product_id: pid, qty: Math.max(1, Number(item.qty) || 1) });
       }
 
-      const subtotal = items.reduce((sum, item) => {
-        const unitPrice = item.water ? getWaterUnitPrice(item.qty || 0) : item.price || 0;
-        return sum + unitPrice * (item.qty || 0);
-      }, 0);
-      const currentBonus = Number(user.bonus_balance ?? readByUser(BONUSES_KEY, String(user.id), 0)) || 0;
-      const bonusSpend = Math.max(0, Math.min(currentBonus, Math.floor(bonusSpendRaw)));
+      const subtotal = computeCartSubtotal(items);
+      const currentBonus = getUserBonusBalance(user);
+      const maxSpend = maxCheckoutBonusSpend(subtotal, currentBonus);
+      const bonusSpendRaw = Math.floor(Number(checkoutForm.elements.namedItem('bonusSpend')?.value || 0));
+      const bonusSpend = Math.min(maxSpend, Math.max(0, bonusSpendRaw));
+      if (bonusSpendRaw > maxSpend) {
+        syncCheckoutBonusUi(user, items);
+        showAppToast(
+          maxSpend <= 0
+            ? 'Бонусов нет — списание недоступно.'
+            : `Можно списать не больше ${maxSpend} бонусов (не больше суммы заказа).`,
+          'error'
+        );
+        return;
+      }
 
       try {
         const response = await api.json('/api/orders', {
@@ -2600,7 +3567,10 @@
           localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedUser));
           if (typeof window.__ekvalineUpdateHeaderAuth === 'function') window.__ekvalineUpdateHeaderAuth();
         }
-        const bonusEarned = Number(order?.bonuses_earned || Math.floor(Math.max(0, subtotal - bonusSpend) * 0.05));
+        const bonusEarned = Number(
+          order?.bonuses_earned ?? Math.floor(Math.max(0, subtotal - bonusSpend) * 0.05)
+        );
+        window.EkvalineOrdersSync?.notifyOrdersDataChanged?.();
 
         const addresses = readByUser(ADDRESSES_KEY, String(user.id), []);
         if (!addresses.includes(address)) {
@@ -2617,10 +3587,11 @@
         if (checkoutDeliveryDate instanceof HTMLInputElement) {
           checkoutDeliveryDate.value = earliestDeliveryIsoDate();
         }
+        const userAfter = readCurrentUser();
+        if (userAfter) syncCheckoutBonusUi(userAfter, []);
         updateCheckoutCommentCounter();
-        showAppToast(
-          `Заказ №${order?.id || ''} принят. Статус «В обработке» — оператор подтвердит доставку. Начислено бонусов: ${bonusEarned}.`
-        );
+        window.EkvalineNotificationsSync?.refresh?.();
+        showOrderSuccessModal(order, { bonusEarned });
       } catch {
         showAppToast('Ошибка сети при оформлении заказа.', 'error');
       }
@@ -2638,12 +3609,20 @@
       showAppToast('Укажите улицу из подсказок и номер дома.', 'error');
       return;
     }
-    if (!pickedAddress || !(checkoutAddressInput instanceof HTMLInputElement)) return;
+    if (!pickedAddress) return;
     if (!/оренбург/i.test(pickedAddress)) {
       showAppToast('Адрес должен быть в Оренбурге.', 'error');
       return;
     }
-    checkoutAddressInput.value = pickedAddress.slice(0, CHECKOUT_ADDRESS_MAX);
+    const line = pickedAddress.slice(0, mapPickerMaxLength);
+    if (typeof mapPickerOnApply === 'function') {
+      mapPickerOnApply(line);
+      mapPickerOnApply = null;
+      closeMapPicker();
+      return;
+    }
+    if (!(checkoutAddressInput instanceof HTMLInputElement)) return;
+    checkoutAddressInput.value = line;
     closeMapPicker();
   });
 
@@ -2707,7 +3686,24 @@
     appToast.hidden = true;
   });
 
+  document.getElementById('orderSuccessContinueBtn')?.addEventListener('click', hideOrderSuccessModal);
+  document.getElementById('orderSuccessModal')?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.orderSuccessClose === 'true') {
+      hideOrderSuccessModal();
+    }
+  });
+
   updateStreetClearButton();
+
+  window.EkvalineMapPicker = {
+    open(opts = {}) {
+      mapPickerOnApply = typeof opts.onApply === 'function' ? opts.onApply : null;
+      mapPickerMaxLength = Math.max(80, Math.floor(Number(opts.maxLength) || CHECKOUT_ADDRESS_MAX));
+      void openMapPicker(String(opts.initialAddress || '').trim());
+    },
+    close: closeMapPicker,
+  };
 
   updateCartBadge();
   saveCart(readCart());
@@ -2754,6 +3750,11 @@ if (
 ) {
   const calcSection = document.getElementById('water-calc');
   const calcResultCard = calcSection && calcSection.querySelector('.calc-result-card');
+  const PEOPLE_MIN = Number(peopleRange.min) || 1;
+  const PEOPLE_MAX = Number(peopleRange.max) || 15;
+  const allowedUsage = new Set(['drink', 'cook', 'both']);
+  const allowedActivity = new Set(['low', 'medium', 'high']);
+  const allowedSeason = new Set(['winter', 'spring-autumn', 'summer']);
 
   const usageLabels = {
     drink: 'Только питье',
@@ -2761,8 +3762,23 @@ if (
     both: 'Питье и готовка',
   };
 
+  function clampInt(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    const int = Math.round(n);
+    return Math.min(max, Math.max(min, int));
+  }
+
+  function normalizeState() {
+    state.people = clampInt(state.people, PEOPLE_MIN, PEOPLE_MAX, PEOPLE_MIN);
+    if (!allowedUsage.has(state.usage)) state.usage = 'both';
+    if (!allowedActivity.has(state.activity)) state.activity = 'medium';
+    if (!allowedSeason.has(state.season)) state.season = 'spring-autumn';
+    peopleRange.value = String(state.people);
+  }
+
   let state = {
-    people: Number(peopleRange.value),
+    people: clampInt(peopleRange.value, PEOPLE_MIN, PEOPLE_MAX, PEOPLE_MIN),
     usage: 'both',
     activity: 'medium',
     season: 'spring-autumn',
@@ -2786,7 +3802,10 @@ if (
 
   /** Применить ответ сервера — подмена в DevTools без нового запроса не является «доверенными» данными надолго. */
   function applyWaterCalcPayload(payload) {
-    peopleValue.textContent = String(payload.people);
+    const peopleSafe = clampInt(payload.people, PEOPLE_MIN, PEOPLE_MAX, state.people);
+    state.people = peopleSafe;
+    peopleRange.value = String(peopleSafe);
+    peopleValue.textContent = String(peopleSafe);
     litersValue.textContent = payload.litersPerDay;
     bottlesValue.textContent = payload.bottlesLabel;
     bottleWater.style.height = `${payload.bottleWaterPercent}%`;
@@ -2815,6 +3834,7 @@ if (
   }
 
   async function fetchWaterCalcFromServer() {
+    normalizeState();
     abortController?.abort();
     abortController = new AbortController();
 
@@ -2864,13 +3884,18 @@ if (
   }
 
   peopleRange.addEventListener('input', (event) => {
-    state.people = Number(event.target.value);
+    state.people = clampInt(event.target.value, PEOPLE_MIN, PEOPLE_MAX, PEOPLE_MIN);
+    peopleRange.value = String(state.people);
     scheduleWaterCalc(false);
   });
 
   document.querySelectorAll('#water-calc .option-btn').forEach((button) => {
     button.addEventListener('click', () => {
       const { group, value } = button.dataset;
+      if (!group || !value) return;
+      if (group === 'usage' && !allowedUsage.has(value)) return;
+      if (group === 'activity' && !allowedActivity.has(value)) return;
+      if (group === 'season' && !allowedSeason.has(value)) return;
       state[group] = value;
       setGroupActive(group, value);
 
@@ -3657,27 +4682,86 @@ if (aboutSteps) {
 
 const DEFAULT_ABOUT_CERTIFICATES_CLIENT = Object.freeze([
   {
-    image: 'assets/certificate-card.jpg',
-    alt: 'Карточка предприятия',
-    badge: 'Документ',
-    title: 'Карточка предприятия',
-    description: 'Реквизиты организации, контакты, банковские данные и юридическая информация.',
-  },
-  {
-    image: 'assets/certificate-eac.jpg',
+    image: 'assets/certificate-declaration-eac-2025-preview.jpg',
     alt: 'Декларация о соответствии ЕАЭС',
-    badge: 'ЕАЭС',
+    badge: 'Документ',
     title: 'Декларация о соответствии',
-    description: 'Подтверждение соответствия продукции требованиям технических регламентов.',
-  },
-  {
-    image: 'assets/certificate-lab.jpg',
-    alt: 'Протокол лабораторных испытаний',
-    badge: 'Лаборатория',
-    title: 'Протокол испытаний',
-    description: 'Результаты лабораторных проверок качества и безопасности питьевой воды.',
+    description: 'Подтверждение соответствия продукции «ЭкваЛайн» требованиям технических регламентов ЕАЭС.',
+    pdf: 'assets/certificate-declaration-eac-2025.pdf',
   },
 ]);
+
+let aboutCertPhotoModalEl = null;
+let aboutCertPhotoModalPrevOverflow = '';
+
+function ensureAboutCertPhotoModal() {
+  if (aboutCertPhotoModalEl) return aboutCertPhotoModalEl;
+
+  const modal = document.createElement('div');
+  modal.className = 'about-cert-photo-modal';
+  modal.id = 'aboutCertPhotoModal';
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Просмотр документа');
+  modal.innerHTML = `
+    <div class="about-cert-photo-modal__scrim" data-cert-photo-close="true"></div>
+    <div class="about-cert-photo-modal__dialog">
+      <button type="button" class="about-cert-photo-modal__close" aria-label="Закрыть" data-cert-photo-close="true">×</button>
+      <div class="about-cert-photo-modal__frame">
+        <img class="about-cert-photo-modal__img" alt="" />
+      </div>
+      <p class="about-cert-photo-modal__caption" hidden></p>
+    </div>
+  `;
+
+  modal.querySelectorAll('[data-cert-photo-close]').forEach((el) => {
+    el.addEventListener('click', closeAboutCertPhotoModal);
+  });
+
+  document.body.appendChild(modal);
+  aboutCertPhotoModalEl = modal;
+  return modal;
+}
+
+function openAboutCertPhotoModal({ src, alt, caption }) {
+  const modal = ensureAboutCertPhotoModal();
+  const img = modal.querySelector('.about-cert-photo-modal__img');
+  const cap = modal.querySelector('.about-cert-photo-modal__caption');
+  if (!(img instanceof HTMLImageElement)) return;
+
+  img.src = src;
+  img.alt = alt || 'Документ';
+
+  if (cap instanceof HTMLElement) {
+    const text = String(caption || '').trim();
+    cap.textContent = text;
+    cap.hidden = !text;
+  }
+
+  aboutCertPhotoModalPrevOverflow = document.body.style.overflow;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+  modal.querySelector('.about-cert-photo-modal__close')?.focus();
+}
+
+function closeAboutCertPhotoModal() {
+  if (!aboutCertPhotoModalEl) return;
+  aboutCertPhotoModalEl.classList.remove('open');
+  aboutCertPhotoModalEl.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = aboutCertPhotoModalPrevOverflow || '';
+  const img = aboutCertPhotoModalEl.querySelector('.about-cert-photo-modal__img');
+  if (img instanceof HTMLImageElement) img.removeAttribute('src');
+}
+
+if (!window.__aboutCertPhotoModalEscBound) {
+  window.__aboutCertPhotoModalEscBound = true;
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (aboutCertPhotoModalEl?.classList.contains('open')) closeAboutCertPhotoModal();
+  });
+}
 
 async function hydrateAboutCertificatesSection() {
   const grid = document.getElementById('aboutCertsGrid');
@@ -3695,41 +4779,81 @@ async function hydrateAboutCertificatesSection() {
   }
 
   grid.replaceChildren();
+  grid.classList.toggle('about-certs-grid--solo', items.length === 1);
 
   items.forEach((raw) => {
     if (!raw || typeof raw !== 'object') return;
     const image = String(raw.image ?? '').trim();
+    const pdf = String(raw.pdf ?? '')
+      .trim()
+      .replace(/^\/+/, '');
     const alt = String(raw.alt ?? '').trim();
     const badge = String(raw.badge ?? '').trim();
     const title = String(raw.title ?? '').trim();
     const description = String(raw.description ?? '').trim();
-    if (!image || !alt || !title || !description) return;
+    if (!image || !alt) return;
 
     const art = document.createElement('article');
     art.className = 'about-cert-card';
 
     const img = document.createElement('img');
     img.src = image;
-    img.alt = alt;
+    img.alt = alt || title || 'Документ';
     img.loading = 'lazy';
+    img.decoding = 'async';
+    art.appendChild(img);
 
     const overlay = document.createElement('div');
-    overlay.className = 'about-cert-overlay';
+    overlay.className = 'about-cert-overlay about-cert-overlay--actions';
 
-    const badgeEl = document.createElement('span');
-    badgeEl.textContent = badge;
+    if (badge) {
+      const badgeEl = document.createElement('span');
+      badgeEl.textContent = badge;
+      overlay.appendChild(badgeEl);
+    }
 
-    const titleEl = document.createElement('h3');
-    titleEl.textContent = title;
+    if (title) {
+      const titleEl = document.createElement('h3');
+      titleEl.textContent = title;
+      overlay.appendChild(titleEl);
+    }
 
-    const descEl = document.createElement('p');
-    descEl.textContent = description;
+    if (description) {
+      const descEl = document.createElement('p');
+      descEl.textContent = description;
+      overlay.appendChild(descEl);
+    }
 
-    overlay.appendChild(badgeEl);
-    overlay.appendChild(titleEl);
-    overlay.appendChild(descEl);
-    art.appendChild(img);
+    const actions = document.createElement('div');
+    actions.className = 'about-cert-actions';
+
+    const photoBtn = document.createElement('button');
+    photoBtn.type = 'button';
+    photoBtn.className = 'about-cert-btn';
+    photoBtn.textContent = 'Открыть фото';
+    photoBtn.addEventListener('click', () => {
+      openAboutCertPhotoModal({
+        src: image,
+        alt: alt || title || 'Документ',
+        caption: title,
+      });
+    });
+    actions.appendChild(photoBtn);
+
+    if (pdf) {
+      const pdfLink = document.createElement('a');
+      pdfLink.className = 'about-cert-btn about-cert-btn--ghost';
+      pdfLink.href = pdf;
+      pdfLink.target = '_blank';
+      pdfLink.rel = 'noopener noreferrer';
+      pdfLink.setAttribute('download', '');
+      pdfLink.textContent = 'Скачать PDF';
+      actions.appendChild(pdfLink);
+    }
+
+    overlay.appendChild(actions);
     art.appendChild(overlay);
+
     grid.appendChild(art);
   });
 
