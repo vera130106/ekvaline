@@ -564,14 +564,24 @@ body {
   }
 
   .opx-zone-map-toolbar {
-    flex-wrap: wrap;
+    padding: 8px 10px;
     gap: 8px;
-    padding: 8px;
   }
 
-  .opx-zone-map-legend {
-    flex-wrap: wrap;
-    font-size: 11px;
+  .opx-zone-map-toolbar-head {
+    width: 100%;
+  }
+
+  .opx-zone-map-title {
+    font-size: 15px;
+  }
+
+  .opx-row-legend--map {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    padding: 0.4rem 0.55rem;
   }
 
   .opx-modal.is-open {

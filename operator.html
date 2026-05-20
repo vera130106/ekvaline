@@ -172,15 +172,21 @@
 
     <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
       <div class="opx-zone-map-toolbar">
-        <div class="opx-zone-map-title">Карта зон и заказов</div>
-        <div class="opx-zone-map-legend">
-          <span><span class="opx-zone-dot is-red" aria-hidden="true"></span>Подхват</span>
-          <span><span class="opx-zone-dot is-orange" aria-hidden="true"></span>Степной</span>
-          <span><span class="opx-zone-dot is-blue" aria-hidden="true"></span>Центр</span>
-          <span><span class="opx-zone-dot is-purple" aria-hidden="true"></span>доп.зона</span>
-          <span><span class="opx-zone-dot is-delivered" aria-hidden="true"></span>Доставлен</span>
+        <div class="opx-zone-map-toolbar-head">
+          <div class="opx-zone-map-title">Карта заказов</div>
+          <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
         </div>
-        <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
+        <div class="opx-row-legend opx-row-legend--map" aria-label="Подсветка заказов на карте">
+          <span class="opx-row-legend-item"
+            ><span class="opx-row-legend-dot is-unassigned" aria-hidden="true"></span>Не назначен, не в работе</span
+          >
+          <span class="opx-row-legend-item"
+            ><span class="opx-row-legend-dot is-in-work" aria-hidden="true"></span>В пути (назначен водитель)</span
+          >
+          <span class="opx-row-legend-item"
+            ><span class="opx-row-legend-dot is-delivered" aria-hidden="true"></span>Доставлен</span
+          >
+        </div>
       </div>
       <div id="opxZoneMapCanvas" class="opx-zone-map-canvas"></div>
     </div>
