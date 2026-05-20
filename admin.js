@@ -855,8 +855,14 @@
     return role || '—';
   }
 
-  function redirectUnauthorizedToHome() {
-    window.location.replace(new URL('index.html', window.location.href).href);
+  function redirectUnauthorizedToHome(sessionExpired) {
+    const q = sessionExpired ? 'session-expired=1' : 'need-login=1';
+    try {
+      localStorage.removeItem(CURRENT_USER_KEY);
+    } catch {
+      /* ignore */
+    }
+    window.location.replace(new URL(`index.html?${q}`, window.location.href).href);
   }
 
   function showAppWorkspace() {
@@ -896,10 +902,10 @@
     if (me.ok && me.data?.user?.role === 'admin') return true;
 
     if (me.status === 0 || me.status >= 500) {
-      redirectUnauthorizedToHome();
+      redirectUnauthorizedToHome(false);
       return false;
     }
-    redirectUnauthorizedToHome();
+    redirectUnauthorizedToHome(!!me.data?.sessionExpired);
     return false;
   }
 

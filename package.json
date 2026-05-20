@@ -14,7 +14,8 @@
     "pg:seed-demo-orders": "node scripts/seed-demo-operator-orders.js",
     "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force",
     "pg:clean-production": "node scripts/cleanup-production-data.js --yes",
-    "test:smtp": "node scripts/test-smtp.mjs"
+    "test:smtp": "node scripts/test-smtp.mjs",
+    "load:public": "k6 run scripts/load/k6-public.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

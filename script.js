@@ -949,16 +949,6 @@
           authLoginError.textContent = String(rApi.data?.error || 'Вход временно заблокирован.');
           return;
         }
-        if (rApi.status === 403 && rApi.data?.needsEmailVerification) {
-          authLoginError.textContent = String(rApi.data?.error || 'Подтвердите email в личном кабинете.');
-          if (authLoginInfo) {
-            authLoginInfo.hidden = false;
-            authLoginInfo.textContent =
-              'Войдите в кабинет и введите код в блоке «Подтверждение email». Не пришло письмо? Запросите код повторно.';
-          }
-          if (authForgotEmail instanceof HTMLInputElement) authForgotEmail.value = email;
-          return;
-        }
         if (rApi.status === 403) {
           const raw = String(rApi.data?.error || '');
           authLoginError.textContent = /csrf|токен/i.test(raw)
@@ -1192,19 +1182,6 @@
     if (errEl) errEl.textContent = r.data?.error || 'Не удалось отправить письмо.';
   }
 
-  const authResendVerifyBtn = document.createElement('button');
-  authResendVerifyBtn.type = 'button';
-  authResendVerifyBtn.className = 'ghost-btn';
-  authResendVerifyBtn.textContent = 'Отправить код подтверждения повторно';
-  authResendVerifyBtn.style.marginTop = '0.45rem';
-  authResendVerifyBtn.addEventListener('click', () => {
-    const email = authLoginValue.value.trim().toLowerCase();
-    void submitForgotOrResend('/api/auth/resend-verification', email, authLoginError, authLoginInfo);
-  });
-  if (authLoginInfo?.parentElement) {
-    authLoginInfo.parentElement.insertBefore(authResendVerifyBtn, authLoginInfo.nextSibling);
-  }
-
   authRegisterForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authRegisterError.textContent = '';
@@ -1290,61 +1267,21 @@
           'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
         return;
       }
-      if (rReg.ok && rReg.data?.needsEmailVerification) {
-        apiReg.resetCsrf?.();
-        if (rReg.data.user) {
-          persistLoggedInUserFromApi(rReg.data.user);
-          updateHeaderAuth();
-          closeAuthModal();
-          if (rReg.data.redirectCabinet) {
-            if (rReg.data.devMode && rReg.data.devCode) {
-              try {
-                sessionStorage.setItem(
-                  'ekvaline_email_verify_dev',
-                  JSON.stringify({
-                    devMode: true,
-                    devCode: rReg.data.devCode,
-                    message: rReg.data.message,
-                  })
-                );
-              } catch {
-                /* ignore */
-              }
-            }
-            window.location.href = 'cabinet.html#cabinet-verify-email';
-            return;
-          }
-        }
-        switchAuthTab('login');
-        if (authLoginValue instanceof HTMLInputElement) authLoginValue.value = email;
-        if (authLoginInfo) {
-          authLoginInfo.hidden = false;
-          authLoginInfo.textContent =
-            rReg.data.message ||
-            'Аккаунт создан. Войдите в личный кабинет и введите код из письма в блоке «Подтверждение email».';
-        }
-        return;
-      }
       if (rReg.ok && rReg.data?.user) {
         const u = rReg.data.user;
         apiReg.resetCsrf?.();
-        const displayName =
-          String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() || u.email;
+        persistLoggedInUserFromApi(u);
         const registeredAt = new Date().toISOString();
-        saveCurrentUser({
-          id: u.id,
-          name: displayName,
-          email: u.email,
-          phone: u.phone || '',
-          role: u.role || 'client',
-          first_name: u.first_name,
-          last_name: u.last_name,
-          bonus_balance: u.bonus_balance,
-        });
         window.EkvalineApp?.stampRegistrationWelcomeNotifications?.(registeredAt);
         updateHeaderAuth();
         closeAuthModal();
-        openCabinet();
+        if (authRegisterInfo) {
+          authRegisterInfo.hidden = false;
+          authRegisterInfo.textContent = rReg.data.message || 'Регистрация успешна.';
+        }
+        window.setTimeout(() => {
+          window.location.href = 'catalog.html';
+        }, 400);
         return;
       }
       authRegisterError.textContent = registerSubmitErrorFromApi(rReg.status, rReg.data);
@@ -1417,17 +1354,31 @@
 
   updateHeaderAuth();
 
+  function openLoginFromQuery(reason) {
+    openAuthModal('login');
+    if (authLoginInfo) {
+      authLoginInfo.hidden = false;
+      authLoginInfo.textContent =
+        reason === 'session-expired'
+          ? 'Сессия завершена из‑за бездействия. Войдите снова.'
+          : 'Войдите в аккаунт, чтобы продолжить.';
+    }
+    if (typeof history.replaceState === 'function') {
+      history.replaceState({}, '', window.location.pathname || '/');
+    }
+  }
+
   try {
     const q = new URLSearchParams(window.location.search);
-    if (q.get('need-login') === '1') {
-      openAuthModal('login');
-      if (typeof history.replaceState === 'function') {
-        history.replaceState({}, '', window.location.pathname || '/');
-      }
-    }
+    if (q.get('need-login') === '1') openLoginFromQuery('need-login');
+    if (q.get('session-expired') === '1') openLoginFromQuery('session-expired');
   } catch {
     /* ignore */
   }
+
+  window.addEventListener('ekvaline:session-expired', () => {
+    openLoginFromQuery('session-expired');
+  });
 })();
 
 /* ── Cart + checkout (frontend only, no DB) ── */
@@ -1749,6 +1700,89 @@
     return { id, title, price, qty: 1, water, preorder, productId: productId ? Number(productId) : undefined };
   }
 
+  function persistClientUserFromApi(u) {
+    const displayName =
+      String(u.name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '').trim() ||
+      u.email ||
+      'Пользователь';
+    localStorage.setItem(
+      CURRENT_USER_KEY,
+      JSON.stringify({
+        id: u.id,
+        name: displayName,
+        email: u.email,
+        phone: u.phone || '',
+        role: u.role || 'client',
+        first_name: u.first_name,
+        last_name: u.last_name,
+        bonus_balance: u.bonus_balance,
+        email_verified: u.email_verified,
+      }),
+    );
+    if (typeof window.__ekvalineUpdateHeaderAuth === 'function') {
+      window.__ekvalineUpdateHeaderAuth();
+    }
+  }
+
+  async function restoreClientSessionFromApi() {
+    const api = window.EkvalineAPI;
+    if (!api?.json || readCurrentUser()) return;
+    try {
+      const me = await api.json('/api/auth/me');
+      if (!me.ok || !me.data?.user) return;
+      const role = String(me.data.user.role || 'client').toLowerCase();
+      if (['admin', 'operator', 'manager', 'driver'].includes(role)) return;
+      persistClientUserFromApi(me.data.user);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function addCatalogItemToCart(card) {
+    if (!(card instanceof HTMLElement)) return false;
+    const nextItem = buildCartItemFromCard(card);
+    if (!nextItem) return false;
+    const items = readCart();
+    const idx = items.findIndex((item) => item.id === nextItem.id);
+    if (idx >= 0) {
+      if (items[idx].water && items[idx].qty >= WATER_MAX_QTY) {
+        setCartError('Больше 50 бутылей, договорная цена.');
+        showAppToast('Больше 50 бутылей — договорная цена. Свяжитесь с оператором.', 'error');
+        return false;
+      }
+      items[idx].qty += 1;
+    } else {
+      items.push(nextItem);
+    }
+    setCartError('');
+    saveCart(items);
+    updateCartBadge();
+    animateAddToCart(card);
+    showAppToast(`«${nextItem.title}» добавлено в корзину`, 'success');
+    return true;
+  }
+
+  function requireClientLoginForCheckout(message) {
+    const user = readCurrentUser();
+    if (user && user.role !== 'manager') return true;
+    showAppToast(message || 'Войдите в аккаунт, чтобы оформить заказ.', 'info');
+    const loginBtn = document.querySelector('[data-auth-login]');
+    if (loginBtn instanceof HTMLElement) loginBtn.click();
+    return false;
+  }
+
+  function bindCatalogAddButtons() {
+    document.querySelectorAll('.catalog-add-btn').forEach((button) => {
+      if (button.dataset.cartBound === '1') return;
+      button.dataset.cartBound = '1';
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const card = button.closest('.full-catalog-card, .catalog-card');
+        if (card instanceof HTMLElement) addCatalogItemToCart(card);
+      });
+    });
+  }
+
   function normalizeCartItems(items) {
     const merged = new Map();
     items.forEach((item) => {
@@ -1779,7 +1813,6 @@
 
   const isCatalogPage = document.body.classList.contains('catalog-page');
   const isCabinetPage = document.body.classList.contains('cabinet-page-full');
-  const contactArea = document.querySelector('.contact-area');
   if (!isCatalogPage && !isCabinetPage) return;
 
   const MAP_PICKER_HTML = `
@@ -1831,16 +1864,21 @@
     document.body.insertAdjacentHTML('beforeend', MAP_PICKER_HTML);
   }
 
-  if (!isCatalogPage || !contactArea) {
-    /* Кабинет: ниже инициализируется только карта, корзина не подключается. */
-  } else {
+  let cartBtn = null;
+
+  if (isCatalogPage) {
   void hydrateCatalogProductIds();
-  const cartBtn = document.createElement('button');
-  cartBtn.type = 'button';
-  cartBtn.className = 'cart-floating-btn cart-trigger-btn';
-  cartBtn.textContent = 'Корзина (0)';
-  document.body.classList.add('has-floating-cart');
-  document.body.appendChild(cartBtn);
+  const existingCartBtn = document.querySelector('.cart-floating-btn.cart-trigger-btn');
+  if (existingCartBtn instanceof HTMLElement) {
+    cartBtn = existingCartBtn;
+  } else {
+    cartBtn = document.createElement('button');
+    cartBtn.type = 'button';
+    cartBtn.className = 'cart-floating-btn cart-trigger-btn';
+    cartBtn.textContent = 'Корзина (0)';
+    document.body.classList.add('has-floating-cart');
+    document.body.appendChild(cartBtn);
+  }
 
   document.body.insertAdjacentHTML(
     'beforeend',
@@ -1962,8 +2000,18 @@
     </div>
   `
   );
+
+    bindCatalogAddButtons();
+    if (cartBtn.dataset.cartTriggerBound !== '1') {
+      cartBtn.dataset.cartTriggerBound = '1';
+      cartBtn.addEventListener('click', openCartModal);
+    }
+    updateCartBadge();
+    saveCart(readCart());
+    void restoreClientSessionFromApi().then(() => updateCartBadge());
   }
 
+  let cartUiReady = isCatalogPage && cartBtn instanceof HTMLElement;
   let mapPickerOnApply = null;
   let mapPickerMaxLength = CHECKOUT_ADDRESS_MAX;
   let pickedAddress = '';
@@ -3093,6 +3141,7 @@
   }
 
   function updateCartBadge() {
+    if (!(cartBtn instanceof HTMLElement)) return;
     const count = readCart().reduce((sum, item) => sum + (item.qty || 0), 0);
     cartBtn.textContent = `Корзина (${count})`;
   }
@@ -3200,12 +3249,6 @@
   }
 
   function openCartModal() {
-    const user = readCurrentUser();
-    if (!user || user.role === 'manager') {
-      const loginBtn = document.querySelector('[data-auth-login]');
-      if (loginBtn instanceof HTMLElement) loginBtn.click();
-      return;
-    }
     renderCart();
     setCartError('');
     cartModal?.classList.add('open');
@@ -3287,8 +3330,8 @@
   }
 
   function openCheckout() {
+    if (!requireClientLoginForCheckout('Войдите в аккаунт, чтобы оформить заказ.')) return;
     const user = readCurrentUser();
-    if (!user || user.role === 'manager') return;
     const items = readCart();
     if (!items.length) return;
     syncCheckoutBonusUi(user, items);
@@ -3317,9 +3360,13 @@
     if (!cartModal?.classList.contains('open')) document.body.style.overflow = '';
   }
 
-  if (isCabinetPage) return;
+  if (isCabinetPage || !(cartBtn instanceof HTMLElement)) return;
 
-  cartBtn.addEventListener('click', openCartModal);
+  if (!cartUiReady) {
+    cartBtn.addEventListener('click', openCartModal);
+  }
+
+  try {
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -3356,36 +3403,6 @@
     if (streetSuggestBtn) {
       const value = streetSuggestBtn.getAttribute('data-street-suggest') || '';
       applyStreetSuggestion(value);
-      return;
-    }
-
-    const addBtn = target.closest('.catalog-add-btn, .cart-btn');
-    if (addBtn) {
-      const user = readCurrentUser();
-      if (!user || user.role === 'manager') {
-        const loginBtn = document.querySelector('[data-auth-login]');
-        if (loginBtn instanceof HTMLElement) loginBtn.click();
-        return;
-      }
-      const card = addBtn.closest('.full-catalog-card, .catalog-card');
-      if (!card) return;
-      const nextItem = buildCartItemFromCard(card);
-      if (!nextItem) return;
-      const items = readCart();
-      const idx = items.findIndex((item) => item.id === nextItem.id);
-      if (idx >= 0) {
-        if (items[idx].water && items[idx].qty >= WATER_MAX_QTY) {
-          setCartError('Больше 50 бутылей, договорная цена.');
-          return;
-        }
-        items[idx].qty += 1;
-      } else {
-        items.push(nextItem);
-      }
-      setCartError('');
-      saveCart(items);
-      updateCartBadge();
-      animateAddToCart(card);
       return;
     }
 
@@ -3705,8 +3722,28 @@
     close: closeMapPicker,
   };
 
-  updateCartBadge();
-  saveCart(readCart());
+  window.EkvalineCart = {
+    addFromCard: addCatalogItemToCart,
+    read: readCart,
+    save: saveCart,
+    refreshBadge: updateCartBadge,
+    open: openCartModal,
+  };
+  if (window.__ekvalineCatalogCartBoot?.bindButtons) {
+    window.__ekvalineCatalogCartBoot.bindButtons();
+  }
+  } catch (cartUiErr) {
+    console.error('[cart] Ошибка инициализации оформления заказа:', cartUiErr);
+    if (isCatalogPage) {
+      bindCatalogAddButtons();
+      updateCartBadge();
+    }
+  }
+
+  if (!cartUiReady) {
+    updateCartBadge();
+    saveCart(readCart());
+  }
 })();
 
 const peopleRange = document.getElementById('peopleRange');

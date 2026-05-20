@@ -3,6 +3,118 @@
  */
 (function () {
   let csrfToken = null;
+  let lastUserActivityAt = Date.now();
+  let sessionIdleMs = 30 * 60 * 1000;
+  let sessionWatchStarted = false;
+  let redirectingForSession = false;
+
+  const PUBLIC_API_PATHS = [
+    '/api/public/',
+    '/api/csrf',
+    '/api/client-boot',
+    '/api/products',
+    '/api/feedback',
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/forgot-password',
+    '/api/auth/verify-password-reset-code',
+    '/api/auth/reset-password-by-email',
+    '/api/auth/reset-password',
+  ];
+
+  function isPublicApiPath(path) {
+    const p = String(path || '').split('?')[0];
+    return PUBLIC_API_PATHS.some((prefix) => p === prefix || p.startsWith(prefix));
+  }
+
+  function hadStoredUser() {
+    try {
+      return !!localStorage.getItem('ekvaline_current_user');
+    } catch {
+      return false;
+    }
+  }
+
+  function clearStoredAuth() {
+    try {
+      localStorage.removeItem('ekvaline_current_user');
+      localStorage.removeItem('ekvaline_users');
+    } catch {
+      /* ignore */
+    }
+    resetCsrf();
+  }
+
+  function loginPageUrl() {
+    try {
+      return new URL('index.html', window.location.href).href;
+    } catch {
+      return 'index.html';
+    }
+  }
+
+  function redirectToLoginAfterSessionExpiry() {
+    if (redirectingForSession) return;
+    redirectingForSession = true;
+    clearStoredAuth();
+    const target = `${loginPageUrl()}?session-expired=1`;
+    const here = String(window.location.pathname || '').replace(/\\/g, '/');
+    if (/\/index\.html$/i.test(here) || here.endsWith('/')) {
+      const u = new URL(window.location.href);
+      if (u.searchParams.get('session-expired') !== '1') {
+        u.searchParams.set('session-expired', '1');
+        window.location.replace(u.href);
+      } else {
+        window.dispatchEvent(new CustomEvent('ekvaline:session-expired'));
+      }
+      return;
+    }
+    window.location.replace(target);
+  }
+
+  function handleSessionAuthFailure(path, status, data) {
+    if (Number(status) !== 401) return;
+    if (isPublicApiPath(path)) return;
+    const expired = data && data.sessionExpired === true;
+    if (!expired && !hadStoredUser()) return;
+    redirectToLoginAfterSessionExpiry();
+  }
+
+  function markUserActivity() {
+    lastUserActivityAt = Date.now();
+  }
+
+  function shouldSendUserActivityHeader() {
+    return Date.now() - lastUserActivityAt < 2 * 60 * 1000;
+  }
+
+  function bindUserActivityListeners() {
+    if (typeof document === 'undefined') return;
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach((ev) => {
+      document.addEventListener(ev, markUserActivity, { passive: true, capture: true });
+    });
+  }
+
+  function startSessionIdleWatch() {
+    if (sessionWatchStarted) return;
+    sessionWatchStarted = true;
+    window.setInterval(() => {
+      if (Date.now() - lastUserActivityAt < sessionIdleMs) return;
+      if (!hadStoredUser()) return;
+      void fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
+        .then((r) => r.json().catch(() => ({})))
+        .then((data) => {
+          if (data && data.sessionExpired) redirectToLoginAfterSessionExpiry();
+          else if (!data || !data.user) {
+            if (hadStoredUser()) redirectToLoginAfterSessionExpiry();
+          }
+        })
+        .catch(() => {
+          /* сеть недоступна */
+        });
+    }, 45000);
+  }
 
   async function ensureCsrf(forceRefresh) {
     if (csrfToken && !forceRefresh) return csrfToken;
@@ -33,6 +145,9 @@
       let t = await ensureCsrf(false);
       if (!t) t = await ensureCsrf(true);
       if (t) headers['X-CSRF-Token'] = t;
+    }
+    if (opts.markUserActivity !== false && shouldSendUserActivityHeader()) {
+      headers['X-User-Activity'] = '1';
     }
     let body = opts.body;
     if (body && typeof body === 'object' && !(body instanceof FormData)) {
@@ -81,6 +196,9 @@
         ({ r, parsed } = await doFetch());
       }
     }
+    if (!parsed.ok) {
+      handleSessionAuthFailure(path, parsed.status, parsed.data);
+    }
     return parsed;
   }
 
@@ -92,9 +210,17 @@
       if (!r.ok) return;
       const j = await r.json();
       const bootId = j && typeof j.bootId === 'string' ? j.bootId.trim() : '';
+      const idleMin = Number(j?.sessionIdleMinutes);
+      if (Number.isFinite(idleMin) && idleMin >= 5) {
+        sessionIdleMs = idleMin * 60 * 1000;
+      }
       if (!bootId) return;
       const prev = sessionStorage.getItem(SESSION_BOOT_KEY);
-      if (prev === bootId) return;
+      if (prev === bootId) {
+        bindUserActivityListeners();
+        startSessionIdleWatch();
+        return;
+      }
 
       sessionStorage.setItem(SESSION_BOOT_KEY, bootId);
 
@@ -107,9 +233,14 @@
         }
         resetCsrf();
         window.location.reload();
+        return;
       }
+      bindUserActivityListeners();
+      startSessionIdleWatch();
     } catch {
       /* не тот origin / файл с диска */
+      bindUserActivityListeners();
+      startSessionIdleWatch();
     }
   }
 
@@ -120,6 +251,8 @@
     resetCsrf,
     fetch: apiFetch,
     json: apiJson,
+    markUserActivity,
+    redirectToLoginAfterSessionExpiry,
     /** Дождаться проверки перезапуска сервера (очистка LS / reload) до инициализации панелей. */
     awaitBootReconciliation: () => bootReconciliationPromise,
   };

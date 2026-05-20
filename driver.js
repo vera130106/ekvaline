@@ -327,6 +327,10 @@
       if (!r.ok) {
         if (r.status === 401 || r.status === 403) {
           clearLocalUser();
+          if (r.data?.sessionExpired) {
+            window.location.href = 'index.html?session-expired=1';
+            return;
+          }
           uiShowLogin();
         }
         listEl.innerHTML = `<p class="drv-empty">${escapeHtml(

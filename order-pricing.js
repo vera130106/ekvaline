@@ -124,6 +124,7 @@ async function resolveStaffOrderItemsPatch(db, itemsJsonRaw) {
 
 module.exports = {
   normalizeProductTitle,
+  extractLinesFromItemsJson,
   resolveOperatorOrderLines,
   resolveStaffOrderItemsPatch,
 };

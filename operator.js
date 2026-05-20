@@ -1105,10 +1105,16 @@
   }
 
   /** Ответ API 401/403: нет сессии или недостаточно прав — на главную. */
-  function redirectOnUnauthorized(status) {
+  function redirectOnUnauthorized(status, data) {
     const s = Number(status);
     if (s !== 401 && s !== 403) return false;
-    window.location.href = 'index.html';
+    try {
+      localStorage.removeItem(CURRENT_USER_KEY);
+    } catch {
+      /* ignore */
+    }
+    const q = data && data.sessionExpired ? 'session-expired=1' : 'need-login=1';
+    window.location.href = `index.html?${q}`;
     return true;
   }
 
@@ -1427,7 +1433,7 @@
     if (!rid || !/^\d+$/.test(rid)) return [];
     const response = await api.json(`/api/orders/${encodeURIComponent(rid)}/journal`);
     if (!response.ok) {
-      if (redirectOnUnauthorized(response.status)) return [];
+      if (redirectOnUnauthorized(response.status, response.data)) return [];
       return [];
     }
     return Array.isArray(response.data?.journal) ? response.data.journal : [];
@@ -1674,10 +1680,22 @@
       .join('');
   }
 
+  function extractOrderItemsArray(itemsJson) {
+    if (itemsJson == null || itemsJson === '') return [];
+    try {
+      const parsed = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson;
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.lines)) return parsed.lines;
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
   function parseOrderItemsFromJson(itemsJson) {
     try {
-      const items = JSON.parse(itemsJson || '[]');
-      if (!Array.isArray(items)) return [];
+      const items = extractOrderItemsArray(itemsJson);
+      if (!items.length) return [];
       return items
         .map((it) => ({
           title: normalizeProductName(String(it?.title || it?.name || '').trim()),
@@ -2600,10 +2618,10 @@
 
   function footerBottleQtyFromOrder(order) {
     try {
-      const items = JSON.parse(order.items_json || '[]');
-      if (!Array.isArray(items) || !items.length) return 0;
+      const items = extractOrderItemsArray(order.items_json);
+      if (!items.length) return 0;
       return items.reduce((s, it) => {
-        if (normalizeProductName(it.title) !== 'Вода') return s;
+        if (normalizeProductName(it.title || it.name) !== 'Вода') return s;
         return s + (Number(it.qty) || 0);
       }, 0);
     } catch {
@@ -2616,12 +2634,7 @@
   }
 
   function orderItems(order) {
-    try {
-      const parsed = JSON.parse(order.items_json || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return extractOrderItemsArray(order.items_json);
   }
 
   /** Колонка отчёта: наличные; карта — в безнал. */
@@ -2669,7 +2682,7 @@
         `/api/orders/operator/audit-report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
       );
       if (!r.ok) {
-        redirectOnUnauthorized(r.status);
+        redirectOnUnauthorized(r.status, r.data);
         return [];
       }
       if (!Array.isArray(r.data?.events)) return [];
@@ -3657,8 +3670,8 @@
 
   function parseQty(itemsJson) {
     try {
-      const items = JSON.parse(itemsJson || '[]');
-      if (!Array.isArray(items)) return 0;
+      const items = extractOrderItemsArray(itemsJson);
+      if (!items.length) return 0;
       return items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
     } catch {
       return 0;
@@ -4322,8 +4335,11 @@
 
   function parseProduct(itemsJson, fallbackIndex) {
     try {
-      const items = JSON.parse(itemsJson || '[]');
-      if (Array.isArray(items) && items.length && items[0].title) return normalizeProductName(String(items[0].title));
+      const items = extractOrderItemsArray(itemsJson);
+      if (items.length) {
+        const label = String(items[0].title || items[0].name || '').trim();
+        if (label) return normalizeProductName(label);
+      }
     } catch {
       /* noop */
     }
@@ -4332,8 +4348,8 @@
 
   function parseUnitPrice(itemsJson) {
     try {
-      const items = JSON.parse(itemsJson || '[]');
-      if (Array.isArray(items) && items.length) {
+      const items = extractOrderItemsArray(itemsJson);
+      if (items.length) {
         const unit = Number(items[0].unit_price);
         if (Number.isFinite(unit) && unit >= 0) return Math.round(unit);
       }
@@ -4588,7 +4604,7 @@
       if (seq !== loadOrdersSeq) return;
       if (!r.ok) {
         emptyOrdersFallback();
-        if (redirectOnUnauthorized(r.status)) return;
+        if (redirectOnUnauthorized(r.status, r.data)) return;
         if (String(r.data?.error || '').trim()) showToast(String(r.data.error).trim());
         else if (!state.orders.length) showToast('Не удалось получить заказы. Проверьте сервер или ответ не JSON.');
         return;
@@ -5496,7 +5512,7 @@
             const errTxt = typeof response?.data?.error === 'string' ? response.data.error.trim() : '';
             /** Не подменяем данные локально, если сервер явно отклонил запрос */
             if (st === 401) {
-              redirectOnUnauthorized(st);
+              redirectOnUnauthorized(st, response?.data);
               return;
             }
             if (st === 403 || st === 422 || st === 404 || st === 400) {
@@ -5755,7 +5771,7 @@
           },
         });
         if (!response.ok) {
-          if (redirectOnUnauthorized(response.status)) return;
+          if (redirectOnUnauthorized(response.status, response.data)) return;
           showToast(response.data?.error || 'Не удалось сохранить заказ на сервере');
           return;
         }
@@ -6766,7 +6782,7 @@
         const st = Number(response.status || 0);
         const errTxt = typeof response?.data?.error === 'string' ? response.data.error.trim() : '';
         if (st === 401) {
-          redirectOnUnauthorized(st);
+          redirectOnUnauthorized(st, response?.data);
           return { outcome: 'auth' };
         }
         if (st === 403 || st === 422 || st === 404 || st === 400) {

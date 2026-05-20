@@ -295,6 +295,7 @@ async function migrate(pool) {
   await ensureColumnDefault(pool, 'orders', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'orders', 'updated_at', 'NOW()');
   await ensureOrdersCompatibility(pool);
+  await migrateClientOrderItemsJson(pool);
   await ensureProductsCatalogColumns(pool);
   await ensureOrderAuditEvents(pool);
   await ensureIdentityDefault(pool, 'order_audit_events');
@@ -1156,6 +1157,40 @@ async function ensureOrdersCompatibility(pool) {
   ).catch(() => {});
 
   await pool.query(`ALTER TABLE "orders" ALTER COLUMN "total_sum" SET DEFAULT 0`).catch(() => {});
+}
+
+/** Старые клиентские заказы: items_json был объектом { lines: [...] } — приводим к массиву для панели оператора. */
+async function migrateClientOrderItemsJson(pool) {
+  const { rows } = await pool.query(
+    `SELECT id, items_json FROM orders WHERE items_json LIKE '%"lines"%' ORDER BY id ASC LIMIT 5000`
+  ).catch(() => ({ rows: [] }));
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(String(row.items_json || ''));
+      if (!parsed || !Array.isArray(parsed.lines) || !parsed.lines.length) continue;
+      const lines = [];
+      for (const raw of parsed.lines) {
+        let title = String(raw?.title || raw?.name || '').trim();
+        const productId = Number(raw?.product_id);
+        if (!title && Number.isFinite(productId) && productId > 0) {
+          const pr = await pool.query('SELECT name FROM products WHERE id = $1', [productId]).catch(() => ({ rows: [] }));
+          title = String(pr.rows[0]?.name || '').trim();
+        }
+        const qty = Math.max(1, Math.floor(Number(raw?.qty) || 0));
+        if (!qty) continue;
+        lines.push({
+          title: title || 'Товар',
+          qty,
+          unit_price: Math.max(0, Math.round(Number(raw?.unit_price) || 0)),
+          ...(Number.isFinite(productId) && productId > 0 ? { product_id: productId } : {}),
+        });
+      }
+      if (!lines.length) continue;
+      await pool.query('UPDATE orders SET items_json = $1 WHERE id = $2', [JSON.stringify(lines), row.id]);
+    } catch {
+      /* skip broken row */
+    }
+  }
 }
 
 /**

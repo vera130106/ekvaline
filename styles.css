@@ -2048,9 +2048,8 @@ body {
   color: #1d6fbf;
 }
 
-.cabinet-bonus-status.is-none {
-  background: #fff4e5;
-  color: #b45309;
+.cabinet-bonus-status-wrap[hidden] {
+  display: none !important;
 }
 
 .cabinet-bonus-stats {

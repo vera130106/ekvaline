@@ -37,6 +37,9 @@ const http = require('http');
 const tokens = new Tokens();
 /** Уникальный идентификатор каждого запуска процесса (сброс «запомненного» входа на клиентах). */
 const CLIENT_BOOT_ID = crypto.randomBytes(12).toString('hex');
+/** Завершение сессии при отсутствии действий пользователя (не продлевается фоновым опросом). */
+const SESSION_IDLE_MINUTES = Math.max(5, Math.min(24 * 60, Number(process.env.SESSION_IDLE_MINUTES) || 30));
+const SESSION_IDLE_MS = SESSION_IDLE_MINUTES * 60 * 1000;
 const app = express();
 const db = openDatabase();
 
@@ -415,6 +418,53 @@ function saveSessionPromise(req) {
     if (!req.session) return resolve();
     req.session.save((err) => (err ? reject(err) : resolve()));
   });
+}
+
+function destroySessionPromise(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.session) return resolve();
+    req.session.destroy((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+function sessionIdleExpired(req) {
+  if (!req.session?.userId) return false;
+  const last = Number(req.session.lastActivityAt) || 0;
+  if (!last) return false;
+  return Date.now() - last > SESSION_IDLE_MS;
+}
+
+/** Продление сессии только при явных действиях пользователя (см. X-User-Activity на клиенте) или мутациях API. */
+function maybeTouchSessionActivity(req) {
+  if (!req.session?.userId) return;
+  const method = String(req.method || 'GET').toUpperCase();
+  const userActive = String(req.headers['x-user-activity'] || '') === '1';
+  if (method !== 'GET' && method !== 'HEAD') {
+    req.session.lastActivityAt = Date.now();
+    return;
+  }
+  if (userActive) req.session.lastActivityAt = Date.now();
+}
+
+function markSessionActive(req) {
+  if (req.session?.userId) req.session.lastActivityAt = Date.now();
+}
+
+async function rejectIfSessionIdle(req, res) {
+  if (!req.session?.userId) return false;
+  if (!sessionIdleExpired(req)) return false;
+  const uid = req.session.userId;
+  try {
+    await destroySessionPromise(req);
+  } catch {
+    /* ignore */
+  }
+  audit(db, uid, 'session_idle_expired', `idle_min=${SESSION_IDLE_MINUTES}`, req.ip);
+  res.status(401).json({
+    error: 'Сессия завершена из‑за бездействия. Войдите снова.',
+    sessionExpired: true,
+  });
+  return true;
 }
 
 async function insertOrderAuditEvent(dbConn, orderId, action, reason, actorUserId, detail) {
@@ -842,11 +892,8 @@ function authCodeExpired(expiresIso) {
   return !exp || exp < Date.now();
 }
 
-function clientNeedsEmailVerification(user) {
-  const role = String(user?.role || '').toLowerCase();
-  if (role !== 'client') return false;
-  if (schemas.isPseudoClientEmail(user.email)) return false;
-  return !Number(user.email_verified);
+function clientNeedsEmailVerification() {
+  return false;
 }
 
 function isLocked(row) {
@@ -906,12 +953,15 @@ async function ensurePhoneCallerUser(customerPhoneDigits, customerName) {
 const requireAuth = asyncHandler(async (req, res, next) => {
   const uid = req.session && req.session.userId;
   if (!uid) return res.status(401).json({ error: 'Требуется вход в систему.' });
+  if (await rejectIfSessionIdle(req, res)) return;
   const user = await getUserById(uid);
   if (!user || user.blocked) {
     req.session.userId = null;
     return res.status(403).json({ error: 'Доступ запрещён.' });
   }
   req.user = user;
+  if (!req.session.lastActivityAt) markSessionActive(req);
+  maybeTouchSessionActivity(req);
   next();
 });
 
@@ -949,7 +999,7 @@ app.get('/api/csrf', (req, res) => {
 
 app.get('/api/client-boot', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ bootId: CLIENT_BOOT_ID });
+  res.json({ bootId: CLIENT_BOOT_ID, sessionIdleMinutes: SESSION_IDLE_MINUTES });
 });
 
 app.get('/api/public/settings', asyncHandler(async (req, res) => {
@@ -1074,6 +1124,14 @@ app.get('/api/products', asyncHandler(async (req, res) => {
 app.get('/api/auth/me', asyncHandler(async (req, res) => {
   const uid = req.session && req.session.userId;
   if (!uid) return res.json({ user: null });
+  if (sessionIdleExpired(req)) {
+    try {
+      await destroySessionPromise(req);
+    } catch {
+      /* ignore */
+    }
+    return res.json({ user: null, sessionExpired: true });
+  }
   let user = await getUserById(uid);
   if (!user || user.blocked) {
     req.session.userId = null;
@@ -1084,6 +1142,7 @@ app.get('/api/auth/me', asyncHandler(async (req, res) => {
     await bonusProgram.syncBonusBalanceFromLots(db, uid);
     user = await getUserById(uid);
   }
+  maybeTouchSessionActivity(req);
   res.json({ user: publicUser(user) });
 }));
 
@@ -1098,17 +1157,14 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
   if (exists) return res.status(409).json({ error: 'Email или телефон уже зарегистрированы.' });
 
   const password_hash = bcrypt.hashSync(password, 12);
-  const verifyCode = generateAuthCode();
-  const verifyCodeHash = hashAuthCode(verifyCode);
-  const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   let info;
   try {
     info = await db
       .prepare(
         `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, email_verified, email_verify_token, email_verify_expires)
-         VALUES (?, ?, ?, ?, ?, 'client', NOW()::text, 0, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, 'client', NOW()::text, 1, NULL, NULL)`
       )
-      .run(email, phone, password_hash, first_name, last_name || '', verifyCodeHash, verifyExpires);
+      .run(email, phone, password_hash, first_name, last_name || '');
   } catch (e) {
     const code = e && e.code;
     // eslint-disable-next-line no-console
@@ -1151,26 +1207,9 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
   }
 
   audit(db, user.id, 'register', `email=${email}`, req.ip);
-  let registerMailResult = { dev: true };
-  try {
-    registerMailResult = await mailer.sendVerificationCodeEmail({
-      email,
-      code: verifyCode,
-      firstName: first_name,
-      lastName: last_name || '',
-    });
-  } catch (mailErr) {
-    // eslint-disable-next-line no-console
-    console.error('[register] Не удалось отправить письмо:', mailErr && mailErr.message);
-    if (mailer.isMailConfigured()) {
-      return res.status(500).json({
-        error: 'Аккаунт создан, но письмо с кодом не отправилось. Проверьте SMTP или запросите код в кабинете.',
-      });
-    }
-  }
-  const registerMail = emailCodeDeliveryPayload(registerMailResult, email);
 
   req.session.userId = user.id;
+  markSessionActive(req);
   try {
     await saveSessionPromise(req);
   } catch (sessErr) {
@@ -1178,21 +1217,11 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
     console.error('[register] Ошибка сохранения сессии:', sessErr);
   }
 
-  const out = {
-    user: publicUser(user),
-    needsEmailVerification: true,
-    email,
-    message: registerMail.ok
-      ? registerMail.message
-      : 'Аккаунт создан. Подтвердите email в личном кабинете.',
-    redirectCabinet: true,
-  };
-  if (registerMail.devMode) {
-    out.devMode = true;
-    out.devCode = registerMail.devCode;
-  }
-  if (!registerMail.ok) out.mailError = registerMail.error;
-  res.json(out);
+  const updated = await getUserById(user.id);
+  res.json({
+    user: publicUser(updated || user),
+    message: 'Регистрация успешна. Можно оформлять заказы.',
+  });
 }));
 
 app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (req, res) => {
@@ -1237,6 +1266,7 @@ app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (r
 
   await recordLoginOk(user.id);
   req.session.userId = user.id;
+  markSessionActive(req);
   audit(db, user.id, 'login', '', req.ip);
   await saveSessionPromise(req);
   res.json({ user: publicUser(user) });
@@ -1354,11 +1384,6 @@ app.post('/api/auth/forgot-password', authRateLimit, asyncHandler(async (req, re
       error: 'Восстановление пароля доступно только для клиентских аккаунтов.',
     });
   }
-  if (!Number(user.email_verified)) {
-    return res.status(400).json({
-      error: 'Email не подтверждён. Подтвердите почту при входе или в личном кабинете.',
-    });
-  }
   if (schemas.isPseudoClientEmail(user.email)) {
     return res.status(400).json({
       error: 'Для этой учётной записи восстановление по email недоступно. Зарегистрируйтесь с вашим email.',
@@ -1400,9 +1425,6 @@ app.post('/api/auth/send-password-code', requireAuth, csrfMiddleware, asyncHandl
   if (String(user.role || '').toLowerCase() !== 'client') {
     return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
   }
-  if (!Number(user.email_verified)) {
-    return res.status(403).json({ error: 'Сначала подтвердите email в блоке выше.' });
-  }
   if (schemas.isPseudoClientEmail(user.email)) {
     return res.status(400).json({ error: 'Для этой учётной записи смена пароля недоступна.' });
   }
@@ -1435,12 +1457,7 @@ app.post('/api/auth/verify-password-reset-code', authRateLimit, asyncHandler(asy
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const user = await findUserByEmail(v.value.email);
-  if (
-    !user ||
-    String(user.role || '').toLowerCase() !== 'client' ||
-    !Number(user.email_verified) ||
-    schemas.isPseudoClientEmail(user.email)
-  ) {
+  if (!user || String(user.role || '').toLowerCase() !== 'client' || schemas.isPseudoClientEmail(user.email)) {
     return res.status(400).json({ error: 'Неверный код или email. Запросите новый код.' });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
@@ -1464,9 +1481,6 @@ app.post('/api/auth/verify-password-code', requireAuth, csrfMiddleware, asyncHan
   if (!user) return res.status(401).json({ error: 'Требуется вход.' });
   if (String(user.role || '').toLowerCase() !== 'client') {
     return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
-  }
-  if (!Number(user.email_verified)) {
-    return res.status(403).json({ error: 'Сначала подтвердите email в личном кабинете.' });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
     return res.status(400).json({ error: 'Код истёк. Нажмите «Отправить код на email» ещё раз.' });
@@ -1511,9 +1525,6 @@ app.post('/api/auth/request-password-reset', requireAuth, csrfMiddleware, asyncH
   if (String(user.role || '').toLowerCase() !== 'client') {
     return res.status(403).json({ error: 'Смена пароля через email доступна только клиентам.' });
   }
-  if (!Number(user.email_verified)) {
-    return res.status(403).json({ error: 'Сначала подтвердите email в личном кабинете.' });
-  }
   if (schemas.isPseudoClientEmail(user.email)) {
     return res.status(400).json({ error: 'Для этой учётной записи смена пароля по email недоступна.' });
   }
@@ -1550,12 +1561,7 @@ async function handleResetPasswordByEmail(req, res) {
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const user = await findUserByEmail(v.value.email);
-  if (
-    !user ||
-    String(user.role || '').toLowerCase() !== 'client' ||
-    !Number(user.email_verified) ||
-    schemas.isPseudoClientEmail(user.email)
-  ) {
+  if (!user || String(user.role || '').toLowerCase() !== 'client' || schemas.isPseudoClientEmail(user.email)) {
     return res.status(400).json({ error: 'Неверный код или email. Запросите новый код на email.' });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
@@ -1621,20 +1627,12 @@ app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, 
   const emailChanged = prev && String(prev.email || '').toLowerCase() !== String(email).toLowerCase();
   const isClient = String(prev?.role || '').toLowerCase() === 'client';
 
-  let profileVerifySent = null;
   if (emailChanged && isClient) {
     await db
       .prepare(
-        `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ?, email_verified = 0, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?`
+        `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ?, email_verified = 1, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?`
       )
       .run(first_name, last_name || '', email, phone, req.user.id);
-    const afterEmailChange = await getUserById(req.user.id);
-    try {
-      profileVerifySent = await sendEmailVerificationForUser(afterEmailChange);
-    } catch (mailErr) {
-      // eslint-disable-next-line no-console
-      console.error('[profile] verify mail', mailErr && mailErr.message);
-    }
   } else {
     await db.prepare(
       `UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE id = ?`
@@ -1644,25 +1642,8 @@ app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, 
   const user = await getUserById(req.user.id);
   audit(db, req.user.id, 'profile_update', emailChanged ? `email_changed=${email}` : '', req.ip);
   const out = { user: publicUser(user) };
-  if (emailChanged && isClient) {
-    out.emailVerificationRequired = true;
-    let verifyDelivery = {
-      ok: true,
-      message: `Email изменён. Запросите код в блоке «Подтверждение email» или нажмите «Отправить код на email».`,
-    };
-    if (profileVerifySent) {
-      verifyDelivery = emailCodeDeliveryPayload(profileVerifySent.mailResult, email);
-    }
-    if (verifyDelivery.ok) {
-      out.message = verifyDelivery.message;
-      if (verifyDelivery.devMode) {
-        out.devMode = true;
-        out.devCode = verifyDelivery.devCode;
-      }
-    } else {
-      out.message = verifyDelivery.error || out.message;
-      out.mailError = verifyDelivery.error;
-    }
+  if (emailChanged) {
+    out.message = 'Профиль сохранён. Email обновлён.';
   }
   res.json(out);
 }));
@@ -1888,11 +1869,20 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   let subtotal = 0;
   const lineItems = [];
   for (const it of items) {
-    const p = await db.prepare('SELECT id, price, stock, hidden FROM products WHERE id = ?').get(it.product_id);
+    const p = await db
+      .prepare('SELECT id, name, price, stock, hidden FROM products WHERE id = ?')
+      .get(it.product_id);
     if (!p || p.hidden) return res.status(400).json({ error: `Товар #${it.product_id} недоступен.` });
     if (p.stock < it.qty) return res.status(400).json({ error: `Недостаточно остатка для товара #${it.product_id}.` });
-    subtotal += p.price * it.qty;
-    lineItems.push({ ...it, unit_price: p.price });
+    const qty = Math.max(1, Math.floor(Number(it.qty) || 0));
+    const unit_price = Math.round(Number(p.price) || 0);
+    subtotal += unit_price * qty;
+    lineItems.push({
+      title: String(p.name || 'Товар').trim(),
+      qty,
+      unit_price,
+      product_id: it.product_id,
+    });
   }
 
   const freshBalance = await bonusProgram.getAvailableBonusBalance(db, req.user.id);
@@ -1900,7 +1890,7 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   let payable = Math.max(0, subtotal - bonusSpend);
 
   const earn = bonusProgram.computeOrderBonusEarn(subtotal, bonusSpend);
-  const itemsJson = JSON.stringify({ lines: lineItems, subtotal, payable, bonusSpend });
+  const itemsJson = JSON.stringify(lineItems);
 
   let orderId;
   try {
@@ -2988,6 +2978,15 @@ app.get('/ekvaline-runtime.js', (req, res) => {
   res.type('application/javascript');
   const p = Number(resolvedListenPort);
   res.send(`window.__EKVALINE_LISTEN_PORT__=${Number.isFinite(p) ? p : 3001};\n`);
+});
+
+/** На VPS/хосте браузер иначе держит старый script.js — корзина «не работает» после деплоя. */
+app.use((req, res, next) => {
+  if (/\.(html?|js|css)$/i.test(req.path)) {
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
 });
 
 app.use(express.static(ROOT, { index: 'index.html' }));

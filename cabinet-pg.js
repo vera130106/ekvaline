@@ -206,12 +206,28 @@
   function renderBonusProgram(summary) {
     if (!summary) return;
     if (bonusValue) bonusValue.textContent = `${Number(summary.balance || 0)}`;
-    if (bonusStatus) {
-      bonusStatus.textContent = summary.member_status_label || '—';
-      bonusStatus.className = `cabinet-bonus-status is-${summary.member_status || 'none'}`;
-    }
-    if (bonusStatusHint) {
-      bonusStatusHint.textContent = summary.member_status_hint || '';
+    const memberCode = String(summary.member_status || 'none');
+    const statusWrap = bonusStatus?.closest('.cabinet-bonus-status-wrap');
+    if (memberCode === 'none') {
+      if (statusWrap instanceof HTMLElement) statusWrap.hidden = true;
+      if (bonusStatus) {
+        bonusStatus.textContent = '';
+        bonusStatus.className = 'cabinet-bonus-status';
+      }
+      if (bonusStatusHint) {
+        bonusStatusHint.textContent = '';
+        bonusStatusHint.hidden = true;
+      }
+    } else {
+      if (statusWrap instanceof HTMLElement) statusWrap.hidden = false;
+      if (bonusStatus) {
+        bonusStatus.textContent = summary.member_status_label || '—';
+        bonusStatus.className = `cabinet-bonus-status is-${memberCode}`;
+      }
+      if (bonusStatusHint) {
+        bonusStatusHint.hidden = false;
+        bonusStatusHint.textContent = summary.member_status_hint || '';
+      }
     }
     if (bonusStats) {
       const rate = Number(summary.earn_rate_percent || 5);
@@ -479,45 +495,32 @@
     });
   }
 
-  function updateSecurityBlocks(user) {
-    const verified = !!user?.email_verified;
+  function updateSecurityBlocks() {
     if (verifySection instanceof HTMLElement) {
-      verifySection.hidden = verified;
+      verifySection.hidden = true;
     }
     if (emailVerifyStatus) {
-      emailVerifyStatus.textContent = verified
-        ? ''
-        : `Код отправляется на ${user?.email || 'ваш email'}. Если письма нет — проверьте «Спам».`;
+      emailVerifyStatus.textContent = '';
     }
-
     if (passwordBlockedSection instanceof HTMLElement) {
-      passwordBlockedSection.hidden = verified;
+      passwordBlockedSection.hidden = true;
     }
     if (changePasswordSection instanceof HTMLElement) {
-      changePasswordSection.hidden = !verified;
+      changePasswordSection.hidden = false;
     }
-
-    if (!verified) {
-      resetPasswordChangeFlow();
-      if (passwordError) passwordError.textContent = '';
-      if (passwordSuccess) passwordSuccess.textContent = '';
-    } else if (securityEmailNote) {
+    if (securityEmailNote) {
       securityEmailNote.textContent =
-        'Сначала отправьте код, затем подтвердите его. Поля нового пароля появятся только после успешной проверки кода.';
+        'Сначала отправьте код на email, затем подтвердите его. Поля нового пароля появятся после проверки кода.';
     }
   }
 
   function renderProfile(user) {
     if (!user) return;
     const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.name || '';
-    const verified = !!user.email_verified;
-    const verifyBadge = verified
-      ? '<span class="cabinet-email-badge is-ok">email подтверждён</span>'
-      : '<span class="cabinet-email-badge is-warn">email не подтверждён</span>';
     if (userMeta) {
-      userMeta.innerHTML = `${name} · ${user.email || '—'} ${verifyBadge} · ${formatPhoneMask(user.phone || '')}`;
+      userMeta.textContent = `${name} · ${user.email || '—'} · ${formatPhoneMask(user.phone || '')}`;
     }
-    updateSecurityBlocks(user);
+    updateSecurityBlocks();
     if (bonusValue && currentUser?.bonus_balance != null) {
       bonusValue.textContent = `${Number(currentUser.bonus_balance || 0)}`;
     }
@@ -762,7 +765,8 @@
     const me = await api.json('/api/auth/me');
     if (!me.ok || !me.data?.user) {
       clearCurrentUser();
-      window.location.href = 'index.html?need-login=1';
+      const q = me.data?.sessionExpired ? 'session-expired=1' : 'need-login=1';
+      window.location.href = `index.html?${q}`;
       return;
     }
     currentUser = me.data.user;
@@ -867,15 +871,8 @@
       currentUser = response.data?.user || currentUser;
       writeCurrentUser(currentUser);
       renderProfile(currentUser);
-      if (profileSuccess) profileSuccess.textContent = 'Профиль сохранен в базе данных.';
-      if (response.data?.emailVerificationRequired) {
-        applyEmailCodeDeliveryResponse(response.data, profileSuccess, profileError);
-        if (response.data?.devCode && verifyEmailForm instanceof HTMLFormElement) {
-          const codeInput = verifyEmailForm.elements.namedItem('code');
-          if (codeInput instanceof HTMLInputElement) codeInput.value = String(response.data.devCode);
-        }
-        window.location.hash = 'cabinet-verify-email';
-        scrollToCabinetHash();
+      if (profileSuccess) {
+        profileSuccess.textContent = response.data?.message || 'Профиль сохранён.';
       }
     });
   }

@@ -204,8 +204,8 @@ async function computeMemberStatus(db, userId) {
   if (totalOrders <= 0) {
     return {
       code: 'none',
-      label: 'Не участник программы',
-      hint: 'Оформите первый заказ, чтобы стать участником и получать бонусы.',
+      label: '',
+      hint: '',
     };
   }
   if (recentOrders > 0) {
