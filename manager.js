@@ -261,7 +261,9 @@
     return wrapper;
   }
 
-  function showSuccessModal(message) {
+  function showSuccessModal(message, opts) {
+    const keepFormOpen = Boolean(opts && opts.keepFormOpen);
+    if (!keepFormOpen) closeLaunchFormModals();
     const modal = ensureSuccessModal();
     const text = modal.querySelector('#managerSuccessText');
     if (text) text.textContent = message || 'Изменения сохранены.';
@@ -270,12 +272,39 @@
     document.body.style.overflow = 'hidden';
   }
 
+  function showManagerFormError(message) {
+    showSuccessModal(message || 'Заполните все обязательные поля.', { keepFormOpen: true });
+  }
+
+  function prepareLaunchFormModal(modalId) {
+    if (modalId === 'managerFactFormModal') renderFactForm();
+    if (modalId === 'managerBlocksFormModal') {
+      renderBlocksForm();
+      renderBlocksPreview();
+    }
+    if (modalId === 'managerStoryFormModal') renderStorySelect();
+  }
+
+  function openLaunchFormModal(modalId) {
+    if (!modalId) return;
+    const modal = document.getElementById(modalId);
+    if (!(modal instanceof HTMLElement)) return;
+    prepareLaunchFormModal(modalId);
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    const focusTarget = modal.querySelector('input, textarea, select, button');
+    if (focusTarget instanceof HTMLElement) {
+      window.requestAnimationFrame(() => focusTarget.focus());
+    }
+  }
+
   function hideSuccessModal() {
     const modal = document.getElementById('managerSuccessModal');
     if (!modal) return;
     modal.classList.remove('open');
     modal.setAttribute('aria-hidden', 'true');
-    document.body.style.overflow = '';
+    const openLaunch = document.querySelector('.manager-modal[id$="FormModal"].open');
+    document.body.style.overflow = openLaunch instanceof HTMLElement ? 'hidden' : '';
   }
 
   function getEffectiveFact() {
@@ -423,34 +452,6 @@
     document.body.style.overflow = 'hidden';
   }
 
-  function renderBlogStats() {
-    const el = document.getElementById('managerBlogStats');
-    if (!(el instanceof HTMLElement)) return;
-    const posts = state.posts;
-    if (!posts.length) {
-      el.textContent = '';
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    let total = 0;
-    posts.forEach((p) => {
-      total += effectivePostReads(p);
-    });
-    const avg = posts.length ? (total / posts.length).toFixed(1) : '0';
-    const top = [...posts]
-      .map((p) => ({ title: truncate(p.title, 80), reads: effectivePostReads(p), id: p.id }))
-      .sort((a, b) => b.reads - a.reads)
-      .filter((item) => item.reads > 0)
-      .slice(0, 3);
-    const topPhrase = top.length
-      ? ` Самые читаемые: ${top.map((item) => `«${escapeHtml(item.title)}» — ${item.reads}`).join('; ')}.`
-      : '';
-    el.innerHTML = `<strong>Статистика просмотров</strong>: сколько раз в клиентском блоге нажали «Читать» и впервые в этом браузере открыли полный текст.<br>Всего срабатываний по постам — <strong>${escapeHtml(total)}</strong>, в среднем — <strong>${escapeHtml(
-      avg
-    )}</strong> на пост.${topPhrase}`;
-  }
-
   function renderPosts() {
     const root = document.getElementById('managerPostsList');
     if (!root) return;
@@ -477,9 +478,9 @@
               <p>${isHidden ? 'Скрыт у клиента' : isPublished ? 'Видим клиенту' : 'В архиве (старый)'}</p>
               <div class="manager-post-tile-stats">
                 <span>👁 ${effectivePostReads(post)}</span>
-                <span>❤️ ${post.likes || 0}</span>
-                <span>💧 ${reactions.useful || 0}</span>
-                <span>💡 ${reactions.new || 0}</span>
+                <span>Нравится: ${post.likes || 0}</span>
+                <span>Полезно: ${reactions.useful || 0}</span>
+                <span>Интересно: ${reactions.new || 0}</span>
                 <span>💬 ${commentsCount}</span>
               </div>
             </div>
@@ -622,7 +623,7 @@
           <article class="manager-comment">
             <p class="manager-comment-post">Пост: ${escapeHtml(post.title)}</p>
             <p><strong>${escapeHtml(comment.name || 'Пользователь')}:</strong> ${escapeHtml(comment.text || '')}</p>
-            <p class="manager-comment-like">Лайков комментария: ❤️ ${comment.likes || 0}</p>
+            <p class="manager-comment-like">Лайков комментария: ${comment.likes || 0}</p>
             ${
               Array.isArray(comment.replies) && comment.replies.length
                 ? `<div class="manager-replies">${comment.replies
@@ -778,65 +779,6 @@
     }
   }
 
-  function computeBlogQualityMetrics() {
-    const hidden = new Set(state.admin.hiddenPostIds || []);
-    const published = getPublishedIds();
-    const posts = sortByDateDesc(state.posts);
-    let totalReads = 0;
-    let totalComments = 0;
-    let totalReactions = 0;
-    let shortExcerpt = 0;
-    posts.forEach((post) => {
-      totalReads += effectivePostReads(post);
-      totalComments += (post.comments || []).length;
-      const reactions = post.reactions || {};
-      totalReactions +=
-        (Number(reactions.useful) || 0) + (Number(reactions.new) || 0) + (Number(reactions.tryIt) || 0);
-      if (String(post.excerpt || '').trim().length < 40) shortExcerpt += 1;
-    });
-    return {
-      totalPosts: posts.length,
-      visiblePosts: published.size,
-      hiddenPosts: posts.filter((p) => hidden.has(p.id)).length,
-      archivedPosts: Math.max(0, posts.length - published.size - posts.filter((p) => hidden.has(p.id)).length),
-      totalReads,
-      totalComments,
-      totalReactions,
-      shortExcerpt,
-    };
-  }
-
-  function renderQualityControl() {
-    const root = document.getElementById('managerQualityStats');
-    if (!(root instanceof HTMLElement)) return;
-    const m = computeBlogQualityMetrics();
-    const engagementScore = m.totalReads + m.totalComments * 2 + m.totalReactions;
-    const flags = [];
-    if (m.visiblePosts <= 0) {
-      flags.push({ kind: 'warn', text: 'Нет видимых постов в клиентской ленте — опубликуйте или покажите материалы.' });
-    } else {
-      flags.push({ kind: 'ok', text: `В клиентской ленте сейчас ${m.visiblePosts} из ${m.totalPosts} материалов.` });
-    }
-    if (m.shortExcerpt > 0) {
-      flags.push({
-        kind: 'warn',
-        text: `${m.shortExcerpt} пост(ов) с очень коротким описанием — проверьте качество анонса.`,
-      });
-    }
-    if (m.hiddenPosts > 0) {
-      flags.push({ kind: 'warn', text: `${m.hiddenPosts} материал(ов) скрыто от клиентов.` });
-    }
-    root.innerHTML = `
-      <div class="manager-quality-stat"><span>Материалов в архиве</span><strong>${m.totalPosts}</strong></div>
-      <div class="manager-quality-stat"><span>Видно клиентам</span><strong>${m.visiblePosts}</strong></div>
-      <div class="manager-quality-stat"><span>Открытий «Читать»</span><strong>${m.totalReads}</strong></div>
-      <div class="manager-quality-stat"><span>Комментариев</span><strong>${m.totalComments}</strong></div>
-      <div class="manager-quality-stat"><span>Реакций</span><strong>${m.totalReactions}</strong></div>
-      <div class="manager-quality-stat"><span>Индекс вовлечённости</span><strong>${engagementScore}</strong></div>
-      ${flags.map((f) => `<p class="manager-quality-flag is-${f.kind}">${escapeHtml(f.text)}</p>`).join('')}
-    `;
-  }
-
   function renderPollResultCard(poll) {
     const active = !!poll.active;
     const badge = active
@@ -898,6 +840,137 @@
     }
   }
 
+  let managerFeedbackItems = [];
+
+  function formatRuPhoneDisplay(raw) {
+    const d = String(raw || '').replace(/\D/g, '');
+    if (d.length === 11 && d[0] === '7') {
+      return `+7 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9, 11)}`;
+    }
+    return String(raw || '').trim() || '—';
+  }
+
+  function formatFeedbackWhen(iso) {
+    const d = new Date(iso || 0);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function renderManagerFeedbackItem(row) {
+    const id = Number(row?.id);
+    const contacted = Boolean(row?.contacted);
+    const name = escapeHtml(String(row?.name || '—').trim() || '—');
+    const phoneRaw = String(row?.phone || '').trim();
+    const phoneShown = escapeHtml(formatRuPhoneDisplay(phoneRaw));
+    const telHref = phoneRaw ? `tel:+${String(phoneRaw).replace(/\D/g, '')}` : '';
+    const message = escapeHtml(String(row?.message || '').trim() || '—');
+    const when = escapeHtml(formatFeedbackWhen(row?.created_at));
+    const cls = contacted ? 'is-yes' : 'is-no';
+    const itemCls = contacted ? 'is-contacted' : 'is-pending';
+    return `<article class="manager-feedback-item ${itemCls}" data-mgr-feedback-id="${id}">
+      <div class="manager-feedback-main">
+        <div class="manager-feedback-head">
+          <span class="manager-feedback-name">${name}</span>
+          <time class="manager-feedback-time" datetime="${escapeHtml(String(row?.created_at || ''))}">${when}</time>
+        </div>
+        ${
+          telHref
+            ? `<a class="manager-feedback-phone" href="${escapeHtml(telHref)}">${phoneShown}</a>`
+            : `<span class="manager-feedback-phone">${phoneShown}</span>`
+        }
+        <p class="manager-feedback-message">${message}</p>
+      </div>
+      <button
+        type="button"
+        class="manager-feedback-contact-btn ${cls}"
+        data-mgr-feedback-toggle="${id}"
+        aria-pressed="${contacted ? 'true' : 'false'}"
+      >Связались</button>
+    </article>`;
+  }
+
+  function renderManagerFeedbackList() {
+    const root = document.getElementById('managerFeedbackList');
+    if (!(root instanceof HTMLElement)) return;
+    if (!managerFeedbackItems.length) {
+      root.innerHTML = '<p class="manager-note">Пока нет обращений с сайта.</p>';
+      return;
+    }
+    root.innerHTML = managerFeedbackItems.map(renderManagerFeedbackItem).join('');
+  }
+
+  function setManagerFeedbackStatus(text, visible = false) {
+    const el = document.getElementById('managerFeedbackStatus');
+    if (!(el instanceof HTMLElement)) return;
+    el.textContent = String(text || '');
+    el.hidden = !visible;
+  }
+
+  async function loadManagerFeedback() {
+    const api = window.EkvalineAPI;
+    if (!api?.json) {
+      setManagerFeedbackStatus('Подключите сервер, чтобы видеть обращения.', true);
+      return;
+    }
+    try {
+      const r = await api.json('/api/manager/feedback');
+      if (!r.ok) {
+        setManagerFeedbackStatus(r.data?.error || 'Не удалось загрузить обращения.', true);
+        return;
+      }
+      managerFeedbackItems = Array.isArray(r.data?.messages) ? r.data.messages : [];
+      setManagerFeedbackStatus('', false);
+      renderManagerFeedbackList();
+    } catch {
+      setManagerFeedbackStatus('Не удалось загрузить обращения.', true);
+    }
+  }
+
+  async function toggleManagerFeedbackContacted(id, contacted) {
+    const api = window.EkvalineAPI;
+    if (!api?.json) return;
+    const key = Number(id);
+    if (!Number.isFinite(key) || key <= 0) return;
+    const btn = document.querySelector(`[data-mgr-feedback-toggle="${key}"]`);
+    if (btn instanceof HTMLButtonElement) btn.disabled = true;
+    try {
+      const r = await api.json(`/api/manager/feedback/${encodeURIComponent(String(key))}/contacted`, {
+        method: 'PATCH',
+        body: { contacted: Boolean(contacted) },
+      });
+      if (!r.ok) {
+        setManagerFeedbackStatus(r.data?.error || 'Не удалось обновить статус.', true);
+        return;
+      }
+      const updated = r.data?.message;
+      if (updated && typeof updated === 'object') {
+        const idx = managerFeedbackItems.findIndex((x) => Number(x.id) === key);
+        if (idx >= 0) managerFeedbackItems[idx] = updated;
+        else managerFeedbackItems.unshift(updated);
+        managerFeedbackItems.sort((a, b) => {
+          const ac = a.contacted ? 1 : 0;
+          const bc = b.contacted ? 1 : 0;
+          if (ac !== bc) return ac - bc;
+          return Number(b.id) - Number(a.id);
+        });
+        renderManagerFeedbackList();
+      } else {
+        await loadManagerFeedback();
+      }
+      setManagerFeedbackStatus('', false);
+    } catch {
+      setManagerFeedbackStatus('Не удалось обновить статус.', true);
+    } finally {
+      if (btn instanceof HTMLButtonElement) btn.disabled = false;
+    }
+  }
+
   function renderAll() {
     renderStorySelect();
     renderStoriesList();
@@ -906,8 +979,6 @@
     renderFactForm();
     renderBlocksForm();
     renderBlocksPreview();
-    renderBlogStats();
-    renderQualityControl();
     void renderPollResults();
     updateArchiveArrowsState();
   }
@@ -967,16 +1038,26 @@
       const openBtn = target.closest('[data-open-form-modal]');
       if (openBtn instanceof HTMLButtonElement) {
         const id = openBtn.getAttribute('data-open-form-modal');
-        if (!id) return;
-        const modal = document.getElementById(id);
-        if (!(modal instanceof HTMLElement)) return;
-        modal.classList.add('open');
-        document.body.style.overflow = 'hidden';
+        openLaunchFormModal(id);
         return;
       }
       const closeBtn = target.closest('[data-close-form-modal]');
       if (closeBtn instanceof HTMLElement) {
         closeLaunchFormModals();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const openLaunch = document.querySelector('.manager-modal[id$="FormModal"].open');
+      if (openLaunch instanceof HTMLElement) {
+        event.preventDefault();
+        closeLaunchFormModals();
+        return;
+      }
+      const success = document.getElementById('managerSuccessModal');
+      if (success instanceof HTMLElement && success.classList.contains('open')) {
+        event.preventDefault();
+        hideSuccessModal();
       }
     });
   }
@@ -1027,7 +1108,71 @@
     publishToClient();
   }
 
+  function initManagerMobileDock() {
+    const dock = document.querySelector('.mgr-mobile-dock');
+    if (!(dock instanceof HTMLElement)) return;
+    const links = [...dock.querySelectorAll('.mgr-mobile-dock-btn')];
+    if (!links.length) return;
+
+    const sectionByKey = {
+      tools: document.getElementById('managerToolsSection'),
+      polls: document.getElementById('managerPollResultsSection'),
+      archive: document.getElementById('managerPostsSection'),
+    };
+
+    function setActive(key) {
+      links.forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-mgr-section') === key);
+      });
+    }
+
+    links.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-mgr-section');
+        if (key) setActive(key);
+      });
+    });
+
+    if (typeof IntersectionObserver !== 'function') {
+      setActive('tools');
+      return;
+    }
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        let best = null;
+        for (const e of entries) {
+          if (e.isIntersecting && (!best || e.intersectionRatio > best.ratio)) {
+            best = { id: e.target.id, ratio: e.intersectionRatio };
+          }
+        }
+        if (!best) return;
+        if (best.id === 'managerToolsSection') setActive('tools');
+        else if (best.id === 'managerPollResultsSection') setActive('polls');
+        else if (best.id === 'managerPostsSection') setActive('archive');
+      },
+      { root: null, rootMargin: '-35% 0px -42% 0px', threshold: [0, 0.12, 0.35] }
+    );
+    Object.values(sectionByKey).forEach((el) => {
+      if (el instanceof HTMLElement) obs.observe(el);
+    });
+  }
+
   function bindEvents() {
+    initManagerMobileDock();
+
+    document.getElementById('managerFeedbackList')?.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const btn = target.closest('[data-mgr-feedback-toggle]');
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const id = Number(btn.getAttribute('data-mgr-feedback-toggle'));
+      if (!Number.isFinite(id) || id <= 0) return;
+      const row = managerFeedbackItems.find((x) => Number(x.id) === id);
+      const next = !Boolean(row?.contacted);
+      void toggleManagerFeedbackContacted(id, next);
+    });
+
     const postForm = document.getElementById('managerPostForm');
     const factForm = document.getElementById('managerFactForm');
     const blocksForm = document.getElementById('managerBlocksForm');
@@ -1067,7 +1212,10 @@
         const details = String(postForm.elements.namedItem('details')?.value || '').trim();
         const imageInput = postForm.elements.namedItem('image');
 
-        if (!title || !excerpt || !details || !(imageInput instanceof HTMLInputElement) || !imageInput.files?.[0]) return;
+        if (!title || !excerpt || !details || !(imageInput instanceof HTMLInputElement) || !imageInput.files?.[0]) {
+          showManagerFormError('Заполните заголовок, тексты и выберите фото поста.');
+          return;
+        }
         const image = await fileToDataUrl(imageInput.files[0]);
         const createdAt = new Date().toISOString();
         const id = `p_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
@@ -1101,10 +1249,15 @@
       factForm.addEventListener('submit', (event) => {
         event.preventDefault();
         const value = String(factForm.elements.namedItem('fact')?.value || '').trim();
+        if (!value) {
+          showManagerFormError('Введите текст факта дня.');
+          return;
+        }
         state.admin.factOfDay = truncate(value, 160);
         saveAdminData();
         renderFactForm();
-        showSuccessModal('Факт дня успешно сохранен.');
+        renderBlocksPreview();
+        showSuccessModal('Факт дня успешно сохранён.');
       });
     }
 
@@ -1154,7 +1307,10 @@
         const text = String(storyForm.elements.namedItem('text')?.value || '').trim();
         const postId = String(storyForm.elements.namedItem('postId')?.value || '').trim();
         const imageInput = storyForm.elements.namedItem('image');
-        if (!title || !text || !(imageInput instanceof HTMLInputElement) || !imageInput.files?.[0]) return;
+        if (!title || !text || !(imageInput instanceof HTMLInputElement) || !imageInput.files?.[0]) {
+          showManagerFormError('Заполните заголовок, текст и выберите фото истории.');
+          return;
+        }
         const image = await fileToDataUrl(imageInput.files[0]);
         state.admin.extraStories.unshift({
           id: `s_extra_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
@@ -1277,7 +1433,10 @@
         const title = truncate(String(titleField?.value || 'Опрос дня').trim() || 'Опрос дня', 40);
         const question = truncate(String(questionField?.value || '').trim(), 120);
         const values = collectPollOptionValues();
-        if (!question || values.length < 2) return;
+        if (!question || values.length < 2) {
+          showManagerFormError('Укажите вопрос и минимум два варианта ответа.');
+          return;
+        }
 
         const prev = state.admin.hydrationPoll;
         const prevMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), Number(opt.votes) || 0]));
@@ -1294,18 +1453,22 @@
         };
         saveAdminData();
         void syncBlogPollToServer(state.admin.hydrationPoll);
-        showSuccessModal('Опрос сохранен и опубликован.');
+        void renderPollResults();
+        showSuccessModal('Опрос сохранён и опубликован.');
       });
     }
 
     if (deactivatePollBtn instanceof HTMLButtonElement) {
       deactivatePollBtn.addEventListener('click', () => {
-        if (!state.admin.hydrationPoll) return;
+        if (!state.admin.hydrationPoll) {
+          showManagerFormError('Сначала сохраните опрос.');
+          return;
+        }
         state.admin.hydrationPoll = { ...state.admin.hydrationPoll, active: false };
         saveAdminData();
         void syncBlogPollToServer(state.admin.hydrationPoll);
         void renderPollResults();
-        showSuccessModal('Опрос скрыт.');
+        showSuccessModal('Опрос скрыт с блога.');
       });
     }
 
@@ -1591,6 +1754,7 @@
       const u = r.data?.user;
       if (u && typeof u === 'object') {
         persistManagerUserFromApi(u);
+        syncManagerHeadForRole(u);
         return;
       }
       const cur = readCurrentUser();
@@ -1605,10 +1769,11 @@
 
   function syncManagerHeadForRole(user) {
     const backBtn = document.getElementById('managerBackToAdminBtn');
-    if (backBtn instanceof HTMLElement) {
-      const role = String(user?.role || '').toLowerCase();
-      backBtn.hidden = role !== 'admin';
-    }
+    if (!(backBtn instanceof HTMLElement)) return;
+    const role = String(user?.role || readCurrentUser()?.role || '').trim().toLowerCase();
+    const showForAdmin = role === 'admin';
+    backBtn.hidden = !showForAdmin;
+    backBtn.setAttribute('aria-hidden', showForAdmin ? 'false' : 'true');
   }
 
   function enforceAccess() {
@@ -1637,6 +1802,7 @@
     await hydrateManagerFromServerSession();
     if (!enforceAccess()) return;
     initState();
+    void loadManagerFeedback();
     void syncBlogPollToServer(state.admin.hydrationPoll);
     renderAll();
     initLaunchFormModals();

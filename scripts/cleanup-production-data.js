@@ -1,15 +1,19 @@
 /**
- * Полная очистка демо-данных перед загрузкой реальных.
- * Оставляет только учётки admin / operator / manager.
+ * Полная очистка операционных данных перед боевой работой.
+ * Удаляет: заказы, клиентов, водителей, бонусы, уведомления, сессии, статистику.
+ * Оставляет: admin / operator / manager, каталог, зоны, настройки сайта.
  *
- * Запуск: node scripts/cleanup-production-data.js
- * Подтверждение: node scripts/cleanup-production-data.js --yes
+ * Запуск: npm run pg:clean-production
+ * Подтверждение: npm run pg:clean-production -- --yes
  */
 require('dotenv').config();
 
 const { Client } = require('pg');
 
 const STAFF_ROLES = ['admin', 'operator', 'manager'];
+
+/** Основные учётки сайта; всё остальное (test.staff.*, лишние operator/manager) удаляется. */
+const KEEP_STAFF_EMAILS = ['admekva@mail.ru', 'menekva@mail.ru', 'opekva@mail.ru'];
 
 async function tableExists(client, name) {
   const r = await client.query(
@@ -19,20 +23,29 @@ async function tableExists(client, name) {
   return r.rowCount > 0;
 }
 
+async function deleteAll(client, table) {
+  if (!(await tableExists(client, table))) return 0;
+  const r = await client.query(`DELETE FROM ${table}`);
+  return r.rowCount;
+}
+
 async function main() {
   const yes = process.argv.includes('--yes');
   if (!yes) {
-    // eslint-disable-next-line no-console
     console.log(
-      'Будут удалены ВСЕ заказы и все пользователи, кроме admin/operator/manager.\n' +
-        'Для выполнения: node scripts/cleanup-production-data.js --yes'
+      'Будут удалены:\n' +
+        '  • все заказы и история изменений заказов\n' +
+        '  • все клиенты, водители и прочие пользователи (кроме admin / operator / manager)\n' +
+        '  • бонусы, уведомления, подписки, голоса в опросах, аудит, сессии входа\n' +
+        '  • промокоды, привязанные к пользователям\n\n' +
+        'Останутся: учётки админа/оператора/менеджера, каталог, зоны доставки, настройки сайта.\n\n' +
+        'Для выполнения: npm run pg:clean-production -- --yes'
     );
     process.exit(0);
   }
 
   const url = process.env.DATABASE_URL;
   if (!url) {
-    // eslint-disable-next-line no-console
     console.error('DATABASE_URL не задан в .env');
     process.exit(1);
   }
@@ -43,53 +56,71 @@ async function main() {
   try {
     await client.query('BEGIN');
 
-    if (await tableExists(client, 'order_audit_events')) {
-      const a = await client.query('DELETE FROM order_audit_events');
-      // eslint-disable-next-line no-console
-      console.log(`order_audit_events: удалено ${a.rowCount}`);
-    }
+    const steps = [
+      ['order_audit_events', () => deleteAll(client, 'order_audit_events')],
+      ['client_notifications', () => deleteAll(client, 'client_notifications')],
+      ['orders', () => deleteAll(client, 'orders')],
+      ['bonus_operations', () => deleteAll(client, 'bonus_operations')],
+      ['subscriptions', () => deleteAll(client, 'subscriptions')],
+      ['client_saved_addresses', () => deleteAll(client, 'client_saved_addresses')],
+      ['feedback_messages', () => deleteAll(client, 'feedback_messages')],
+      ['poll_votes', () => deleteAll(client, 'poll_votes')],
+      ['audit_log', () => deleteAll(client, 'audit_log')],
+      ['express_session', () => deleteAll(client, 'express_session')],
+      ['clients', () => deleteAll(client, 'clients')],
+    ];
 
-    if (await tableExists(client, 'orders')) {
-      const o = await client.query('DELETE FROM orders');
-      // eslint-disable-next-line no-console
-      console.log(`orders: удалено ${o.rowCount}`);
+    for (const [label, fn] of steps) {
+      const n = await fn();
+      if (n > 0) console.log(`${label}: удалено ${n}`);
     }
 
     if (await tableExists(client, 'promocodes')) {
-      await client.query(
-        `DELETE FROM promocodes WHERE user_id IS NOT NULL AND user_id NOT IN (SELECT id FROM users WHERE lower(role) = ANY($1::text[]))`,
+      const p = await client.query(
+        `DELETE FROM promocodes
+         WHERE user_id IS NOT NULL
+            OR (created_by_user_id IS NOT NULL
+                AND created_by_user_id NOT IN (SELECT id FROM users WHERE lower(role) = ANY($1::text[])))`,
         [STAFF_ROLES]
-      ).catch(() => {});
+      ).catch(() => ({ rowCount: 0 }));
+      if (p.rowCount > 0) console.log(`promocodes (клиентские): удалено ${p.rowCount}`);
     }
 
-    const delUsers = await client.query(
+    const delClients = await client.query(
       `DELETE FROM users
        WHERE lower(COALESCE(role, '')) <> ALL($1::text[])
           OR role IS NULL`,
       [STAFF_ROLES]
     );
-    // eslint-disable-next-line no-console
-    console.log(`users (не staff): удалено ${delUsers.rowCount}`);
+    console.log(`users (клиенты, водители, демо): удалено ${delClients.rowCount}`);
 
-    if (await tableExists(client, 'clients')) {
-      const c = await client.query('DELETE FROM clients');
-      // eslint-disable-next-line no-console
-      console.log(`clients: удалено ${c.rowCount}`);
+    const delExtraStaff = await client.query(
+      `DELETE FROM users
+       WHERE lower(COALESCE(role, '')) = ANY($1::text[])
+         AND lower(email) <> ALL($2::text[])`,
+      [STAFF_ROLES, KEEP_STAFF_EMAILS.map((e) => e.toLowerCase())]
+    );
+    if (delExtraStaff.rowCount > 0) {
+      console.log(`users (тестовые staff из автопроверок): удалено ${delExtraStaff.rowCount}`);
     }
 
     const left = await client.query(
-      `SELECT role, COUNT(*)::int AS c FROM users GROUP BY role ORDER BY role`
+      `SELECT email, role FROM users ORDER BY role, email`
     );
-    // eslint-disable-next-line no-console
-    console.log('Остались пользователи:', left.rows);
+    console.log('Остались учётки staff:');
+    for (const row of left.rows) {
+      console.log(`  • ${row.email} (${row.role})`);
+    }
 
     const ordLeft = await client.query('SELECT COUNT(*)::int AS c FROM orders');
-    // eslint-disable-next-line no-console
-    console.log(`Заказов в БД: ${ordLeft.rows[0].c}`);
+    const bonusLeft = await tableExists(client, 'bonus_operations')
+      ? await client.query('SELECT COUNT(*)::int AS c FROM bonus_operations')
+      : { rows: [{ c: 0 }] };
+    console.log(`Заказов: ${ordLeft.rows[0].c}, бонусных операций: ${bonusLeft.rows[0].c}`);
 
     await client.query('COMMIT');
-    // eslint-disable-next-line no-console
-    console.log('Готово. Можно загружать реальные данные.');
+    console.log('\nГотово. БД чистая — можно создавать реальных клиентов и заказы.');
+    console.log('Убедитесь, что SEED_DEMO_ORDERS не включён в .env (или =0).');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -99,7 +130,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[cleanup]', err.message);
   process.exit(1);
 });

@@ -1,4 +1,4 @@
-/* ── Auth + cabinet (frontend only, no DB) ── */
+/* ── Auth modal + header (вход/регистрация через API сервера) ── */
 (function redirectDriverAwayFromMarketingSite() {
   try {
     const path = (window.location.pathname || '').replace(/\\/g, '/');
@@ -15,11 +15,13 @@
 })();
 
 (function initAuthAndCabinet() {
-  const USERS_KEY = 'ekvaline_users';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
   const STAFF_RESERVED_EMAILS = new Set([
+    'menekva@mail.ru',
     'managerekva@mail.ru',
+    'opekva@mail.ru',
     'operatorekva@mail.ru',
+    'admekva@mail.ru',
     'adminekva@mail.ru',
   ]);
 
@@ -74,19 +76,20 @@
           </div>
 
           <div class="auth-forgot-panel" id="authForgotPanel" hidden>
-            <p class="auth-forgot-hint">Укажите email, подтвердите код из письма — затем задайте новый пароль. Действует только последний код.</p>
+            <p class="auth-forgot-hint">Только для клиентских аккаунтов. Сотрудники (админ, менеджер, оператор, водитель) — пароль задаёт администратор.</p>
             <label>Email
               <input type="email" id="authForgotEmail" placeholder="example@mail.ru" autocomplete="email" />
             </label>
-            <p class="auth-step-label">Шаг 1. Код на email</p>
-            <button type="button" class="ghost-btn auth-btn-loading" id="authForgotSendCode">
-              <span class="auth-btn-label">Отправить код на email</span>
-              <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
-            </button>
+            <div class="auth-forgot-step auth-forgot-step-send">
+              <p class="auth-step-label">Шаг 1. Код на email</p>
+              <button type="button" class="ghost-btn auth-btn-loading" id="authForgotSendCode">
+                <span class="auth-btn-label">Отправить код на email</span>
+                <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
             <p class="auth-error" id="authForgotError"></p>
             <p class="auth-info" id="authForgotInfo" hidden></p>
-            <div class="auth-dev-code-box" id="authForgotDevCode" hidden></div>
-            <form id="authForgotVerifyForm" class="auth-forgot-step" hidden novalidate>
+            <form id="authForgotVerifyForm" class="auth-forgot-step auth-forgot-step-verify" hidden novalidate>
               <p class="auth-step-label">Шаг 2. Проверка кода</p>
               <label>Код из письма
                 <input type="text" id="authForgotCode" class="auth-code-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
@@ -96,10 +99,10 @@
                 <span class="auth-btn-spinner" hidden aria-hidden="true"></span>
               </button>
             </form>
-            <form id="authForgotPasswordForm" class="auth-forgot-step" hidden novalidate>
+            <form id="authForgotPasswordForm" class="auth-forgot-step auth-forgot-step-password" hidden novalidate>
               <p class="auth-step-label">Шаг 3. Новый пароль</p>
               <p class="auth-forgot-hint auth-password-rules-hint" id="authForgotPasswordRulesHint">
-                Поля откроются после проверки кода. Пароль по правилам системы: заглавная и строчная буквы, цифра, спецсимвол (!@#$…), от 8 символов.
+                Поля откроются после проверки кода. Пароль только на латинице (A–Z, a–z): заглавная, строчная, цифра, спецсимвол (!@#$…), от 8 символов.
               </p>
               <label>Новый пароль
                 <input type="password" id="authForgotNewPassword" minlength="8" maxlength="128" autocomplete="new-password" disabled />
@@ -124,12 +127,14 @@
           <label>Email
             <input type="email" id="authRegEmail" placeholder="example@mail.ru" autocomplete="email" />
           </label>
+          <p class="auth-info auth-reg-field-hint" id="authRegEmailHint" hidden aria-live="polite"></p>
           <label>Телефон
             <input type="tel" id="authRegPhone" maxlength="18" placeholder="+7 (999) 123-45-67" autocomplete="tel" />
           </label>
+          <p class="auth-info auth-reg-field-hint" id="authRegPhoneHint" hidden aria-live="polite"></p>
           <label>Пароль
             <span class="auth-password-wrap">
-              <input type="password" id="authRegPassword" minlength="8" maxlength="128" placeholder="По требованиям сервера: буквы, цифра, символ" autocomplete="new-password" />
+              <input type="password" id="authRegPassword" minlength="8" maxlength="128" placeholder="Латиница A–Z: заглавная, строчная, цифра, символ" autocomplete="new-password" />
               <button type="button" class="auth-password-toggle" id="authRegPasswordToggle" aria-label="Показать пароль" aria-pressed="false">
                 <svg class="auth-pw-icon auth-pw-icon-open" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -167,32 +172,6 @@
         </form>
       </div>
     </div>
-
-    <div class="cabinet" id="cabinet" aria-hidden="true">
-      <div class="cabinet-overlay" data-cabinet-close="true"></div>
-      <aside class="cabinet-panel">
-        <div class="cabinet-head">
-          <div>
-            <p class="cabinet-kicker">Личный кабинет</p>
-            <h3 id="cabinetUserName">Пользователь</h3>
-            <p id="cabinetUserMeta">email@example.com</p>
-          </div>
-          <button type="button" class="cabinet-close" id="cabinetClose" aria-label="Закрыть кабинет">×</button>
-        </div>
-
-        <div class="cabinet-layout">
-          <nav class="cabinet-nav" aria-label="Разделы кабинета">
-            <button type="button" class="cabinet-nav-btn active" data-cabinet-section="notifications">Уведомления</button>
-            <button type="button" class="cabinet-nav-btn" data-cabinet-section="orders">Текущие заказы</button>
-            <button type="button" class="cabinet-nav-btn" data-cabinet-section="history">История заказов</button>
-            <button type="button" class="cabinet-nav-btn" data-cabinet-section="profile">Профиль</button>
-          </nav>
-          <section class="cabinet-content" id="cabinetContent"></section>
-        </div>
-
-        <button type="button" class="cabinet-logout" id="cabinetLogout">Выйти из аккаунта</button>
-      </aside>
-    </div>
     `
   );
 
@@ -212,7 +191,6 @@
   const authForgotEmail = document.getElementById('authForgotEmail');
   const authForgotError = document.getElementById('authForgotError');
   const authForgotInfo = document.getElementById('authForgotInfo');
-  const authForgotDevCode = document.getElementById('authForgotDevCode');
   const authForgotSendCode = document.getElementById('authForgotSendCode');
   const authForgotVerifyForm = document.getElementById('authForgotVerifyForm');
   const authForgotCode = document.getElementById('authForgotCode');
@@ -225,6 +203,8 @@
 
   const authRegName = document.getElementById('authRegName');
   const authRegEmail = document.getElementById('authRegEmail');
+  const authRegEmailHint = document.getElementById('authRegEmailHint');
+  const authRegPhoneHint = document.getElementById('authRegPhoneHint');
   const authRegPhone = document.getElementById('authRegPhone');
   const authRegPassword = document.getElementById('authRegPassword');
   const authRegPasswordConfirm = document.getElementById('authRegPasswordConfirm');
@@ -235,45 +215,37 @@
   const authPasswordStrengthMissing = document.getElementById('authPasswordStrengthMissing');
   const authRegSubmit = authRegisterForm.querySelector('.auth-submit');
 
-  function wireAuthPasswordToggle(toggleBtn, input) {
-    if (!(toggleBtn instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)) return;
-    function syncUi() {
-      const visible = input.type === 'text';
-      toggleBtn.classList.toggle('is-visible', visible);
-      toggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
-      toggleBtn.setAttribute('aria-label', visible ? 'Скрыть пароль' : 'Показать пароль');
-    }
-    toggleBtn.addEventListener('click', () => {
-      input.type = input.type === 'password' ? 'text' : 'password';
-      syncUi();
+  function wireBuiltInAuthPasswordToggles() {
+    const pairs = [
+      [document.getElementById('authLoginPasswordToggle'), authLoginPassword],
+      [document.getElementById('authRegPasswordToggle'), authRegPassword],
+      [document.getElementById('authRegPasswordConfirmToggle'), authRegPasswordConfirm],
+    ];
+    pairs.forEach(([btn, input]) => {
+      if (!(btn instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)) return;
+      if (btn.dataset.pwToggleWired === '1') return;
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const visible = input.type === 'password';
+        input.type = visible ? 'text' : 'password';
+        btn.classList.toggle('is-visible', visible);
+        btn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+        btn.setAttribute('aria-label', visible ? 'Скрыть пароль' : 'Показать пароль');
+      });
+      btn.dataset.pwToggleWired = '1';
+      input.dataset.pwToggleWired = '1';
     });
-    syncUi();
   }
 
-  wireAuthPasswordToggle(document.getElementById('authLoginPasswordToggle'), authLoginPassword);
-  wireAuthPasswordToggle(document.getElementById('authRegPasswordToggle'), authRegPassword);
-  wireAuthPasswordToggle(document.getElementById('authRegPasswordConfirmToggle'), authRegPasswordConfirm);
-
-  const cabinet = document.getElementById('cabinet');
-  const cabinetClose = document.getElementById('cabinetClose');
-  const cabinetLogout = document.getElementById('cabinetLogout');
-  const cabinetUserName = document.getElementById('cabinetUserName');
-  const cabinetUserMeta = document.getElementById('cabinetUserMeta');
-  const cabinetContent = document.getElementById('cabinetContent');
-  const cabinetNavButtons = Array.from(document.querySelectorAll('.cabinet-nav-btn'));
-
-  function readUsers() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
+  function refreshAuthPasswordVisibility(scope) {
+    if (window.EkvalinePasswordVisibility?.init) {
+      window.EkvalinePasswordVisibility.init(scope || authModal || document);
     }
+    wireBuiltInAuthPasswordToggles();
   }
 
-  function saveUsers(users) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }
+  refreshAuthPasswordVisibility(authModal);
 
   function readCurrentUser() {
     try {
@@ -329,6 +301,7 @@
 
   const PASSWORD_MIN = 8;
   const PASSWORD_MAX = 128;
+  const PASSWORD_ALLOWED_CHARS_RE = /^[A-Za-z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]+$/;
   const PASSWORD_SPECIAL_RE = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
 
   function getRegisterPasswordStrength(value) {
@@ -345,16 +318,23 @@
       const need = PASSWORD_MIN - len;
       const line =
         len === 0
-          ? `Минимум ${PASSWORD_MIN} символов.`
+          ? `Минимум ${PASSWORD_MIN} символов, только латиница (A–Z, a–z).`
           : `Не хватает символов: ещё ${need} до ${PASSWORD_MIN} (сейчас ${len}).`;
       return { level: 'weak', line, missing: [] };
     }
-    const missing = [];
-    if (!/[A-ZА-ЯЁ]/.test(s)) {
-      missing.push('заглавную букву (русскую или латинскую)');
+    if (!PASSWORD_ALLOWED_CHARS_RE.test(s)) {
+      return {
+        level: 'weak',
+        line: 'Пароль: только латинские буквы (A–Z, a–z), цифры и спецсимволы (!@#$…).',
+        missing: ['только латинские буквы'],
+      };
     }
-    if (!/[a-zа-яё]/.test(s)) {
-      missing.push('строчную букву (русскую или латинскую)');
+    const missing = [];
+    if (!/[A-Z]/.test(s)) {
+      missing.push('заглавную латинскую букву (A–Z)');
+    }
+    if (!/[a-z]/.test(s)) {
+      missing.push('строчную латинскую букву (a–z)');
     }
     if (!/\d/.test(s)) {
       missing.push('цифру');
@@ -420,184 +400,19 @@
       .replace(/'/g, '&#39;');
   }
 
-  function validateProfileData(data) {
-    if (!data.name || data.name.length < 2 || !/^[A-Za-zА-Яа-яЁё\s\-']{2,40}$/.test(data.name)) {
-      return 'Имя должно содержать 2-40 символов и только буквы.';
-    }
-    const mail = String(data.email ?? '').trim();
-    if (!mail) {
-      return 'Поле email пустое — заполните его.';
-    }
-    if (!isValidEmail(mail)) {
-      return 'Введите корректный email.';
-    }
-    if (data.phone.length !== 11 || data.phone[0] !== '7') {
-      return 'Введите телефон в формате +7 (999) 123-45-67.';
-    }
-    return '';
-  }
-
-  function saveProfileData(userId, data) {
-    const users = readUsers();
-    const duplicated = users.some((item) => (item.email === data.email || item.phone === data.phone) && item.id !== userId);
-    if (duplicated) {
-      return { ok: false, error: 'Этот email или телефон уже используется другим аккаунтом.' };
-    }
-
-    const index = users.findIndex((item) => item.id === userId);
-    if (index < 0) {
-      return { ok: false, error: 'Не удалось найти профиль пользователя.' };
-    }
-
-    users[index] = {
-      ...users[index],
-      name: data.name,
-      email: data.email,
-      phone: data.phone,
-    };
-    saveUsers(users);
-
-    const current = {
-      id: users[index].id,
-      name: users[index].name,
-      email: users[index].email,
-      phone: users[index].phone,
-    };
-    saveCurrentUser(current);
-    return { ok: true, user: current };
-  }
-
   function openAuthModal(tab) {
     switchAuthTab(tab);
     authModal.classList.add('open');
     authModal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+    refreshAuthPasswordVisibility(authModal);
   }
 
   function closeAuthModal() {
     closeForgotPasswordMode();
     authModal.classList.remove('open');
     authModal.setAttribute('aria-hidden', 'true');
-    if (!cabinet.classList.contains('open')) {
-      document.body.style.overflow = '';
-    }
-  }
-
-  function renderCabinetSection(section, user) {
-    const sections = {
-      notifications: `
-        <div class="cabinet-card-head">
-          <h4>Уведомления</h4>
-          <span class="cabinet-pill">3 новых</span>
-        </div>
-        <div class="cabinet-card-list">
-          <article class="cabinet-list-item">
-            <p>Ваш последний заказ №4821 принят в обработку.</p>
-            <small>2 минуты назад</small>
-          </article>
-          <article class="cabinet-list-item">
-            <p>Доставка по городу бесплатная для всех заказов.</p>
-            <small>сегодня</small>
-          </article>
-          <article class="cabinet-list-item">
-            <p>Напоминание: у вас осталось мало воды по прогнозу потребления.</p>
-            <small>вчера</small>
-          </article>
-        </div>
-      `,
-      orders: `
-        <div class="cabinet-card-head">
-          <h4>Текущие заказы</h4>
-          <span class="cabinet-pill">1 активный</span>
-        </div>
-        <div class="cabinet-order-card">
-          <p><strong>Заказ №4821</strong></p>
-          <p>Состав: 2 x 19л</p>
-          <p>Статус: <span class="cabinet-status">Курьер выехал</span></p>
-          <p>Адрес: Оренбург, ул. Ветеранов труда, 15а</p>
-          <p>Окно доставки: сегодня с 16:00 до 18:00</p>
-        </div>
-      `,
-      history: `
-        <div class="cabinet-card-head">
-          <h4>История заказов</h4>
-          <span class="cabinet-pill">3 заказа</span>
-        </div>
-        <div class="cabinet-history-list">
-          <article class="cabinet-history-item"><span>№4718</span><span>26.03.2026</span><span>3 x 19л</span><strong>450 ₽</strong></article>
-          <article class="cabinet-history-item"><span>№4651</span><span>11.03.2026</span><span>2 x 19л</span><strong>400 ₽</strong></article>
-          <article class="cabinet-history-item"><span>№4593</span><span>25.02.2026</span><span>1 x 19л</span><strong>200 ₽</strong></article>
-        </div>
-      `,
-      profile: `
-        <div class="cabinet-card-head">
-          <h4>Профиль</h4>
-          <span class="cabinet-pill">Редактирование</span>
-        </div>
-        <p class="cabinet-muted">Обновляйте контактные данные для корректных уведомлений и доставки.</p>
-        <form id="cabinetProfileForm" class="cabinet-profile-form" novalidate>
-          <label>Имя
-            <input type="text" id="cabinetProfileName" maxlength="40" value="${escapeHtml(user.name)}" />
-          </label>
-          <label>Email
-            <input type="email" id="cabinetProfileEmail" value="${escapeHtml(user.email)}" />
-          </label>
-          <label>Телефон
-            <input type="tel" id="cabinetProfilePhone" maxlength="18" value="${escapeHtml(formatPhoneMask(user.phone))}" />
-          </label>
-          <p class="cabinet-profile-error" id="cabinetProfileError"></p>
-          <p class="cabinet-profile-success" id="cabinetProfileSuccess"></p>
-          <button type="submit" class="cabinet-profile-save">Сохранить изменения</button>
-        </form>
-      `,
-    };
-    cabinetContent.innerHTML = `<div class="cabinet-section">${sections[section] || sections.notifications}</div>`;
-
-    if (section === 'profile') {
-      const profileForm = document.getElementById('cabinetProfileForm');
-      const profileName = document.getElementById('cabinetProfileName');
-      const profileEmail = document.getElementById('cabinetProfileEmail');
-      const profilePhone = document.getElementById('cabinetProfilePhone');
-      const profileError = document.getElementById('cabinetProfileError');
-      const profileSuccess = document.getElementById('cabinetProfileSuccess');
-
-      if (!profileForm || !profileName || !profileEmail || !profilePhone || !profileError || !profileSuccess) return;
-
-      profilePhone.addEventListener('input', () => {
-        profilePhone.value = formatPhoneMask(profilePhone.value);
-      });
-
-      profileForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        profileError.textContent = '';
-        profileSuccess.textContent = '';
-
-        const payload = {
-          name: normalizeName(profileName.value),
-          email: profileEmail.value.trim().toLowerCase(),
-          phone: normalizePhoneDigits(profilePhone.value),
-        };
-
-        const validationError = validateProfileData(payload);
-        if (validationError) {
-          profileError.textContent = validationError;
-          return;
-        }
-
-        const result = saveProfileData(user.id, payload);
-        if (!result.ok) {
-          profileError.textContent = result.error;
-          return;
-        }
-
-        profileName.value = result.user.name;
-        profileEmail.value = result.user.email;
-        profilePhone.value = formatPhoneMask(result.user.phone);
-        cabinetUserName.textContent = result.user.name;
-        cabinetUserMeta.textContent = `${result.user.email} · ${formatPhoneMask(result.user.phone)}`;
-        profileSuccess.textContent = 'Профиль успешно обновлен.';
-      });
-    }
+    document.body.style.overflow = '';
   }
 
   function openCabinet() {
@@ -629,14 +444,6 @@
     }, 0);
   }
 
-  function closeCabinet() {
-    cabinet.classList.remove('open');
-    cabinet.setAttribute('aria-hidden', 'true');
-    if (!authModal.classList.contains('open')) {
-      document.body.style.overflow = '';
-    }
-  }
-
   function switchAuthTab(tab) {
     const isLogin = tab === 'login';
     authTabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.authTab === tab));
@@ -656,6 +463,7 @@
     closeForgotPasswordMode();
     if (!isLogin) {
       syncRegisterPasswordStrength();
+      resetRegistrationFieldHints();
     }
   }
 
@@ -689,7 +497,7 @@
     if (p.length < 8) return { ok: false, error: 'Пароль: минимум 8 символов.' };
     return {
       ok: false,
-      error: api?.PASSWORD_RULES_HINT || 'Пароль: нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).',
+      error: api?.PASSWORD_RULES_HINT || 'Пароль: только латиница (A–Z, a–z), заглавная, строчная, цифра и спецсимвол (!@#$…).',
     };
   }
 
@@ -706,6 +514,7 @@
       return;
     }
     syncForgotPasswordSubmitState();
+    refreshAuthPasswordVisibility(authForgotPasswordForm || authModal);
   }
 
   function syncForgotPasswordSubmitState() {
@@ -738,10 +547,6 @@
     }
     if (authForgotPasswordForm instanceof HTMLFormElement) authForgotPasswordForm.reset();
     setForgotPasswordFieldsEnabled(false);
-    if (authForgotDevCode instanceof HTMLElement) {
-      authForgotDevCode.hidden = true;
-      authForgotDevCode.innerHTML = '';
-    }
     const checkBtn = document.getElementById('authForgotCheckCode');
     if (checkBtn instanceof HTMLButtonElement) checkBtn.disabled = false;
   }
@@ -829,6 +634,7 @@
     const onCabinetPage = isStandaloneCabinetPage();
     cabinetTrigger.style.display = isLoggedIn && !onCabinetPage ? 'inline-flex' : 'none';
     syncTopbarNotifications();
+    if (typeof window.__ekvalineSyncCartGuestUi === 'function') window.__ekvalineSyncCartGuestUi();
   }
 
   window.__ekvalineUpdateHeaderAuth = updateHeaderAuth;
@@ -861,10 +667,139 @@
     const st = Number(status) || 0;
     const raw = data && typeof data.error === 'string' ? data.error.trim() : '';
     if (st === 400 && raw) return raw;
+    if (st === 409 && raw) return raw;
     if (st === 409) return 'Этот email или телефон уже зарегистрированы.';
     if (st === 403) return 'Сессия устарела. Обновите страницу и попробуйте снова.';
     return 'Сейчас регистрацию оформить не получилось. Попробуйте чуть позже или обновите страницу.';
   }
+
+  let regEmailCheckSeq = 0;
+  let regPhoneCheckSeq = 0;
+  let regEmailAvailable = null;
+  let regPhoneAvailable = null;
+  function setRegFieldHint(el, text, tone) {
+    if (!(el instanceof HTMLElement)) return;
+    if (!text) {
+      el.hidden = true;
+      el.textContent = '';
+      el.classList.remove('is-ok', 'is-error');
+      return;
+    }
+    el.hidden = false;
+    el.textContent = text;
+    el.classList.toggle('is-ok', tone === 'ok');
+    el.classList.toggle('is-error', tone === 'error');
+  }
+
+  function resetRegistrationFieldHints() {
+    regEmailAvailable = null;
+    regPhoneAvailable = null;
+    regEmailCheckSeq += 1;
+    regPhoneCheckSeq += 1;
+    setRegFieldHint(authRegEmailHint, '', '');
+    setRegFieldHint(authRegPhoneHint, '', '');
+  }
+
+  async function checkRegistrationEmailAvailability(emailRaw) {
+    const email = String(emailRaw || '').trim().toLowerCase();
+    if (!email) {
+      regEmailAvailable = null;
+      setRegFieldHint(authRegEmailHint, '', '');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      regEmailAvailable = null;
+      setRegFieldHint(authRegEmailHint, 'Введите корректный email.', 'error');
+      return;
+    }
+    if (isPseudoClientEmail(email)) {
+      regEmailAvailable = false;
+      setRegFieldHint(authRegEmailHint, 'Укажите ваш настоящий email — служебные адреса не принимаются.', 'error');
+      return;
+    }
+    if (STAFF_RESERVED_EMAILS.has(email)) {
+      regEmailAvailable = false;
+      setRegFieldHint(authRegEmailHint, 'Этот email зарезервирован для служебного входа.', 'error');
+      return;
+    }
+    const apiCli = window.EkvalineAPI;
+    if (!apiCli?.json) return;
+    const seq = ++regEmailCheckSeq;
+    setRegFieldHint(authRegEmailHint, 'Проверяем email…', 'info');
+    let r;
+    try {
+      r = await apiCli.json('/api/auth/check-registration', { method: 'POST', body: { email } });
+    } catch {
+      regEmailAvailable = null;
+      setRegFieldHint(authRegEmailHint, 'Не удалось проверить email. Попробуйте ещё раз.', 'error');
+      return;
+    }
+    if (seq !== regEmailCheckSeq) return;
+    if (!r.ok) {
+      regEmailAvailable = null;
+      setRegFieldHint(authRegEmailHint, r.data?.error || 'Не удалось проверить email.', 'error');
+      return;
+    }
+    const info = r.data?.email;
+    if (!info) {
+      regEmailAvailable = null;
+      setRegFieldHint(authRegEmailHint, '', '');
+      return;
+    }
+    regEmailAvailable = !!info.available;
+    setRegFieldHint(
+      authRegEmailHint,
+      info.message || (info.available ? 'Email свободен.' : 'Этот email уже зарегистрирован.'),
+      info.available ? 'ok' : 'error'
+    );
+  }
+
+  async function checkRegistrationPhoneAvailability(phoneRaw) {
+    const phone = normalizePhoneDigits(phoneRaw);
+    if (!phone) {
+      regPhoneAvailable = null;
+      setRegFieldHint(authRegPhoneHint, '', '');
+      return;
+    }
+    if (phone.length !== 11 || phone[0] !== '7') {
+      regPhoneAvailable = null;
+      setRegFieldHint(authRegPhoneHint, 'Введите телефон в формате +7 (999) 123-45-67.', 'error');
+      return;
+    }
+    const apiCli = window.EkvalineAPI;
+    if (!apiCli?.json) return;
+    const seq = ++regPhoneCheckSeq;
+    setRegFieldHint(authRegPhoneHint, 'Проверяем номер…', 'info');
+    let r;
+    try {
+      r = await apiCli.json('/api/auth/check-registration', { method: 'POST', body: { phone } });
+    } catch {
+      regPhoneAvailable = null;
+      setRegFieldHint(authRegPhoneHint, 'Не удалось проверить телефон.', 'error');
+      return;
+    }
+    if (seq !== regPhoneCheckSeq) return;
+    if (!r.ok) {
+      regPhoneAvailable = null;
+      setRegFieldHint(authRegPhoneHint, r.data?.error || 'Не удалось проверить телефон.', 'error');
+      return;
+    }
+    const info = r.data?.phone;
+    if (!info) {
+      regPhoneAvailable = null;
+      setRegFieldHint(authRegPhoneHint, '', '');
+      return;
+    }
+    regPhoneAvailable = !!info.available;
+    setRegFieldHint(
+      authRegPhoneHint,
+      info.message || (info.available ? 'Номер свободен.' : 'Этот телефон уже занят.'),
+      info.available ? 'ok' : 'error'
+    );
+  }
+
+  let regEmailCheckTimer = 0;
+  let regPhoneCheckTimer = 0;
 
   function staffPageForRole(role) {
     const r = String(role || '').toLowerCase();
@@ -938,6 +873,7 @@
             window.location.href = staffPage;
             return;
           }
+          window.EkvalineNotificationsSync?.refresh?.();
           window.setTimeout(() => openCabinet(), 50);
           return;
         }
@@ -964,23 +900,14 @@
     }
 
     if (STAFF_RESERVED_EMAILS.has(byEmail)) {
-      authLoginError.textContent =
-        'Вход сотрудника только через сервер (npm start). Пароль проверяется в базе данных.';
+      authLoginError.textContent = 'Этот email зарезервирован для сотрудников. Используйте служебный вход.';
       return;
     }
-
-    const user = readUsers().find((item) => item.email === byEmail);
-    if (!user || user.password !== password) {
-      authLoginError.textContent = apiCli?.json
-        ? 'Неверный email или пароль.'
-        : 'Неверные данные для входа. Запустите сервер для входа по учётке из админ-панели.';
+    if (!apiCli?.json) {
+      authLoginError.textContent = 'Сайт временно недоступен. Обновите страницу и попробуйте снова.';
       return;
     }
-
-    saveCurrentUser({ id: user.id, name: user.name, email: user.email, phone: user.phone });
-    updateHeaderAuth();
-    closeAuthModal();
-    openCabinet();
+    authLoginError.textContent = 'Неверный email или пароль.';
   });
 
   if (authForgotToggle instanceof HTMLButtonElement) {
@@ -1040,11 +967,6 @@
           authForgotInfo.textContent =
             (r.data?.message || 'Код отправлен на email.') +
             ' Если нажимали повторно — введите код из последнего письма.';
-        }
-        if (r.data?.devMode && r.data?.devCode && authForgotDevCode instanceof HTMLElement) {
-          authForgotDevCode.hidden = false;
-          authForgotDevCode.innerHTML = `<p class="auth-dev-code-title">Код (режим разработки)</p><p class="auth-dev-code-value">${r.data.devCode}</p>`;
-          if (authForgotCode instanceof HTMLInputElement) authForgotCode.value = String(r.data.devCode);
         }
         if (authForgotVerifyForm instanceof HTMLElement) {
           authForgotVerifyForm.hidden = false;
@@ -1182,6 +1104,34 @@
     if (errEl) errEl.textContent = r.data?.error || 'Не удалось отправить письмо.';
   }
 
+  if (authRegEmail instanceof HTMLInputElement) {
+    authRegEmail.addEventListener('input', () => {
+      regEmailAvailable = null;
+      window.clearTimeout(regEmailCheckTimer);
+      regEmailCheckTimer = window.setTimeout(() => {
+        void checkRegistrationEmailAvailability(authRegEmail.value);
+      }, 450);
+    });
+    authRegEmail.addEventListener('blur', () => {
+      window.clearTimeout(regEmailCheckTimer);
+      void checkRegistrationEmailAvailability(authRegEmail.value);
+    });
+  }
+
+  if (authRegPhone instanceof HTMLInputElement) {
+    authRegPhone.addEventListener('input', () => {
+      regPhoneAvailable = null;
+      window.clearTimeout(regPhoneCheckTimer);
+      regPhoneCheckTimer = window.setTimeout(() => {
+        void checkRegistrationPhoneAvailability(authRegPhone.value);
+      }, 450);
+    });
+    authRegPhone.addEventListener('blur', () => {
+      window.clearTimeout(regPhoneCheckTimer);
+      void checkRegistrationPhoneAvailability(authRegPhone.value);
+    });
+  }
+
   authRegisterForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     authRegisterError.textContent = '';
@@ -1234,7 +1184,7 @@
     }
     if (!isStrongPassword(password)) {
       authRegisterError.textContent =
-        'Пароль: 8–128 символов, нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).';
+        'Пароль: 8–128 символов, только латиница (A–Z, a–z): заглавная, строчная, цифра и спецсимвол (!@#$…).';
       return;
     }
     if (!String(passwordConfirm || '').trim()) {
@@ -1246,16 +1196,40 @@
       return;
     }
 
+    const apiReg = window.EkvalineAPI;
+    if (apiReg?.json) {
+      await checkRegistrationEmailAvailability(email);
+      if (regEmailAvailable !== true) {
+        authRegisterError.textContent =
+          regEmailAvailable === false
+            ? authRegEmailHint?.textContent ||
+              'Этот email уже зарегистрирован. Войдите в аккаунт или восстановите пароль.'
+            : 'Дождитесь проверки email или исправьте адрес.';
+        authRegEmail?.focus?.();
+        return;
+      }
+      await checkRegistrationPhoneAvailability(phone);
+      if (regPhoneAvailable !== true) {
+        authRegisterError.textContent =
+          regPhoneAvailable === false
+            ? authRegPhoneHint?.textContent || 'Этот телефон уже привязан к другому аккаунту.'
+            : 'Дождитесь проверки телефона или исправьте номер.';
+        authRegPhone?.focus?.();
+        return;
+      }
+
+    }
+
     const nameParts = name.split(/\s+/).filter(Boolean);
     const first_name = nameParts[0] || name;
     const last_name = nameParts.slice(1).join(' ');
-    const apiReg = window.EkvalineAPI;
     if (apiReg?.json) {
       let rReg;
       try {
+        const regBody = { first_name, last_name: last_name || '', email, phone, password };
         rReg = await apiReg.json('/api/auth/register', {
           method: 'POST',
-          body: { first_name, last_name: last_name || '', email, phone, password },
+          body: regBody,
         });
       } catch {
         authRegisterError.textContent =
@@ -1271,8 +1245,9 @@
         const u = rReg.data.user;
         apiReg.resetCsrf?.();
         persistLoggedInUserFromApi(u);
-        const registeredAt = new Date().toISOString();
+        const registeredAt = u.created_at || new Date().toISOString();
         window.EkvalineApp?.stampRegistrationWelcomeNotifications?.(registeredAt);
+        window.EkvalineNotificationsSync?.refresh?.();
         updateHeaderAuth();
         closeAuthModal();
         if (authRegisterInfo) {
@@ -1285,70 +1260,25 @@
         return;
       }
       authRegisterError.textContent = registerSubmitErrorFromApi(rReg.status, rReg.data);
-      return;
-    }
-
-    const users = readUsers();
-    const exists = users.some((item) => item.email === email || item.phone === phone);
-    if (exists) {
-      authRegisterError.textContent = 'Этот email или телефон уже зарегистрированы.';
-      return;
-    }
-
-    const newUser = {
-      id: Date.now(),
-      name,
-      email,
-      phone,
-      password,
-      createdAt: new Date().toISOString(),
-    };
-
-    users.push(newUser);
-    saveUsers(users);
-    const registeredAt = new Date().toISOString();
-    saveCurrentUser({ id: newUser.id, name, email, phone });
-    window.EkvalineApp?.stampRegistrationWelcomeNotifications?.(registeredAt);
-    updateHeaderAuth();
-    closeAuthModal();
-    openCabinet();
-  });
-
-  cabinet.addEventListener('click', (event) => {
-    const target = event.target;
-    if (target instanceof HTMLElement && target.dataset.cabinetClose === 'true') {
-      closeCabinet();
-    }
-  });
-  cabinetClose.addEventListener('click', closeCabinet);
-
-  cabinetNavButtons.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      cabinetNavButtons.forEach((item) => item.classList.remove('active'));
-      btn.classList.add('active');
-      const user = readCurrentUser();
-      if (!user) return;
-      renderCabinetSection(btn.dataset.cabinetSection, user);
-    });
-  });
-
-  cabinetLogout.addEventListener('click', async () => {
-    try {
-      if (window.EkvalineAPI?.json) {
-        await window.EkvalineAPI.json('/api/auth/logout', { method: 'POST', body: {} });
-        window.EkvalineAPI.resetCsrf?.();
+      if (Number(rReg.status) === 409) {
+        const field = String(rReg.data?.field || '').toLowerCase();
+        const msg = registerSubmitErrorFromApi(rReg.status, rReg.data);
+        if (field === 'email') {
+          regEmailAvailable = false;
+          setRegFieldHint(authRegEmailHint, msg, 'error');
+        } else if (field === 'phone') {
+          regPhoneAvailable = false;
+          setRegFieldHint(authRegPhoneHint, msg, 'error');
+        }
       }
-    } catch {
-      /* ignore */
+      return;
     }
-    clearCurrentUser();
-    closeCabinet();
-    updateHeaderAuth();
+
+    authRegisterError.textContent = 'Регистрация временно недоступна. Обновите страницу и попробуйте снова.';
   });
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    if (cabinet.classList.contains('open')) closeCabinet();
     if (authModal.classList.contains('open')) closeAuthModal();
   });
 
@@ -1381,12 +1311,10 @@
   });
 })();
 
-/* ── Cart + checkout (frontend only, no DB) ── */
+/* ── Cart + checkout (через API сервера) ── */
 (function initCartAndCheckout() {
   const CART_KEY = 'ekvaline_cart_items';
   const CURRENT_USER_KEY = 'ekvaline_current_user';
-  const ORDERS_KEY = 'ekvaline_orders_by_user';
-  const ORDER_SEQ_KEY = 'ekvaline_order_seq';
   const ADDRESSES_KEY = 'ekvaline_addresses_by_user';
   const BONUSES_KEY = 'ekvaline_bonuses_by_user';
   const WATER_MAX_QTY = 50;
@@ -1396,6 +1324,10 @@
   const MAP_DEFAULT_ZOOM = 12;
   const DEFAULT_CITY = 'Оренбург';
   const ORENBURG_VIEWBOX = '54.95,51.95,55.55,51.55';
+  const ORENBURG_BBOX = (() => {
+    const [minLon, maxLat, maxLon, minLat] = ORENBURG_VIEWBOX.split(',').map(Number);
+    return { minLon, maxLat, maxLon, minLat };
+  })();
   const ORENBURG_STREETS = [
     { name: 'Салмышская', type: 'улица', popularity: 10 },
     { name: 'Родимцева', type: 'улица', popularity: 9 },
@@ -1441,7 +1373,11 @@
   }
 
   function saveCart(items) {
-    localStorage.setItem(CART_KEY, JSON.stringify(items));
+    try {
+      localStorage.setItem(CART_KEY, JSON.stringify(items));
+    } catch {
+      showAppToast('Не удалось сохранить корзину. Разрешите хранилище в браузере.', 'error');
+    }
   }
 
   function readByUser(key, userId, fallback) {
@@ -1455,72 +1391,6 @@
     localStorage.setItem(key, JSON.stringify(all));
   }
 
-  function extractOrderNumber(rawId) {
-    if (typeof rawId === 'number' && Number.isFinite(rawId)) return Math.max(0, Math.floor(rawId));
-    const text = String(rawId || '').trim();
-    let match = text.match(/^ЛС-(\d{1,12})$/i);
-    if (match) return Number(match[1]) || 0;
-    match = text.match(/^ORD-(\d{6,})$/i);
-    if (match) return Number(match[1].slice(-6)) || 0;
-    match = text.match(/(\d{3,12})/);
-    if (match) return Number(match[1]) || 0;
-    return 0;
-  }
-
-  function formatOrderId(numberValue) {
-    const n = Math.max(1, Math.floor(Number(numberValue) || 1));
-    return `ЛС-${String(n).padStart(6, '0')}`;
-  }
-
-  function normalizeAllOrderIds() {
-    const allOrders = safeParse(localStorage.getItem(ORDERS_KEY), {});
-    if (!allOrders || typeof allOrders !== 'object') return;
-    let maxNum = Math.max(253000, Number(localStorage.getItem(ORDER_SEQ_KEY)) || 0);
-
-    Object.keys(allOrders).forEach((uid) => {
-      const list = Array.isArray(allOrders[uid]) ? allOrders[uid] : [];
-      list.forEach((order) => {
-        const num = extractOrderNumber(order?.id);
-        if (num > maxNum) maxNum = num;
-      });
-    });
-
-    const used = new Set();
-    let changed = false;
-    Object.keys(allOrders).forEach((uid) => {
-      const list = Array.isArray(allOrders[uid]) ? allOrders[uid] : [];
-      allOrders[uid] = list.map((order) => {
-        const currentId = String(order?.id || '');
-        const currentNum = extractOrderNumber(currentId);
-        const isGoodFormat = /^ЛС-\d{6,}$/i.test(currentId);
-        const canKeep = isGoodFormat && currentNum > 0 && !used.has(currentNum);
-        if (canKeep) {
-          used.add(currentNum);
-          return order;
-        }
-        if (isGoodFormat && currentNum > 0 && !used.has(currentNum)) {
-          used.add(currentNum);
-          return order;
-        }
-        maxNum += 1;
-        while (used.has(maxNum)) maxNum += 1;
-        used.add(maxNum);
-        changed = true;
-        return { ...order, id: formatOrderId(maxNum) };
-      });
-    });
-
-    if (changed) localStorage.setItem(ORDERS_KEY, JSON.stringify(allOrders));
-    localStorage.setItem(ORDER_SEQ_KEY, String(maxNum));
-  }
-
-  function nextOrderId() {
-    let seq = Math.max(253000, Number(localStorage.getItem(ORDER_SEQ_KEY)) || 0);
-    seq += 1;
-    localStorage.setItem(ORDER_SEQ_KEY, String(seq));
-    return formatOrderId(seq);
-  }
-
   function parsePrice(value) {
     const matches = String(value || '')
       .replace(/\s/g, '')
@@ -1528,8 +1398,6 @@
     if (!matches || !matches.length) return 0;
     return Number(matches[matches.length - 1]) || 0;
   }
-
-  normalizeAllOrderIds();
 
   function isWaterProduct(title) {
     return /вода\s*18\.?9\s*л/i.test(String(title || ''));
@@ -1724,18 +1592,79 @@
     }
   }
 
-  async function restoreClientSessionFromApi() {
+  function isCheckoutClientUser(user) {
+    if (!user || typeof user !== 'object') return false;
+    return String(user.role || 'client').toLowerCase() === 'client';
+  }
+
+  /** Синхронизация localStorage с cookie-сессией сервера (важно на VPS после HTTPS/перезапуска). */
+  async function syncClientAuthFromServer() {
     const api = window.EkvalineAPI;
-    if (!api?.json || readCurrentUser()) return;
+    if (!api?.json) {
+      return { ok: false, reason: readCurrentUser() ? 'no_api' : 'guest' };
+    }
     try {
       const me = await api.json('/api/auth/me');
-      if (!me.ok || !me.data?.user) return;
-      const role = String(me.data.user.role || 'client').toLowerCase();
-      if (['admin', 'operator', 'manager', 'driver'].includes(role)) return;
-      persistClientUserFromApi(me.data.user);
+      if (me.ok && me.data?.user) {
+        const role = String(me.data.user.role || 'client').toLowerCase();
+        if (['admin', 'operator', 'manager', 'driver'].includes(role)) {
+          if (readCurrentUser()) {
+            localStorage.removeItem(CURRENT_USER_KEY);
+            if (typeof window.__ekvalineUpdateHeaderAuth === 'function') window.__ekvalineUpdateHeaderAuth();
+          }
+          return { ok: false, reason: 'staff' };
+        }
+        persistClientUserFromApi(me.data.user);
+        return { ok: true, user: me.data.user };
+      }
+      if (readCurrentUser()) {
+        localStorage.removeItem(CURRENT_USER_KEY);
+        if (typeof window.__ekvalineUpdateHeaderAuth === 'function') window.__ekvalineUpdateHeaderAuth();
+      }
+      return { ok: false, reason: me.data?.sessionExpired ? 'expired' : 'guest' };
     } catch {
-      /* ignore */
+      return { ok: false, reason: 'network' };
     }
+  }
+
+  async function restoreClientSessionFromApi() {
+    if (readCurrentUser()) return;
+    await syncClientAuthFromServer();
+  }
+
+  function promptCheckoutLogin(message, options = {}) {
+    const msg = message || 'Для оформления заказа войдите или зарегистрируйтесь.';
+    showAppToast(msg, 'info');
+    if (options.openModal !== true) return;
+    const loginBtn = document.querySelector('[data-auth-login]');
+    if (loginBtn instanceof HTMLElement) loginBtn.click();
+  }
+
+  async function ensureServerSessionForCheckout() {
+    const session = await syncClientAuthFromServer();
+    if (session.ok || session.reason === 'guest') return true;
+    if (session.reason === 'no_api') {
+      showAppToast('Оформление заказа временно недоступно. Обновите страницу.', 'error');
+      return false;
+    }
+    if (session.reason === 'expired') {
+      setCartError('Сессия истекла — войдите снова, чтобы оформить заказ.');
+      promptCheckoutLogin('Сессия истекла — войдите снова, чтобы оформить заказ.', { openModal: true });
+      return false;
+    }
+    if (session.reason === 'network') {
+      showAppToast('Нет связи с сервером. Проверьте интернет и обновите страницу.', 'error');
+      return false;
+    }
+    if (session.reason === 'staff') {
+      showAppToast(
+        'Оформление заказа доступно только клиентам. Выйдите из панели оператора или откройте каталог в другом браузере.',
+        'error'
+      );
+      return false;
+    }
+    showAppToast('Не удалось проверить вход. Обновите страницу и войдите в аккаунт клиента.', 'error');
+    return false;
   }
 
   function addCatalogItemToCart(card) {
@@ -1764,20 +1693,35 @@
 
   function requireClientLoginForCheckout(message) {
     const user = readCurrentUser();
-    if (user && user.role !== 'manager') return true;
-    showAppToast(message || 'Войдите в аккаунт, чтобы оформить заказ.', 'info');
-    const loginBtn = document.querySelector('[data-auth-login]');
-    if (loginBtn instanceof HTMLElement) loginBtn.click();
+    if (isCheckoutClientUser(user)) return true;
+    const msg = message || 'Для оформления заказа войдите или зарегистрируйтесь.';
+    setCartError(msg);
+    promptCheckoutLogin(msg, { openModal: true });
+    syncCartGuestUi();
     return false;
+  }
+
+  function syncCartGuestUi() {
+    const loggedIn = isCheckoutClientUser(readCurrentUser());
+    const guestHint = document.querySelector('.cart-guest-hint');
+    if (guestHint instanceof HTMLElement) guestHint.hidden = loggedIn;
+    const checkoutBtn = document.getElementById('openCheckoutBtn');
+    if (checkoutBtn instanceof HTMLButtonElement) {
+      checkoutBtn.disabled = !loggedIn;
+      checkoutBtn.textContent = loggedIn ? 'Оформить заказ' : 'Оформить заказ (нужен вход)';
+      checkoutBtn.title = loggedIn ? '' : 'Войдите или зарегистрируйтесь, чтобы оформить заказ';
+    }
   }
 
   function bindCatalogAddButtons() {
     document.querySelectorAll('.catalog-add-btn').forEach((button) => {
-      if (button.dataset.cartBound === '1') return;
-      button.dataset.cartBound = '1';
-      button.addEventListener('click', (event) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      const newBtn = button.cloneNode(true);
+      button.replaceWith(newBtn);
+      newBtn.addEventListener('click', (event) => {
+        event.preventDefault();
         event.stopPropagation();
-        const card = button.closest('.full-catalog-card, .catalog-card');
+        const card = newBtn.closest('.full-catalog-card, .catalog-card');
         if (card instanceof HTMLElement) addCatalogItemToCart(card);
       });
     });
@@ -1815,53 +1759,62 @@
   const isCabinetPage = document.body.classList.contains('cabinet-page-full');
   if (!isCatalogPage && !isCabinetPage) return;
 
-  const MAP_PICKER_HTML = `
+  function buildMapPickerModalHtml() {
+    return `
     <div class="cart-modal" id="mapPickerModal" aria-hidden="true">
       <div class="cart-modal-overlay" data-map-close="true"></div>
       <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
         <button type="button" class="cart-modal-close" data-map-close="true">×</button>
         <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
-        <p class="checkout-subtitle">Укажите точку на карте или заполните поля — адрес должен быть в Оренбурге.</p>
-        <div class="checkout-map-form">
-          <label class="checkout-field">Город
-            <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
-          </label>
-          <label class="checkout-field">Улица
-            <div class="address-suggest-wrap">
-              <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Салмышская" autocomplete="off" />
-              <button type="button" id="clearMapStreetBtn" class="address-input-clear" aria-label="Очистить улицу" title="Очистить">×</button>
-              <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
+        <p class="checkout-subtitle">Заполните поля слева или отметьте дом на карте. Доставка только по Оренбургу.</p>
+        <div class="checkout-map-layout">
+          <aside class="checkout-map-panel">
+            <label class="checkout-field checkout-map-field">Город
+              <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
+            </label>
+            <label class="checkout-field checkout-map-field">Улица
+              <div class="address-suggest-wrap">
+                <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Салмышская" autocomplete="off" />
+                <button type="button" id="clearMapStreetBtn" class="address-input-clear" aria-label="Очистить улицу" title="Очистить">×</button>
+                <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
+              </div>
+            </label>
+            <label class="checkout-field checkout-map-field">Дом
+              <input type="text" id="mapHouseInput" maxlength="20" placeholder="Например: 12" />
+            </label>
+            <label class="checkout-field checkout-map-field">Квартира
+              <input type="text" id="mapApartmentInput" maxlength="10" placeholder="Например: 45" />
+            </label>
+            <div class="checkout-map-inline-fields">
+              <label class="checkout-field checkout-map-field">Этаж
+                <input type="text" id="mapFloorInput" maxlength="10" placeholder="-" />
+              </label>
+              <label class="checkout-field checkout-map-field">Подъезд
+                <input type="text" id="mapEntranceInput" maxlength="10" placeholder="-" />
+              </label>
             </div>
-          </label>
-          <label class="checkout-field">Дом
-            <input type="text" id="mapHouseInput" maxlength="20" placeholder="Например: 12" />
-          </label>
-          <label class="checkout-field">Квартира
-            <input type="text" id="mapApartmentInput" maxlength="10" placeholder="Например: 45" />
-          </label>
-          <label class="checkout-field">Этаж
-            <input type="text" id="mapFloorInput" maxlength="10" placeholder="Например: 6" />
-          </label>
-          <label class="checkout-field">Подъезд
-            <input type="text" id="mapEntranceInput" maxlength="10" placeholder="Например: 2" />
-          </label>
-        </div>
-        <p id="mapApartmentRequirementsHint" class="checkout-map-validation-hint" hidden>
-          Если указана квартира, обязательно заполните этаж и подъезд.
-        </p>
-        <datalist id="mapCitySuggestions"></datalist>
-        <div id="checkoutMapRoot" class="checkout-map-root"></div>
-        <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
-        <p class="checkout-map-picker-hint">Если адрес не находится, выберите точку на карте.</p>
-        <div class="checkout-map-actions">
-          <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
-          <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
+            <p id="mapApartmentRequirementsHint" class="checkout-map-validation-hint" hidden>
+              Если указана квартира, обязательно заполните этаж и подъезд.
+            </p>
+            <datalist id="mapCitySuggestions"></datalist>
+            <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
+            <div class="checkout-map-panel-actions">
+              <button type="button" class="checkout-map-action-btn" id="findMapAddressBtn">Найти</button>
+              <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
+            </div>
+            <div class="checkout-map-panel-actions">
+              <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn" disabled>Выбрать</button>
+              <button type="button" class="checkout-map-action-btn" data-map-close="true">Отмена</button>
+            </div>
+          </aside>
+          <div id="checkoutMapRoot" class="checkout-map-root"></div>
         </div>
       </div>
     </div>`;
+  }
 
   if (isCabinetPage && !document.getElementById('mapPickerModal')) {
-    document.body.insertAdjacentHTML('beforeend', MAP_PICKER_HTML);
+    document.body.insertAdjacentHTML('beforeend', buildMapPickerModalHtml());
   }
 
   let cartBtn = null;
@@ -1888,6 +1841,7 @@
       <div class="cart-modal-card" role="dialog" aria-modal="true" aria-labelledby="cartModalTitle">
         <button type="button" class="cart-modal-close" data-cart-close="true">×</button>
         <h3 id="cartModalTitle">Корзина</h3>
+        <p class="cart-guest-hint">Товары можно добавлять без входа. Оформление заказа доступно после входа или регистрации.</p>
         <div id="cartItemsList" class="cart-items-list"></div>
         <p id="cartErrorText" class="cart-error-text" aria-live="polite"></p>
         <div class="cart-total-row"><span>Итого:</span><strong id="cartTotalPrice">0 ₽</strong></div>
@@ -1911,16 +1865,12 @@
             <button type="button" class="checkout-map-btn" id="openMapPickerBtn">Выбрать на карте</button>
           </label>
           <label class="checkout-field">Дата доставки
-            <input type="date" id="checkoutDeliveryDate" name="deliveryDate" required />
+            <input type="hidden" id="checkoutDeliveryDate" name="deliveryDate" required />
+            <div id="checkoutDeliveryDatePicker" class="checkout-delivery-date-picker" role="listbox" aria-label="Дата доставки"></div>
             <span class="checkout-field-hint" id="checkoutDeliveryDateHint">Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя).</span>
           </label>
           <label class="checkout-field">Интервал доставки
-            <select id="checkoutDeliverySlot" name="deliverySlot" required>
-              <option value="09:00-14:00">09:00–14:00</option>
-              <option value="14:00-17:00">14:00–17:00</option>
-              <option value="17:00-21:00">17:00–21:00</option>
-              <option value="09:00-17:00">Для организации: 09:00–17:00</option>
-            </select>
+            <select id="checkoutDeliverySlot" name="deliverySlot" required></select>
           </label>
           <label class="checkout-field">Комментарий к заказу
             <textarea id="checkoutCommentField" name="comment" maxlength="${CHECKOUT_COMMENT_MAX}" placeholder="Например: позвонить за 30 минут"></textarea>
@@ -1935,66 +1885,27 @@
       </div>
     </div>
 
-    <div class="cart-modal" id="mapPickerModal" aria-hidden="true">
-      <div class="cart-modal-overlay" data-map-close="true"></div>
-      <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
-        <button type="button" class="cart-modal-close" data-map-close="true">×</button>
-        <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
-        <p class="checkout-subtitle">Заполните поля адреса, карта автоматически покажет точку.</p>
-        <div class="checkout-map-form">
-          <label class="checkout-field">Город
-            <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
-          </label>
-          <label class="checkout-field">Улица
-            <div class="address-suggest-wrap">
-              <input type="text" id="mapStreetInput" maxlength="80" placeholder="Например: Тверская" autocomplete="off" />
-              <button type="button" id="clearMapStreetBtn" class="address-input-clear" aria-label="Очистить улицу" title="Очистить">×</button>
-              <div id="mapStreetDropdown" class="address-suggest-dropdown" hidden></div>
-            </div>
-          </label>
-          <label class="checkout-field">Дом
-            <input type="text" id="mapHouseInput" maxlength="20" placeholder="Например: 12" />
-          </label>
-          <label class="checkout-field">Квартира
-            <input type="text" id="mapApartmentInput" maxlength="10" placeholder="Например: 45" />
-          </label>
-          <label class="checkout-field">Этаж
-            <input type="text" id="mapFloorInput" maxlength="10" placeholder="Например: 6" />
-          </label>
-          <label class="checkout-field">Подъезд
-            <input type="text" id="mapEntranceInput" maxlength="10" placeholder="Например: 2" />
-          </label>
-        </div>
-        <p id="mapApartmentRequirementsHint" class="checkout-map-validation-hint" hidden>
-          Если указана квартира, обязательно заполните этаж и подъезд.
-        </p>
-        <datalist id="mapCitySuggestions"></datalist>
-        <div id="checkoutMapRoot" class="checkout-map-root"></div>
-        <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
-        <p class="checkout-map-picker-hint">Если адрес не находится, выберите точку на карте сами.</p>
-        <div class="checkout-map-actions">
-          <button type="button" class="catalog-more-btn" data-map-close="true">Отмена</button>
-          <button type="button" class="auth-submit" id="applyMapAddressBtn" disabled>Использовать адрес</button>
-        </div>
-      </div>
-    </div>
-    <div id="appToast" class="ek-notify" hidden role="status" aria-live="polite" aria-atomic="true">
-      <div class="ek-notify-card">
-        <span class="ek-notify-icon" aria-hidden="true"></span>
-        <p id="appToastText" class="ek-notify-text"></p>
-        <button type="button" id="appToastClose" class="ek-notify-close" aria-label="Закрыть">×</button>
-      </div>
-    </div>
+    ${buildMapPickerModalHtml()}
     <div id="orderSuccessModal" class="order-success-modal" aria-hidden="true">
       <div class="order-success-backdrop" data-order-success-close="true"></div>
       <div class="order-success-card" role="dialog" aria-modal="true" aria-labelledby="orderSuccessTitle">
+        <div class="order-success-icon" aria-hidden="true">✓</div>
         <p class="order-success-kicker">Заказ оформлен</p>
         <h3 id="orderSuccessTitle">Заявка принята</h3>
         <dl class="order-success-details" id="orderSuccessDetails"></dl>
         <p class="order-success-note" id="orderSuccessNote"></p>
         <div class="order-success-actions">
-          <a href="cabinet.html" class="solid-btn" id="orderSuccessCabinetBtn">Личный кабинет</a>
-          <button type="button" class="ghost-btn" id="orderSuccessContinueBtn" data-order-success-close="true">Продолжить покупки</button>
+          <a href="cabinet.html" class="order-success-btn order-success-btn-primary" id="orderSuccessCabinetBtn">
+            Личный кабинет
+          </a>
+          <button
+            type="button"
+            class="order-success-btn order-success-btn-secondary"
+            id="orderSuccessContinueBtn"
+            data-order-success-close="true"
+          >
+            Продолжить покупки
+          </button>
         </div>
       </div>
     </div>
@@ -2006,9 +1917,13 @@
       cartBtn.dataset.cartTriggerBound = '1';
       cartBtn.addEventListener('click', openCartModal);
     }
+    syncCartGuestUi();
     updateCartBadge();
     saveCart(readCart());
-    void restoreClientSessionFromApi().then(() => updateCartBadge());
+    void syncClientAuthFromServer().then(() => {
+      syncCartGuestUi();
+      updateCartBadge();
+    });
   }
 
   let cartUiReady = isCatalogPage && cartBtn instanceof HTMLElement;
@@ -2036,6 +1951,8 @@
   const checkoutMapRoot = document.getElementById('checkoutMapRoot');
   const checkoutMapAddress = document.getElementById('checkoutMapAddress');
   const applyMapAddressBtn = document.getElementById('applyMapAddressBtn');
+  const resetMapPickerBtn = document.getElementById('resetMapPickerBtn');
+  const findMapAddressBtn = document.getElementById('findMapAddressBtn');
   const mapCityInput = document.getElementById('mapCityInput');
   const mapStreetInput = document.getElementById('mapStreetInput');
   const mapHouseInput = document.getElementById('mapHouseInput');
@@ -2079,6 +1996,37 @@
     modal.setAttribute('aria-hidden', 'true');
   }
 
+  function parseOrderItemsJson(raw) {
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw || '[]') : raw;
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.lines)) return parsed.lines;
+    } catch {
+      /* ignore */
+    }
+    return [];
+  }
+
+  function computeOrderSuccessPayable(order) {
+    const items = parseOrderItemsJson(order?.items_json);
+    if (!items.length) return Math.max(0, Math.round(Number(order?.total_sum) || 0));
+    const gross = items.reduce((sum, item) => {
+      const qty = Math.max(1, Math.floor(Number(item?.qty) || 0));
+      const unitStored = Math.round(Number(item?.unit_price ?? item?.price) || 0);
+      const unit = isWaterCartItem(item) || isWaterProduct(item?.title) ? getWaterUnitPrice(qty) : unitStored;
+      return sum + unit * qty;
+    }, 0);
+    const bonuses = Math.max(0, Math.floor(Number(order?.bonuses_used) || 0));
+    return Math.max(0, gross - bonuses);
+  }
+
+  function formatClientOrderId(rawId) {
+    const fn = window.EkvalineOrderDisplay?.displayOrderId;
+    if (typeof fn === 'function') return fn(rawId);
+    const n = Number(rawId);
+    return Number.isFinite(n) && n > 0 ? `ЛС-${String(Math.trunc(n)).padStart(6, '0')}` : '—';
+  }
+
   function showOrderSuccessModal(order, extras) {
     const modal = document.getElementById('orderSuccessModal');
     const details = document.getElementById('orderSuccessDetails');
@@ -2086,19 +2034,19 @@
     const title = document.getElementById('orderSuccessTitle');
     if (!(modal instanceof HTMLElement) || !(details instanceof HTMLElement)) return;
 
-    const orderId = order?.id != null ? String(order.id) : '—';
+    const orderLabel = formatClientOrderId(order?.id);
     const dateRu = order?.delivery_date
       ? String(order.delivery_date).split('-').reverse().join('.')
       : '—';
     const slot = formatOrderSlotLabel(order?.delivery_slot);
-    const total = Number(order?.total_sum || 0);
+    const total = computeOrderSuccessPayable(order);
     const bonusEarned = Number(extras?.bonusEarned ?? order?.bonuses_earned ?? 0);
 
     if (title instanceof HTMLElement) {
-      title.textContent = `Заявка №${orderId}`;
+      title.textContent = `Заявка ${orderLabel}`;
     }
     details.innerHTML = `
-      <div><dt>Номер заявки</dt><dd>№${orderId}</dd></div>
+      <div><dt>Номер заявки</dt><dd>${orderLabel}</dd></div>
       <div><dt>Дата доставки</dt><dd>${dateRu}</dd></div>
       <div><dt>Интервал</dt><dd>${slot}</dd></div>
       <div><dt>Итого к оплате</dt><dd><strong>${total} ₽</strong></dd></div>
@@ -2172,8 +2120,9 @@
   let checkoutAvailPollTimer = null;
   const CHECKOUT_AVAIL_POLL_MS = 20000;
   const PUBLIC_DATA_POLL_MS = 45000;
+  const CHECKOUT_BOOKING_DAYS = 30;
   const CHECKOUT_DELIVERY_HINT_DEFAULT =
-    'Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя).';
+    'Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя). Серые даты и интервалы закрыты оператором.';
 
   function parseCheckoutAvailabilityPayload(data) {
     const root =
@@ -2253,6 +2202,65 @@
     return '';
   }
 
+  function checkoutWeekdayShort(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return '';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const names = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+    return names[d.getDay()] || '';
+  }
+
+  function checkoutDateChipLabel(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return String(iso || '');
+    return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
+  }
+
+  function enumerateCheckoutBookingDays(count = CHECKOUT_BOOKING_DAYS) {
+    const out = [];
+    let cur = earliestDeliveryIsoDate();
+    for (let i = 0; i < count; i += 1) {
+      out.push(cur);
+      cur = addIsoCalendarDays(cur, 1);
+    }
+    return out;
+  }
+
+  function isCheckoutDateSelectable(iso) {
+    if (!deliveryDateAllowed(iso)) return false;
+    if (isCheckoutDayClosed(iso)) return false;
+    return availableCheckoutSlots(iso).length > 0;
+  }
+
+  function checkoutDateUnavailableReason(iso) {
+    if (!deliveryDateAllowed(iso)) return 'Дата недоступна';
+    if (isCheckoutDayClosed(iso)) return 'Приём заказов закрыт';
+    if (!availableCheckoutSlots(iso).length) return 'Все интервалы закрыты';
+    return '';
+  }
+
+  function renderCheckoutDatePicker(activeIso) {
+    const picker = document.getElementById('checkoutDeliveryDatePicker');
+    if (!(picker instanceof HTMLElement)) return;
+    const days = enumerateCheckoutBookingDays();
+    picker.innerHTML = days
+      .map((iso) => {
+        const selectable = isCheckoutDateSelectable(iso);
+        const active = iso === activeIso;
+        const reason = checkoutDateUnavailableReason(iso);
+        const cls = ['checkout-date-chip', active && selectable ? 'is-active' : '', !selectable ? 'is-unavailable' : '']
+          .filter(Boolean)
+          .join(' ');
+        const dis = selectable ? '' : ' disabled';
+        const title = reason ? ` title="${escapeHtmlLocal(reason)}"` : '';
+        return `<button type="button" class="${cls}" data-checkout-date="${escapeHtmlLocal(iso)}"${dis}${title} aria-selected="${active && selectable ? 'true' : 'false'}">
+          <span class="checkout-date-chip-date">${escapeHtmlLocal(checkoutDateChipLabel(iso))}</span>
+          <span class="checkout-date-chip-wd">${escapeHtmlLocal(checkoutWeekdayShort(iso))}</span>
+        </button>`;
+      })
+      .join('');
+  }
+
   function setCheckoutDeliveryHint(text) {
     const el = document.getElementById('checkoutDeliveryDateHint');
     if (el instanceof HTMLElement) el.textContent = text;
@@ -2296,38 +2304,43 @@
       return;
     }
     const minDate = earliestDeliveryIsoDate();
-    checkoutDeliveryDate.min = minDate;
-    let date = checkoutDeliveryDate.value || minDate;
+    let date = String(checkoutDeliveryDate.value || '').trim() || minDate;
     if (date < minDate) date = minDate;
 
-    if (isCheckoutDayClosed(date) || !availableCheckoutSlots(date).length) {
-      const next = firstCheckoutDateWithSlots(minDate);
-      if (!next) {
-        setCheckoutDeliveryHint('Приём заказов временно закрыт на все даты. Свяжитесь с оператором.');
-        checkoutDeliverySlot.innerHTML = '<option value="">Нет доступных интервалов</option>';
-        checkoutDeliverySlot.disabled = true;
-        return;
-      }
-      date = next;
+    const firstOpen = firstCheckoutDateWithSlots(minDate);
+    if (!firstOpen) {
+      renderCheckoutDatePicker('');
+      checkoutDeliveryDate.value = '';
+      checkoutDeliverySlot.innerHTML = CHECKOUT_SLOT_DEFS.map(
+        (s) => `<option value="${escapeHtmlLocal(s.key)}" disabled>${escapeHtmlLocal(s.label)} — недоступно</option>`
+      ).join('');
+      checkoutDeliverySlot.disabled = true;
+      setCheckoutDeliveryHint('Приём заказов временно закрыт на все даты. Свяжитесь с оператором.');
+      return;
+    }
+
+    if (!isCheckoutDateSelectable(date)) {
+      date = firstOpen;
       checkoutDeliveryDate.value = date;
     }
 
-    const slots = availableCheckoutSlots(date);
-    checkoutDeliverySlot.disabled = !slots.length;
-    const prev = normalizeCheckoutSlotKey(checkoutDeliverySlot.value);
-    checkoutDeliverySlot.innerHTML = slots.length
-      ? slots.map((s) => `<option value="${s.key}">${s.label}</option>`).join('')
-      : '<option value="">Нет доступных интервалов</option>';
-    if (slots.some((s) => s.key === prev)) checkoutDeliverySlot.value = prev;
-    else if (slots.length) checkoutDeliverySlot.value = slots[0].key;
+    renderCheckoutDatePicker(date);
 
-    if (isCheckoutDayClosed(date)) {
-      setCheckoutDeliveryHint('На выбранную дату приём заказов закрыт — выберите другой день.');
-    } else if (!slots.length) {
-      setCheckoutDeliveryHint('На эту дату все интервалы закрыты — выберите другой день.');
-    } else {
-      setCheckoutDeliveryHint(CHECKOUT_DELIVERY_HINT_DEFAULT);
-    }
+    const slotsOpen = availableCheckoutSlots(date);
+    checkoutDeliverySlot.disabled = !slotsOpen.length;
+    const prev = normalizeCheckoutSlotKey(checkoutDeliverySlot.value);
+    checkoutDeliverySlot.innerHTML = CHECKOUT_SLOT_DEFS.map((s) => {
+      const closed = isCheckoutSlotClosed(date, s.key);
+      const dis = closed ? ' disabled' : '';
+      const suffix = closed ? ' — недоступно' : '';
+      return `<option value="${escapeHtmlLocal(s.key)}"${dis}>${escapeHtmlLocal(s.label + suffix)}</option>`;
+    }).join('');
+
+    if (prev && !isCheckoutSlotClosed(date, prev)) checkoutDeliverySlot.value = prev;
+    else if (slotsOpen.length) checkoutDeliverySlot.value = slotsOpen[0].key;
+    else checkoutDeliverySlot.value = '';
+
+    setCheckoutDeliveryHint(CHECKOUT_DELIVERY_HINT_DEFAULT);
   }
 
   function validateCheckoutBooking(date, slot) {
@@ -2391,29 +2404,88 @@
     return chunks.join(', ');
   }
 
-  function geocodeAddress(parts) {
-    const normalizedStreet = String(parts.street || '')
-      .replace(/^\s*(ул\.?|улица)\s+/i, '')
-      .trim();
-    const params = new URLSearchParams({
-      limit: '10',
-      countrycodes: 'ru',
-      city: parts.city,
-      street: normalizedStreet,
-    });
-    const house = String(parts.house || '').trim();
-    if (house) params.set('house', house);
-    if (normalizeAddressToken(parts.city) === normalizeAddressToken(DEFAULT_CITY)) {
-      params.set('bounded', '1');
-      params.set('viewbox', ORENBURG_VIEWBOX);
+  function geocodeBoundedParams(city) {
+    if (normalizeAddressToken(city) === normalizeAddressToken(DEFAULT_CITY)) {
+      return { bounded: '1', viewbox: ORENBURG_VIEWBOX };
     }
+    return {};
+  }
+
+  function fetchGeocodeSearch(params) {
     const url = `/api/public/geocode-search?${params.toString()}`;
     return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then((response) => {
         if (!response.ok) throw new Error('geocode_failed');
         return response.json();
       })
-      .then((rows) => (Array.isArray(rows) ? rows : []));
+      .then((rows) => (Array.isArray(rows) ? rows : []))
+      .catch(() => []);
+  }
+
+  function geocodeAddress(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const params = new URLSearchParams({
+      limit: '12',
+      countrycodes: 'ru',
+      city: parts.city,
+      street: normalizedStreet,
+    });
+    const house = String(parts.house || '').trim();
+    if (house) params.set('house', house);
+    const bounded = geocodeBoundedParams(parts.city);
+    if (bounded.bounded) params.set('bounded', bounded.bounded);
+    if (bounded.viewbox) params.set('viewbox', bounded.viewbox);
+    return fetchGeocodeSearch(params);
+  }
+
+  function mergeGeocodeRows(...lists) {
+    const seen = new Set();
+    const out = [];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const row of list) {
+        const lat = Number(row?.lat);
+        const lon = Number(row?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const key = `${lat.toFixed(5)}|${lon.toFixed(5)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(row);
+      }
+    }
+    return out;
+  }
+
+  async function collectGeocodeCandidates(parts) {
+    const normalizedStreet = String(parts.street || '')
+      .replace(/^\s*(ул\.?|улица)\s+/i, '')
+      .trim();
+    const house = String(parts.house || '').trim();
+    const city = String(parts.city || '').trim();
+    const lists = [await geocodeAddress(parts)];
+    if (house) {
+      const bounded = geocodeBoundedParams(city);
+      const qVariants = [
+        `${city}, ул. ${normalizedStreet}, д. ${house}, Россия`,
+        `${city}, ${normalizedStreet}, дом ${house}, Россия`,
+        `${city}, ${normalizedStreet}, ${house}, Россия`,
+        `${city}, д. ${house}, ул. ${normalizedStreet}, Россия`,
+      ];
+      for (const qv of qVariants) {
+        const params = new URLSearchParams({
+          limit: '12',
+          countrycodes: 'ru',
+          q: qv,
+        });
+        if (bounded.bounded) params.set('bounded', bounded.bounded);
+        if (bounded.viewbox) params.set('viewbox', bounded.viewbox);
+        lists.push(await fetchGeocodeSearch(params));
+      }
+    }
+    lists.push(await fallbackGeocode(parts));
+    return mergeGeocodeRows(...lists);
   }
 
   function searchSuggestions(query, limit = 5, opts = {}) {
@@ -2503,12 +2575,23 @@
     if (mapCityInput instanceof HTMLInputElement) mapCityInput.value = DEFAULT_CITY;
   }
 
+  function isWithinOrenburgBBox(row) {
+    const lat = Number(row?.lat);
+    const lon = Number(row?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+    const { minLon, maxLat, maxLon, minLat } = ORENBURG_BBOX;
+    return lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
+  }
+
   function isOrenburgCityAddress(row) {
+    if (!isWithinOrenburgBBox(row)) return false;
     const address = row?.address || {};
     const city = normalizeAddressToken(address.city || address.town || address.village || '');
     const stateDistrict = normalizeAddressToken(address.state_district || '');
     const state = normalizeAddressToken(address.state || '');
+    const display = String(row?.display_name || '');
     if (city === normalizeAddressToken(DEFAULT_CITY)) return true;
+    if (/оренбург/i.test(display)) return true;
     return stateDistrict.includes('оренбург') || state.includes('оренбург');
   }
 
@@ -2839,28 +2922,42 @@
     if (!Array.isArray(rows) || !rows.length) return null;
     const srcCity = normalizeAddressToken(parts.city);
     const srcStreet = normalizeAddressToken(parts.street);
-    const srcHouse = normalizeAddressToken(parts.house);
+    const srcHouse = normalizeHouseToken(parts.house);
+    let pool = rows;
+    if (srcHouse) {
+      const withHouse = rows.filter((row) => rowMatchesHouseToken(row, parts.house));
+      if (withHouse.length) pool = withHouse;
+      else {
+        const displayHouse = rows.filter((row) => {
+          const display = normalizeAddressToken(row.display_name || '');
+          return display.includes(srcHouse);
+        });
+        if (displayHouse.length) pool = displayHouse;
+        else return null;
+      }
+    }
     let best = null;
     let bestScore = -1;
-    rows.forEach((row) => {
+    pool.forEach((row) => {
       if (!isOrenburgCityAddress(row)) return;
       const addr = row.address || {};
       const city = normalizeAddressToken(addr.city || addr.town || addr.village || addr.state || '');
       const street = normalizeAddressToken(addr.road || addr.pedestrian || addr.footway || '');
-      const house = normalizeAddressToken(addr.house_number || '');
+      const house = rowHouseToken(row);
       const display = normalizeAddressToken(row.display_name || '');
       let score = 0;
       if (city && city === srcCity) score += 5;
       if (street && (street === srcStreet || street.includes(srcStreet) || srcStreet.includes(street))) score += 6;
-      if (house && house === srcHouse) score += 10;
-      else if (srcHouse && display.includes(srcHouse)) score += 4;
+      if (srcHouse && house && housesRoughlyMatch(srcHouse, house)) score += 20;
+      else if (srcHouse && display.includes(srcHouse)) score += 8;
       if (display.includes(srcStreet)) score += 2;
-      if (['building', 'house', 'residential'].includes(String(row.type || '').toLowerCase())) score += 2;
+      if (['building', 'house', 'residential', 'yes'].includes(String(row.type || '').toLowerCase())) score += 3;
       if (score > bestScore) {
         best = row;
         bestScore = score;
       }
     });
+    if (srcHouse && bestScore < 14) return null;
     return best;
   }
 
@@ -2969,6 +3066,49 @@
       .replace(/[^a-zа-я0-9]/gi, '');
   }
 
+  function normalizeHouseToken(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/^д\.?\s*/i, '')
+      .replace(/^дом\.?\s*/i, '')
+      .replace(/[^a-zа-я0-9/]/gi, '');
+  }
+
+  function rowHouseToken(row) {
+    const addr = row?.address || {};
+    let h = normalizeHouseToken(addr.house_number);
+    if (h) return h;
+    const display = String(row?.display_name || row?.name || '');
+    const dm = /(?:д\.?|дом\.?)\s*(\d+[a-zа-я0-9/\-]*)/iu.exec(display);
+    return dm ? normalizeHouseToken(dm[1]) : '';
+  }
+
+  function housesRoughlyMatch(wantRaw, gotRaw) {
+    const want = normalizeHouseToken(wantRaw);
+    const got = normalizeHouseToken(gotRaw);
+    if (!want || !got) return false;
+    if (want === got) return true;
+    const wantNum = (want.match(/^\d+/) || [''])[0];
+    const gotNum = (got.match(/^\d+/) || [''])[0];
+    if (wantNum && gotNum && wantNum === gotNum) {
+      const wantSuffix = want.slice(wantNum.length);
+      const gotSuffix = got.slice(gotNum.length);
+      if (!wantSuffix || !gotSuffix || wantSuffix === gotSuffix) return true;
+      if (wantSuffix.startsWith(gotSuffix) || gotSuffix.startsWith(wantSuffix)) return true;
+    }
+    return false;
+  }
+
+  function rowMatchesHouseToken(row, houseRaw) {
+    const want = normalizeHouseToken(houseRaw);
+    if (!want) return true;
+    const got = rowHouseToken(row);
+    if (got && housesRoughlyMatch(want, got)) return true;
+    const display = normalizeAddressToken(row?.display_name || row?.name || '');
+    return Boolean(display && display.includes(want));
+  }
+
   function updatePickedAddressLabel() {
     enforceOrenburgCityInput();
     const parts = readAddressParts();
@@ -2991,34 +3131,138 @@
     }
   }
 
-  async function syncMapByInputs() {
+  async function geocodeMapFromInputs(options = {}) {
+    const feedback = Boolean(options.feedback);
     const parts = readAddressParts();
     updatePickedAddressLabel();
-    if (!parts.city || !parts.street || !parts.house || !checkoutMapCtl) return;
-    const requestId = ++latestGeocodeRequestId;
-    try {
-      let candidates = await geocodeAddress(parts);
-      if (!candidates.length) {
-        candidates = await fallbackGeocode(parts);
+    if (!parts.city || !parts.street) {
+      if (feedback && checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent = 'Укажите улицу, чтобы найти адрес на карте.';
       }
+      return false;
+    }
+    if (!checkoutMapCtl) {
+      if (feedback) {
+        showAppToast('Карта ещё загружается — подождите секунду и нажмите снова.', 'info');
+      }
+      return false;
+    }
+    if (!parts.house) {
+      if (feedback && checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent = 'Ищем улицу на карте…';
+      }
+      const requestId = ++latestStreetPreviewId;
+      try {
+        const streetParts = { ...parts, house: '' };
+        let candidates = await geocodeAddress(streetParts);
+        if (!candidates.length) {
+          candidates = await fallbackGeocodeStreetOnly(streetParts);
+        }
+        const match = pickBestStreetGeocodeMatch(parts, candidates);
+        if (!match || requestId !== latestStreetPreviewId) {
+          if (feedback && checkoutMapAddress instanceof HTMLElement) {
+            checkoutMapAddress.textContent =
+              'Улица не найдена. Проверьте название, укажите дом или отметьте точку на карте.';
+          }
+          return false;
+        }
+        const lat = Number(match.lat);
+        const lon = Number(match.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+        checkoutMapCtl.setMarker(lat, lon);
+        checkoutMapCtl.flyToMarker(lat, lon, 15);
+        if (feedback && checkoutMapAddress instanceof HTMLElement) {
+          checkoutMapAddress.textContent = 'Улица найдена. Укажите дом или выберите точный дом на карте.';
+        }
+        return true;
+      } catch {
+        if (feedback && checkoutMapAddress instanceof HTMLElement) {
+          checkoutMapAddress.textContent = 'Не удалось найти улицу. Попробуйте ещё раз или укажите точку на карте.';
+        }
+        return false;
+      }
+    }
+    const requestId = ++latestGeocodeRequestId;
+    if (feedback && checkoutMapAddress instanceof HTMLElement) {
+      checkoutMapAddress.textContent = 'Ищем дом на карте…';
+    }
+    try {
+      const candidates = await collectGeocodeCandidates(parts);
       const match = pickBestGeocodeMatch(parts, candidates);
-      if (!match) return;
-      if (requestId !== latestGeocodeRequestId) return;
+      if (!match || requestId !== latestGeocodeRequestId) {
+        if (feedback && checkoutMapAddress instanceof HTMLElement) {
+          checkoutMapAddress.textContent =
+            'Адрес не найден. Проверьте улицу и дом или отметьте точку на карте вручную.';
+        }
+        return false;
+      }
       const lat = Number(match.lat);
       const lon = Number(match.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        if (feedback && checkoutMapAddress instanceof HTMLElement) {
+          checkoutMapAddress.textContent = 'Не удалось определить координаты. Укажите точку на карте.';
+        }
+        return false;
+      }
       checkoutMapCtl.setMarker(lat, lon);
       checkoutMapCtl.flyToMarker(lat, lon, 16);
+      updatePickedAddressLabel();
+      if (feedback && checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent = pickedAddress || 'Адрес найден на карте.';
+      }
+      return true;
     } catch {
-      /* silent */
+      if (feedback && checkoutMapAddress instanceof HTMLElement) {
+        checkoutMapAddress.textContent = 'Ошибка поиска. Попробуйте ещё раз или укажите точку на карте.';
+      }
+      return false;
     }
+  }
+
+  async function syncMapByInputs() {
+    await geocodeMapFromInputs({ feedback: false });
+  }
+
+  function resetMapPickerFields() {
+    latestGeocodeRequestId += 1;
+    latestStreetPreviewId += 1;
+    if (mapSearchTimer) {
+      window.clearTimeout(mapSearchTimer);
+      mapSearchTimer = null;
+    }
+    if (streetSuggestTimer) {
+      window.clearTimeout(streetSuggestTimer);
+      streetSuggestTimer = null;
+    }
+    showStreetDropdown([]);
+    applyAddressPartsToMapInputs({
+      city: DEFAULT_CITY,
+      street: '',
+      house: '',
+      apartment: '',
+      floor: '',
+      entrance: '',
+    });
+    pickedAddress = '';
+    updatePickedAddressLabel();
+    updateStreetClearButton();
+    if (checkoutMapCtl && typeof checkoutMapCtl.clearMarker === 'function') {
+      checkoutMapCtl.clearMarker();
+      checkoutMapCtl.flyToMarker(MAP_DEFAULT_CENTER[0], MAP_DEFAULT_CENTER[1], MAP_DEFAULT_ZOOM);
+    }
+    if (checkoutMapAddress instanceof HTMLElement) {
+      checkoutMapAddress.textContent = 'Поля очищены. Введите адрес и нажмите «Найти».';
+    }
+    if (mapStreetInput instanceof HTMLInputElement) mapStreetInput.focus();
   }
 
   async function initMapPicker() {
     if (!(checkoutMapRoot instanceof HTMLElement)) return;
     const EM = window.EkvalineMaps;
     if (!EM || typeof EM.attachInteractiveMap !== 'function') {
-      throw new Error('maps_runtime_missing');
+      checkoutMapRoot.innerHTML =
+        '<div class="ek-map-unavailable" role="status">Карта недоступна — заполните поля адреса ниже (улица, дом, квартира).</div>';
+      return;
     }
     if (!checkoutMapCtl) {
       checkoutMapCtl = await EM.attachInteractiveMap(
@@ -3090,6 +3334,7 @@
     updatePickedAddressLabel();
     mapPickerModal?.classList.add('open');
     mapPickerModal?.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
     try {
       await initMapPicker();
       const p = readAddressParts();
@@ -3100,14 +3345,19 @@
         checkoutMapCtl?.flyToMarker(MAP_DEFAULT_CENTER[0], MAP_DEFAULT_CENTER[1], MAP_DEFAULT_ZOOM);
       }
     } catch {
-      closeMapPicker();
-      showAppToast('Не удалось загрузить карту. Проверьте подключение к интернету.', 'error');
+      showAppToast(
+        'Карта не загрузилась — укажите адрес полями ниже (улица, дом, при необходимости этаж и подъезд).',
+        'info'
+      );
     }
   }
 
   function closeMapPicker() {
     mapPickerModal?.classList.remove('open');
     mapPickerModal?.setAttribute('aria-hidden', 'true');
+    if (!cartModal?.classList.contains('open') && !checkoutModal?.classList.contains('open')) {
+      document.body.style.overflow = '';
+    }
   }
 
   function animateAddToCart(card) {
@@ -3178,6 +3428,7 @@
       })
       .join('');
     cartTotalPrice.textContent = `${total} ₽`;
+    syncCartGuestUi();
     return total;
   }
 
@@ -3251,6 +3502,7 @@
   function openCartModal() {
     renderCart();
     setCartError('');
+    syncCartGuestUi();
     cartModal?.classList.add('open');
     cartModal?.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -3329,28 +3581,46 @@
     renderCheckoutSavedAddresses();
   }
 
+  function bindOpenCheckoutButton() {
+    if (!(openCheckoutBtn instanceof HTMLButtonElement)) return;
+    if (openCheckoutBtn.dataset.checkoutBound === '1') return;
+    openCheckoutBtn.dataset.checkoutBound = '1';
+    openCheckoutBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      openCheckout();
+    });
+  }
+
   function openCheckout() {
-    if (!requireClientLoginForCheckout('Войдите в аккаунт, чтобы оформить заказ.')) return;
-    const user = readCurrentUser();
-    const items = readCart();
-    if (!items.length) return;
-    syncCheckoutBonusUi(user, items);
-    void loadCheckoutSavedAddresses();
     void (async () => {
-      await loadCheckoutAvailability();
-      if (checkoutDeliveryDate instanceof HTMLInputElement) {
-        const minDate = earliestDeliveryIsoDate();
-        checkoutDeliveryDate.min = minDate;
-        if (!checkoutDeliveryDate.value || checkoutDeliveryDate.value < minDate) {
-          checkoutDeliveryDate.value = minDate;
+      const checkoutBtn = openCheckoutBtn instanceof HTMLButtonElement ? openCheckoutBtn : null;
+      if (checkoutBtn) checkoutBtn.disabled = true;
+      try {
+        if (!(await ensureServerSessionForCheckout())) return;
+        if (!requireClientLoginForCheckout('Для оформления заказа войдите или зарегистрируйтесь.')) return;
+        const user = readCurrentUser();
+        const items = readCart();
+        if (!items.length) {
+          showAppToast('Корзина пуста — добавьте товары из каталога.', 'info');
+          return;
         }
+        syncCheckoutBonusUi(user, items);
+        void loadCheckoutSavedAddresses();
+        await loadCheckoutAvailability();
+        refreshCheckoutDeliveryUi();
+        closeCartModal();
+        checkoutModal?.classList.add('open');
+        checkoutModal?.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+        startCheckoutAvailabilityPoll();
+        updateCheckoutCommentCounter();
+      } catch (err) {
+        console.error('[cart] openCheckout:', err);
+        showAppToast('Не удалось открыть оформление заказа. Обновите страницу (Ctrl+F5).', 'error');
+      } finally {
+        if (checkoutBtn) checkoutBtn.disabled = false;
       }
-      refreshCheckoutDeliveryUi();
     })();
-    checkoutModal?.classList.add('open');
-    checkoutModal?.setAttribute('aria-hidden', 'false');
-    startCheckoutAvailabilityPoll();
-    updateCheckoutCommentCounter();
   }
 
   function closeCheckout() {
@@ -3360,11 +3630,14 @@
     if (!cartModal?.classList.contains('open')) document.body.style.overflow = '';
   }
 
-  if (isCabinetPage || !(cartBtn instanceof HTMLElement)) return;
-
-  if (!cartUiReady) {
-    cartBtn.addEventListener('click', openCartModal);
+  if (!isCabinetPage) {
+    if (!(cartBtn instanceof HTMLElement)) return;
+    if (!cartUiReady) {
+      cartBtn.addEventListener('click', openCartModal);
+    }
   }
+
+  bindOpenCheckoutButton();
 
   try {
   document.addEventListener('click', (event) => {
@@ -3385,6 +3658,7 @@
       return;
     }
     if (target.closest('#openCheckoutBtn')) {
+      event.preventDefault();
       openCheckout();
       return;
     }
@@ -3397,6 +3671,15 @@
     const savedAddrChip = target.closest('.checkout-saved-address-chip');
     if (savedAddrChip instanceof HTMLElement) {
       selectCheckoutSavedAddress(savedAddrChip.getAttribute('data-saved-address-id'));
+      return;
+    }
+    const dateChip = target.closest('[data-checkout-date]');
+    if (dateChip instanceof HTMLButtonElement && !dateChip.disabled) {
+      const iso = String(dateChip.getAttribute('data-checkout-date') || '').trim();
+      if (iso && checkoutDeliveryDate instanceof HTMLInputElement) {
+        checkoutDeliveryDate.value = iso;
+        refreshCheckoutDeliveryUi();
+      }
       return;
     }
     const streetSuggestBtn = target.closest('[data-street-suggest]');
@@ -3450,11 +3733,10 @@
     }
   });
 
-  checkoutDeliveryDate?.addEventListener('change', () => {
-    void (async () => {
-      await loadCheckoutAvailability();
-      refreshCheckoutDeliveryUi();
-    })();
+  checkoutDeliverySlot?.addEventListener('change', () => {
+    const date = checkoutDeliveryDate instanceof HTMLInputElement ? checkoutDeliveryDate.value : '';
+    const slot = normalizeCheckoutSlotKey(checkoutDeliverySlot instanceof HTMLSelectElement ? checkoutDeliverySlot.value : '');
+    if (date && slot && isCheckoutSlotClosed(date, slot)) refreshCheckoutDeliveryUi();
   });
 
   void loadCheckoutAvailability().then(() => refreshCheckoutDeliveryUi());
@@ -3487,8 +3769,12 @@
     });
     checkoutForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!(await ensureServerSessionForCheckout())) return;
       const user = readCurrentUser();
-      if (!user || user.role === 'manager') return;
+      if (!isCheckoutClientUser(user)) {
+        requireClientLoginForCheckout('Для оформления заказа войдите или зарегистрируйтесь.');
+        return;
+      }
       const items = readCart();
       if (!items.length) return;
 
@@ -3530,7 +3816,7 @@
 
       const products = await fetchCatalogProducts();
       if (!products.length) {
-        showAppToast('Не удалось загрузить каталог товаров. Обновите страницу или перезапустите сервер.', 'error');
+        showAppToast('Не удалось загрузить каталог. Обновите страницу и попробуйте снова.', 'error');
         return;
       }
 
@@ -3538,7 +3824,7 @@
       for (const item of items) {
         const pid = findCatalogProductId(item, products);
         if (!pid) {
-          showAppToast(`Не найден товар в каталоге: ${item.title || 'позиция'}`, 'error');
+          showAppToast('Не удалось оформить заказ. Обновите каталог и добавьте товар снова.', 'error');
           return;
         }
         lineItems.push({ product_id: pid, qty: Math.max(1, Number(item.qty) || 1) });
@@ -3574,7 +3860,24 @@
           },
         });
         if (!response.ok) {
-          showAppToast(String(response.data?.error || 'Не удалось оформить заказ.'), 'error');
+          const humanize =
+            typeof api.humanizeClientApiError === 'function'
+              ? api.humanizeClientApiError
+              : (_s, _e, fb) => fb || 'Не удалось оформить заказ.';
+          if (response.status === 401 || response.status === 403) {
+            await syncClientAuthFromServer();
+            showAppToast(
+              response.status === 401
+                ? 'Сессия истекла. Войдите снова и повторите оформление.'
+                : humanize(response.status, response.data?.error, 'Не удалось оформить заказ.'),
+              'error'
+            );
+            if (response.status === 401) {
+              promptCheckoutLogin('Сессия истекла — войдите снова и повторите оформление.', { openModal: true });
+            }
+            return;
+          }
+          showAppToast(humanize(response.status, response.data?.error, 'Не удалось оформить заказ.'), 'error');
           return;
         }
         api.resetCsrf?.();
@@ -3601,9 +3904,7 @@
         closeCheckout();
         closeCartModal();
         checkoutForm.reset();
-        if (checkoutDeliveryDate instanceof HTMLInputElement) {
-          checkoutDeliveryDate.value = earliestDeliveryIsoDate();
-        }
+        refreshCheckoutDeliveryUi();
         const userAfter = readCurrentUser();
         if (userAfter) syncCheckoutBonusUi(userAfter, []);
         updateCheckoutCommentCounter();
@@ -3696,6 +3997,24 @@
     mapStreetInput.focus();
   });
 
+  resetMapPickerBtn?.addEventListener('click', () => {
+    resetMapPickerFields();
+  });
+
+  findMapAddressBtn?.addEventListener('click', () => {
+    void (async () => {
+      if (!(checkoutMapCtl && checkoutMapRoot instanceof HTMLElement)) {
+        try {
+          await initMapPicker();
+        } catch {
+          showAppToast('Карта недоступна — укажите точку на карте или заполните поля вручную.', 'info');
+          return;
+        }
+      }
+      await geocodeMapFromInputs({ feedback: true });
+    })();
+  });
+
   appToastClose?.addEventListener('click', () => {
     if (!(appToast instanceof HTMLElement)) return;
     if (appToastTimer) window.clearTimeout(appToastTimer);
@@ -3713,6 +4032,19 @@
 
   updateStreetClearButton();
 
+  function warmMapPicker() {
+    if (!(checkoutMapRoot instanceof HTMLElement)) return;
+    window.EkvalineMaps?.prefetch?.();
+    const run = () => {
+      void initMapPicker().catch(() => {});
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 2500 });
+    } else {
+      window.setTimeout(run, 600);
+    }
+  }
+
   window.EkvalineMapPicker = {
     open(opts = {}) {
       mapPickerOnApply = typeof opts.onApply === 'function' ? opts.onApply : null;
@@ -3722,21 +4054,29 @@
     close: closeMapPicker,
   };
 
+  warmMapPicker();
+
   window.EkvalineCart = {
     addFromCard: addCatalogItemToCart,
     read: readCart,
     save: saveCart,
     refreshBadge: updateCartBadge,
     open: openCartModal,
+    syncGuestUi: syncCartGuestUi,
   };
-  if (window.__ekvalineCatalogCartBoot?.bindButtons) {
-    window.__ekvalineCatalogCartBoot.bindButtons();
+  window.__ekvalineSyncCartGuestUi = syncCartGuestUi;
+  if (window.__ekvalineCatalogCartBoot?.bindAddButtons) {
+    window.__ekvalineCatalogCartBoot.bindAddButtons();
   }
   } catch (cartUiErr) {
     console.error('[cart] Ошибка инициализации оформления заказа:', cartUiErr);
     if (isCatalogPage) {
       bindCatalogAddButtons();
+      bindOpenCheckoutButton();
       updateCartBadge();
+    }
+    if (isCabinetPage && !window.EkvalineMapPicker) {
+      console.error('[cabinet] EkvalineMapPicker не инициализирован — выбор адреса на карте недоступен.');
     }
   }
 
@@ -3947,49 +4287,8 @@ if (
   scheduleWaterCalc(true);
 }
 
-/** Второй запрос на 127.0.0.1 / localhost — если страница с Live Server/Vite на том же ПК по LAN-IP или нестандартному порту. */
-function shouldOfferFeedbackApiFallback(pageOrigin) {
-  try {
-    const u = new URL(pageOrigin);
-    const h = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
-    const ipv4 =
-      /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h) ||
-      /^(?:ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/i.exec(h);
-    if (ipv4) {
-      const a = Number(ipv4[1]);
-      const b = Number(ipv4[2]);
-      if (a === 10) return true;
-      if (a === 172 && b >= 16 && b <= 31) return true;
-      if (a === 192 && b === 168) return true;
-      if (a === 127) return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function resolveFeedbackApiPort() {
-  const w = typeof window !== 'undefined' ? window : {};
-  const fromWin = w.__EKVALINE_LISTEN_PORT__;
-  if (typeof fromWin === 'number' && Number.isFinite(fromWin) && fromWin > 0 && fromWin < 65536) return fromWin;
-  const portMeta = document.querySelector('meta[name="ekvaline-api-port"]');
-  const n = Number(portMeta && typeof portMeta.content === 'string' ? portMeta.content.trim() : '');
-  if (Number.isFinite(n) && n > 0 && n < 65536) return n;
-  return 3001;
-}
-
-function feedbackFallbackApiOrigins(apiPort) {
-  const port = typeof apiPort === 'number' && apiPort > 0 ? apiPort : 3001;
-  const o1 = `http://127.0.0.1:${port}`;
-  const o2 = `http://localhost:${port}`;
-  return o1 === o2 ? [o1] : [o1, o2];
-}
-
-/** URL POST /api/feedback (порт через /ekvaline-runtime.js или meta ekvaline-api-port). */
+/** URL POST /api/feedback (same-origin или meta ekvaline-api-origin). */
 function getCallbackFeedbackPostUrls() {
-  const apiPort = resolveFeedbackApiPort();
   const meta = document.querySelector('meta[name="ekvaline-api-origin"]');
   const rawMeta = meta && typeof meta.content === 'string' ? meta.content.trim() : '';
   if (rawMeta) {
@@ -4008,17 +4307,7 @@ function getCallbackFeedbackPostUrls() {
     if (typeof u === 'string' && !urls.includes(u)) urls.push(u);
   };
 
-  if (proto === 'file:' || origin === 'null') {
-    feedbackFallbackApiOrigins(apiPort).forEach((b) => add(`${b}/api/feedback`));
-    return urls;
-  }
-
   add(`${origin}/api/feedback`);
-  if (shouldOfferFeedbackApiFallback(origin)) {
-    for (const b of feedbackFallbackApiOrigins(apiPort)) {
-      add(`${b}/api/feedback`);
-    }
-  }
   return urls;
 }
 

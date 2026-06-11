@@ -26,19 +26,28 @@ const ruPhoneSchema = Joi.string().custom((value, helpers) => {
   return n;
 });
 
-const passwordSchema = Joi.string()
-  .min(8)
-  .max(128)
-  .pattern(/[A-ZА-ЯЁ]/)
-  .pattern(/[a-zа-яё]/)
-  .pattern(/\d/)
-  .pattern(/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/)
-  .messages({
-    'string.min': 'Пароль: минимум 8 символов.',
-    'string.max': 'Пароль: не более 128 символов.',
-    'string.pattern.base':
-      'Пароль: нужны заглавная и строчная буквы, цифра и спецсимвол (!@#$…).',
-  });
+const PASSWORD_ALLOWED_CHARS_RE = /^[A-Za-z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]+$/;
+const PASSWORD_SPECIAL_CHAR_RE = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
+
+function validatePasswordValue(raw) {
+  const s = String(raw ?? '');
+  if (s.length < 8) return 'Пароль: минимум 8 символов.';
+  if (s.length > 128) return 'Пароль: не более 128 символов.';
+  if (!PASSWORD_ALLOWED_CHARS_RE.test(s)) {
+    return 'Пароль: только латинские буквы (A–Z, a–z), цифры и спецсимволы (!@#$…).';
+  }
+  if (!/[A-Z]/.test(s)) return 'Пароль: нужна заглавная латинская буква (A–Z).';
+  if (!/[a-z]/.test(s)) return 'Пароль: нужна строчная латинская буква (a–z).';
+  if (!/\d/.test(s)) return 'Пароль: нужна цифра.';
+  if (!PASSWORD_SPECIAL_CHAR_RE.test(s)) return 'Пароль: нужен спецсимвол (!@#$…).';
+  return null;
+}
+
+const passwordSchema = Joi.string().custom((value, helpers) => {
+  const err = validatePasswordValue(value);
+  if (err) return helpers.error('any.custom', { message: err });
+  return value;
+});
 
 const PSEUDO_EMAIL_SUFFIXES = ['@phone.ekvaline.local', '@ekvaline.local'];
 
@@ -62,6 +71,24 @@ const realClientEmailSchema = Joi.string()
   .messages({
     'string.email': 'Укажите корректный email.',
     'string.max': `Email: не более ${EMAIL_MAX} символов.`,
+  });
+
+const checkRegistrationSchema = Joi.object({
+  email: realClientEmailSchema.optional(),
+  phone: ruPhoneSchema.optional(),
+})
+  .or('email', 'phone')
+  .messages({
+    'object.missing': 'Укажите email или телефон для проверки.',
+  });
+
+const authCodeSchema = Joi.string()
+  .trim()
+  .pattern(/^\d{6}$/)
+  .required()
+  .messages({
+    'string.pattern.base': 'Код: 6 цифр.',
+    'any.required': 'Введите код из письма.',
   });
 
 const registerSchema = Joi.object({
@@ -109,15 +136,6 @@ const resetPasswordSchema = Joi.object({
   password: passwordSchema.required(),
 });
 
-const authCodeSchema = Joi.string()
-  .trim()
-  .pattern(/^\d{6}$/)
-  .required()
-  .messages({
-    'string.pattern.base': 'Код: 6 цифр.',
-    'any.required': 'Введите код из письма.',
-  });
-
 const confirmEmailCodeSchema = Joi.object({
   code: authCodeSchema,
 });
@@ -143,19 +161,29 @@ const profileSchema = Joi.object({
     .trim()
     .min(2)
     .max(NAME_MAX)
-    .pattern(/^[A-Za-zА-Яа-яЁё\s\-']+$/)
-    .required(),
+    .required()
+    .messages({
+      'string.min': 'Имя: минимум 2 символа.',
+      'string.max': `Имя: не более ${NAME_MAX} символов.`,
+      'any.required': 'Укажите имя.',
+    }),
   last_name: Joi.string()
     .trim()
     .max(NAME_MAX)
     .allow('')
-    .pattern(/^[A-Za-zА-Яа-яЁё\s\-']*$/),
+    .messages({
+      'string.max': `Фамилия: не более ${NAME_MAX} символов.`,
+    }),
   email: realClientEmailSchema.required(),
   phone: ruPhoneSchema.required(),
 });
 
 /** Имя в форме обратной связи: только буквы (любой алфавит); слова через пробел. \p{L} включает ё, ґ и т.д. */
 const FEEDBACK_NAME_PATTERN = /^[\p{L}]+(?: [\p{L}]+)*$/u;
+
+const feedbackContactedPatchSchema = Joi.object({
+  contacted: Joi.boolean().required(),
+});
 
 const feedbackSchema = Joi.object({
   name: Joi.string()
@@ -181,11 +209,19 @@ const feedbackSchema = Joi.object({
     }),
 });
 
+const driverDutySchema = Joi.object({
+  on_duty: Joi.boolean().required(),
+});
+
 const adminUserPatchSchema = Joi.object({
   blocked: Joi.number().valid(0, 1).optional(),
   role: Joi.string().valid('client', 'operator', 'manager', 'admin', 'driver').optional(),
   driver_route_label: Joi.string().trim().max(120).allow('', null).optional(),
 }).min(1);
+
+const adminStaffPasswordSetSchema = Joi.object({
+  password: passwordSchema.required(),
+});
 
 const adminUserCreateSchema = Joi.object({
   first_name: Joi.string().trim().min(2).max(NAME_MAX).required(),
@@ -325,6 +361,7 @@ const operatorOrderLineSchema = Joi.object({
   title: Joi.string().trim().min(1).max(180).required(),
   qty: Joi.number().integer().min(1).max(50).required(),
   unit_price: Joi.number().min(0).max(1_000_000).required(),
+  product_id: Joi.number().integer().positive().allow(null).optional(),
 });
 
 const operatorOrderCreateSchema = Joi.object({
@@ -590,6 +627,7 @@ function translateJoiMessage(raw) {
     [/is not allowed to be empty$/i, 'не может быть пустым'],
     [/length must be at least (\d+)/i, 'минимум $1 символов'],
     [/length must be less than or equal to (\d+)/i, 'не более $1 символов'],
+    [/fails to match the required pattern/i, 'недопустимые символы — проверьте поле'],
   ];
   for (const [re, ru] of rules) {
     const m = msg.match(re);
@@ -623,6 +661,7 @@ module.exports = {
   validate,
   waterCalcQuerySchema,
   registerSchema,
+  checkRegistrationSchema,
   clientLoginSchema,
   loginSchema,
   forgotPasswordSchema,
@@ -633,7 +672,10 @@ module.exports = {
   checkPasswordResetByEmailSchema,
   profileSchema,
   feedbackSchema,
+  feedbackContactedPatchSchema,
+  driverDutySchema,
   adminUserPatchSchema,
+  adminStaffPasswordSetSchema,
   adminUserCreateSchema,
   adminProductCreateSchema,
   adminProductPatchSchema,

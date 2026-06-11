@@ -241,6 +241,34 @@ function enumerateBookingDays(count = 30, fromIso) {
   return out;
 }
 
+/** Оставляет только закрытия внутри скользящего окна бронирования (с завтра, count дней). */
+function pruneAvailabilityToBookingWindow(raw, count = 30, fromIso) {
+  const availability = parseAvailabilityStored(raw);
+  const allowed = new Set(enumerateBookingDays(count, fromIso));
+  const closedDays = [];
+  const daySet = new Set();
+  availability.closedDays.forEach((d) => {
+    const iso = normalizeIsoDate(d);
+    if (!iso || !allowed.has(iso) || daySet.has(iso)) return;
+    daySet.add(iso);
+    closedDays.push(iso);
+  });
+  closedDays.sort();
+  const closedSlots = [];
+  const slotSet = new Set();
+  availability.closedSlots.forEach((row) => {
+    const date = normalizeIsoDate(row?.date ?? row?.delivery_date);
+    const slot = normalizeDeliverySlotKey(row?.slot ?? row?.delivery_slot);
+    if (!date || !slot || !allowed.has(date) || daySet.has(date)) return;
+    const sig = `${date}|${slot}`;
+    if (slotSet.has(sig)) return;
+    slotSet.add(sig);
+    closedSlots.push({ date, slot });
+  });
+  closedSlots.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
+  return { closedDays, closedSlots };
+}
+
 module.exports = {
   BOOKING_SLOT_DEFS,
   BOOKING_SLOT_KEYS,
@@ -260,4 +288,5 @@ module.exports = {
   slotKeyToClientValue,
   slotKeyToDisplayLabel,
   enumerateBookingDays,
+  pruneAvailabilityToBookingWindow,
 };

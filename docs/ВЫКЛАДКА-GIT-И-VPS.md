@@ -4,9 +4,12 @@
 Каждый шаг расписан подробно. Подходит для **Windows** на вашем ПК и **Ubuntu** на сервере.
 
 Связанные файлы:
+- `docs/ЧЕКЛИСТ-ПЕРЕД-ВЫКЛАДКОЙ.md` — краткий чек-лист перед выкладкой
 - `docs/ПЕРЕДАЧА-ЗАКАЗЧИКУ-DOCKER.md` — что такое Docker для заказчика
 - `docs/НАСТРОЙКА-ПОЧТЫ.md` — SMTP (письма с кодами)
 - `.env.docker.example` — шаблон настроек на сервере
+- `docker/nginx/ekvaline.conf.example` — nginx + HTTPS
+- `deploy/update-on-server.sh` — обновление после `git pull`
 
 ---
 
@@ -167,13 +170,28 @@ git push -u origin master
 
 ---
 
-## A.6. Что должно быть в репозитории на GitHub
+## A.6. Проверка готовности к выкладке
+
+В папке проекта на ПК:
+
+```powershell
+cd C:\Users\verun\OneDrive\Desktop\dpp
+cp .env.docker.example .env
+# заполните .env (SESSION_SECRET, SMTP, APP_BASE_URL)
+npm run deploy:check
+```
+
+Команда проверит `.env`, синтаксис JS и обязательные файлы Docker.
+
+## A.7. Что должно быть в репозитории на GitHub
 
 Откройте репозиторий в браузере и проверьте наличие:
 
 - `Dockerfile`
 - `docker-compose.yml`
 - `docker/entrypoint.sh`
+- `docker/nginx/ekvaline.conf.example`
+- `deploy/update-on-server.sh`
 - `.env.docker.example` (шаблон, без секретов)
 - `package.json`, `server.js`
 - папки `docs/`, HTML-файлы, JS
@@ -469,8 +487,10 @@ http://ВАШ_IP:3001
 
 | Роль | Email | Пароль |
 |------|-------|--------|
-| Админ | adminekva@mail.ru | AdminEkva2026! |
-| Оператор | operatorekva@mail.ru | OperatorEkva2026! |
+| Админ | admekva@mail.ru | adm2026A |
+| Менеджер | menekva@mail.ru | men2026M |
+| Оператор | opekva@mail.ru | ekva2026E |
+| Водитель | driverekva@mail.ru | DriverEkva2026! |
 
 **На боевом сайте смените пароли** через админку или новые учётки.
 
@@ -512,14 +532,38 @@ cd /opt/ekvaline
 docker compose restart app
 ```
 
-## G.3. Nginx + HTTPS (кратко)
+## G.3. Nginx + HTTPS
 
-Чтобы открывать сайт без `:3001` и с замком HTTPS, на сервере ставят **nginx** как прокси.  
-У Timeweb/Beget часто есть готовый «SSL в один клик» в панели — смотрите справку хостинга.
+Готовый шаблон конфигурации: `docker/nginx/ekvaline.conf.example`
 
-Минимальная идея nginx: проксировать `80/443` → `http://127.0.0.1:3001`.
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+cp /opt/ekvaline/docker/nginx/ekvaline.conf.example /etc/nginx/sites-available/ekvaline
+nano /etc/nginx/sites-available/ekvaline   # замените ekvaline.ru на ваш домен
+ln -sf /etc/nginx/sites-available/ekvaline /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d ekvaline.ru -d www.ekvaline.ru
+```
 
-После настройки домена проверьте: `https://ekvaline.ru`
+В `.env` на сервере:
+
+```env
+APP_BASE_URL=https://ekvaline.ru
+USE_SECURE_COOKIES=true
+```
+
+```bash
+cd /opt/ekvaline && docker compose restart app
+```
+
+Рекомендация: при работе через nginx привязать app только к localhost в `docker-compose.yml`:
+
+```yaml
+ports:
+  - '127.0.0.1:3001:3001'
+```
+
+После настройки проверьте: `https://ekvaline.ru`
 
 ---
 
@@ -541,9 +585,10 @@ git push
 
 ```bash
 cd /opt/ekvaline
-git pull
-docker compose up -d --build
+sh deploy/update-on-server.sh
 ```
+
+Или вручную: `git pull && docker compose up -d --build`
 
 Через 1–3 минуты обновлённый сайт на `http://IP:3001` или на домене.
 
@@ -578,6 +623,7 @@ docker compose up -d --build
 | Порт 3001 занят | В `docker-compose.yml` сменить `"3001:3001"` на `"3002:3001"`, открывать `:3002` |
 | Письма не уходят | SMTP в `.env`, см. `docs/НАСТРОЙКА-ПОЧТЫ.md` |
 | После `git pull` старый сайт | Обязательно `docker compose up -d --build` |
+| Корзина / заказ не работают | См. `docs/ЧЕКЛИСТ-ПЕРЕД-ВЫКЛАДКОЙ.md` → «Если корзина…»; `USE_SECURE_COOKIES` + HTTPS |
 | Нет места на диске | `docker system prune -a` (удалит неиспользуемые образы) |
 
 ---

@@ -7,7 +7,28 @@
   let configCache = null;
   let configPromise = null;
 
+  function readRuntimeMapsKey() {
+    try {
+      const w = typeof window !== 'undefined' ? window : {};
+      const k = typeof w.__EKVALINE_YANDEX_MAPS_KEY__ === 'string' ? w.__EKVALINE_YANDEX_MAPS_KEY__.trim() : '';
+      return k || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function cacheFromKey(key) {
+    const trimmed = String(key || '').trim();
+    if (!trimmed) return { provider: 'none', yandexMapsKey: null };
+    return { provider: 'yandex', yandexMapsKey: trimmed };
+  }
+
   function getConfig() {
+    const runtimeKey = readRuntimeMapsKey();
+    if (runtimeKey) {
+      configCache = cacheFromKey(runtimeKey);
+      return Promise.resolve(configCache);
+    }
     if (configCache) return Promise.resolve(configCache);
     if (!configPromise) {
       configPromise = fetch(`${BASE}/api/public/maps-config`, {
@@ -24,7 +45,8 @@
           return configCache;
         })
         .catch(() => {
-          configCache = { provider: 'none', yandexMapsKey: null };
+          const fallback = readRuntimeMapsKey();
+          configCache = fallback ? cacheFromKey(fallback) : { provider: 'none', yandexMapsKey: null };
           return configCache;
         });
     }
@@ -42,10 +64,12 @@
       const raw = typeof location !== 'undefined' ? String(location.pathname || '') : '';
       const path = raw.replace(/\\/g, '/');
       const leaf = path.split('/').filter(Boolean).pop() || '';
-      if (/^(operator|delivery|catalog)\.html$/i.test(leaf)) return true;
+      if (/^(operator|delivery|catalog|cabinet)\.html$/i.test(leaf)) return true;
       if (document.getElementById('deliveryZoneMap')) return true;
       if (document.getElementById('checkoutMapRoot')) return true;
+      if (document.getElementById('opxZoneMapCanvas')) return true;
       if (document.body?.classList?.contains?.('catalog-page')) return true;
+      if (document.body?.classList?.contains?.('cabinet-page-full')) return true;
     } catch {
       /**/
     }
@@ -53,40 +77,113 @@
   }
 
   let ymapsPromise = null;
+
+  function ymapsRefererHint() {
+    try {
+      const origin = String(window.location?.origin || '').trim();
+      if (origin && origin !== 'null') return `${origin}/*`;
+    } catch {
+      /**/
+    }
+    return 'http://31.129.96.146:3001/*';
+  }
+
+  function ymapsLoadFailMessage() {
+    return `Не удалось загрузить Яндекс.Карты. Проверьте YANDEX_MAPS_API_KEY в .env и HTTP Referer в кабинете developer.tech.yandex.ru: ${ymapsRefererHint()}`;
+  }
+
+  function buildYmapsScriptUrl(apiKey, cspMode) {
+    const base = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(apiKey)}&lang=ru_RU`;
+    if (cspMode === '202512') return `${base}&csp=202512`;
+    if (cspMode === 'legacy') return `${base}&csp=true`;
+    return base;
+  }
+
+  function removeYmapsScriptTags() {
+    document.querySelectorAll('script[data-ek-ymaps-api="true"]').forEach((node) => node.remove());
+  }
+
+  function waitForYmapsReady(timeoutMs) {
+    return new Promise((resolve, reject) => {
+      if (!window.ymaps || typeof window.ymaps.ready !== 'function') {
+        reject(new Error('ymaps_load_error'));
+        return;
+      }
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('ymaps_ready_timeout'));
+      }, timeoutMs);
+      try {
+        window.ymaps.ready(() => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (window.ymaps?.Map) resolve(window.ymaps);
+          else reject(new Error('ymaps_load_error'));
+        });
+      } catch (err) {
+        window.clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error('ymaps_load_error'));
+      }
+    });
+  }
+
+  function injectYmapsScript(apiKey, cspMode) {
+    return new Promise((resolve, reject) => {
+      if (window.ymaps?.Map) {
+        waitForYmapsReady(12000).then(resolve).catch(reject);
+        return;
+      }
+      const existing = document.querySelector(`script[data-ek-ymaps-api="true"][data-ek-ymaps-csp="${cspMode || 'none'}"]`);
+      if (existing instanceof HTMLScriptElement) {
+        existing.addEventListener('load', () => waitForYmapsReady(12000).then(resolve).catch(reject), { once: true });
+        existing.addEventListener('error', () => reject(new Error('ymaps_load_error')), { once: true });
+        queueMicrotask(() => {
+          if (window.ymaps?.Map) waitForYmapsReady(12000).then(resolve).catch(reject);
+        });
+        return;
+      }
+      const s = document.createElement('script');
+      s.async = true;
+      s.setAttribute('data-ek-ymaps-api', 'true');
+      s.setAttribute('data-ek-ymaps-csp', cspMode || 'none');
+      s.src = buildYmapsScriptUrl(apiKey, cspMode);
+      s.onload = () => {
+        waitForYmapsReady(12000).then(resolve).catch(reject);
+      };
+      s.onerror = () => reject(new Error('ymaps_load_error'));
+      document.head.appendChild(s);
+    });
+  }
+
   function loadYmaps() {
     if (typeof window !== 'undefined' && window.ymaps && window.ymaps.Map) {
-      return new Promise((resolve) => window.ymaps.ready(() => resolve(window.ymaps)));
+      return waitForYmapsReady(12000);
     }
     if (ymapsPromise) return ymapsPromise;
-    ymapsPromise = getConfig().then((c) => {
+    ymapsPromise = getConfig().then(async (c) => {
       if (!c?.yandexMapsKey) return null;
-      return new Promise((resolve, reject) => {
-        if (window.ymaps && window.ymaps.Map) {
-          window.ymaps.ready(() => resolve(window.ymaps));
-          return;
+      const modes = ['202512', 'legacy', null];
+      let lastError = null;
+      for (const mode of modes) {
+        try {
+          if (lastError) {
+            removeYmapsScriptTags();
+            try {
+              delete window.ymaps;
+            } catch {
+              window.ymaps = undefined;
+            }
+          }
+          const ymaps = await injectYmapsScript(c.yandexMapsKey, mode);
+          return ymaps;
+        } catch (err) {
+          lastError = err;
         }
-        const existing = document.querySelector('script[data-ek-ymaps-api="true"]');
-        if (existing instanceof HTMLScriptElement) {
-          const done = () => {
-            window.ymaps.ready(() => resolve(window.ymaps));
-          };
-          existing.addEventListener('load', () => done(), { once: true });
-          existing.addEventListener('error', () => reject(new Error('ymaps_load_error')), { once: true });
-          queueMicrotask(() => {
-            if (window.ymaps && window.ymaps.Map) done();
-          });
-          return;
-        }
-        const s = document.createElement('script');
-        s.async = true;
-        s.setAttribute('data-ek-ymaps-api', 'true');
-        s.src = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(c.yandexMapsKey)}&lang=ru_RU`;
-        s.onload = () => {
-          window.ymaps.ready(() => resolve(window.ymaps));
-        };
-        s.onerror = () => reject(new Error('ymaps_load_error'));
-        document.head.appendChild(s);
-      });
+      }
+      throw lastError || new Error('ymaps_load_error');
     });
     return ymapsPromise;
   }
@@ -194,7 +291,7 @@
         const { map } = createYandexMap(container, center, z, { disableScrollZoom: false });
         return { engine: 'yandex', map };
       })
-      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
+      .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
 
   /**
@@ -268,29 +365,105 @@
           },
         };
       })
-      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
+      .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
 
-  function bindOrdersMapPopupNav(rootEl, closePopupFn, popupRootHandler) {
-    if (!(rootEl instanceof HTMLElement) || rootEl._ekvalinePopupNav) return;
-    rootEl._ekvalinePopupNav = true;
-    rootEl.addEventListener('click', (event) => {
-      const btOrder = event.target.closest('[data-opx-zone-open-order]');
-      if (btOrder && rootEl.contains(btOrder)) {
+  function createPopupClickHandler(closePopupFn, popupRootHandler) {
+    return function onPopupActionClick(event) {
+      const t = event.target;
+      if (!(t instanceof Element)) return;
+      const btOrder = t.closest('[data-opx-zone-open-order]');
+      if (btOrder) {
         event.preventDefault();
         event.stopPropagation();
         closePopupFn();
         if (popupRootHandler) popupRootHandler({ type: 'order', btn: btOrder });
         return;
       }
-      const btn = event.target.closest('[data-opx-zone-open-client]');
-      if (btn && rootEl.contains(btn)) {
+      const btn = t.closest('[data-opx-zone-open-client]');
+      if (btn) {
         event.preventDefault();
         event.stopPropagation();
         closePopupFn();
-        if (popupRootHandler) popupRootHandler({ type: 'client', btn });
+        if (popupRootHandler) popupRootHandler({ type: 'client', btn: btn });
       }
+    };
+  }
+
+  function bindOrdersMapPopupNav(hostContainer, map, closePopupFn, popupRootHandler) {
+    const onClick = createPopupClickHandler(closePopupFn, popupRootHandler);
+    const roots = [];
+    if (hostContainer instanceof HTMLElement) roots.push(hostContainer);
+    try {
+      const mapEl = map?.container?.getElement?.();
+      if (mapEl instanceof HTMLElement && !roots.includes(mapEl)) roots.push(mapEl);
+    } catch (_) {
+      /**/
+    }
+    roots.forEach((root) => {
+      if (root._ekvalinePopupNav) return;
+      root._ekvalinePopupNav = true;
+      root.addEventListener('click', onClick, true);
     });
+
+    if (!map?.balloon?.events) return onClick;
+
+    map.balloon.events.add('open', () => {
+      window.setTimeout(() => {
+        try {
+          const balloonEl = map.balloon.getElement();
+          if (!(balloonEl instanceof HTMLElement)) return;
+          if (!balloonEl._ekvalinePopupNav) {
+            balloonEl._ekvalinePopupNav = true;
+            balloonEl.addEventListener('click', onClick, true);
+          }
+          balloonEl.querySelectorAll('[class*="balloon__content"]').forEach((node) => {
+            if (!(node instanceof HTMLElement) || node._ekvalinePopupNav) return;
+            node._ekvalinePopupNav = true;
+            node.addEventListener('click', onClick, true);
+          });
+        } catch (_) {
+          /**/
+        }
+      }, 0);
+    });
+
+    return onClick;
+  }
+
+  function attachZoneRegions(hostMap, regions) {
+    if (!hostMap || !window.ymaps || !Array.isArray(regions) || !regions.length) {
+      return { clearZones() {} };
+    }
+    const collection = new window.ymaps.GeoObjectCollection();
+    hostMap.geoObjects.add(collection);
+    regions.forEach((region) => {
+      if (!region || !Array.isArray(region.center) || region.center.length !== 2) return;
+      const radiusM = Number(region.radiusM);
+      const color = String(region.color || '#1565c0');
+      const name = String(region.name || 'Зона');
+      const circle = new window.ymaps.Circle(
+        [region.center, Number.isFinite(radiusM) && radiusM > 0 ? radiusM : 2500],
+        {
+          hintContent: name,
+          balloonContent: `<strong>${name}</strong>`,
+        },
+        {
+          fillColor: `${color}26`,
+          strokeColor: color,
+          strokeWidth: 2,
+          strokeOpacity: 0.75,
+          fillOpacity: 0.12,
+          interactivityModel: 'default#transparent',
+        }
+      );
+      collection.add(circle);
+    });
+    return {
+      clearZones() {
+        collection.removeAll();
+      },
+    };
   }
 
   function attachOrdersLayer(hostMap, onPopupActionClose) {
@@ -305,12 +478,12 @@
       clear() {
         collection.removeAll();
       },
-      addOrderMarker(lat, lng, ringColor, balloonHtml, orderIdTag) {
+      addOrderMarker(lat, lng, ringColor, balloonHtml, hintText) {
         const pm = new window.ymaps.Placemark(
           [lat, lng],
           {
             balloonContent: balloonHtml,
-            hintContent: String(orderIdTag || ''),
+            hintContent: String(hintText || ''),
           },
           {
             preset: 'islands#circleDotIcon',
@@ -332,7 +505,7 @@
   }
 
   /** Карта заказов оператора: Яндекс.Карты, маркеры по статусу заказа. */
-  function createOrdersMapHost(container, centerLatLng, zoom, popupRootHandler) {
+  function createOrdersMapHost(container, centerLatLng, zoom, popupRootHandler, zoneRegions) {
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : [51.78, 55.11];
     const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 11;
@@ -354,9 +527,9 @@
           }
         }
 
-        const containerEl = map.container.getElement();
-        bindOrdersMapPopupNav(containerEl, closePopupFn, popupRootHandler);
+        bindOrdersMapPopupNav(container, map, closePopupFn, popupRootHandler);
 
+        attachZoneRegions(map, zoneRegions);
         const layerBundle = attachOrdersLayer(map, closePopupFn);
         if (!layerBundle) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
 
@@ -379,7 +552,7 @@
           },
         };
       })
-      .catch(() => renderMapPlaceholder(container, 'Не удалось загрузить Яндекс.Карты.'));
+      .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
 
   window.EkvalineMaps = {

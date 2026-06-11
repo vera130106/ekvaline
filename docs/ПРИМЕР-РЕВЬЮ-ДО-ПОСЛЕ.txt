@@ -1,0 +1,105 @@
+for (const it of items) {
+  const p = await db.prepare('SELECT id, price, stock, hidden FROM products WHERE id = ?').get(it.product_id);
+  subtotal += p.price * it.qty;
+  lineItems.push({ ...it, unit_price: p.price });
+}
+const itemsJson = JSON.stringify({ lines: lineItems, subtotal, payable, bonusSpend });
+
+const p = await db
+  .prepare('SELECT id, name, price, stock, hidden FROM products WHERE id = ?')
+  .get(it.product_id);
+const qty = Math.max(1, Math.floor(Number(it.qty) || 0));
+const unit_price = Math.round(Number(p.price) || 0);
+subtotal += unit_price * qty;
+lineItems.push({
+  title: String(p.name || 'Товар').trim(),
+  qty,
+  unit_price,
+  product_id: it.product_id,
+});
+const itemsJson = JSON.stringify(lineItems);
+
+function parseQty(itemsJson) {
+  const items = JSON.parse(itemsJson || '[]');
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+}
+
+function extractOrderItemsArray(itemsJson) {
+  if (itemsJson == null || itemsJson === '') return [];
+  try {
+    const parsed = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson;
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.lines)) return parsed.lines;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function parseQty(itemsJson) {
+  try {
+    const items = extractOrderItemsArray(itemsJson);
+    if (!items.length) return 0;
+    return items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
+app.use(session({
+  rolling: true,
+  cookie: { maxAge: 2 * 24 * 60 * 60 * 1000 },
+}));
+
+const requireAuth = asyncHandler(async (req, res, next) => {
+  const uid = req.session && req.session.userId;
+  if (!uid) return res.status(401).json({ error: 'Требуется вход в систему.' });
+  next();
+});
+
+function sessionIdleExpired(req) {
+  if (!req.session?.userId) return false;
+  const last = Number(req.session.lastActivityAt) || 0;
+  if (!last) return false;
+  return Date.now() - last > SESSION_IDLE_MS;
+}
+
+function maybeTouchSessionActivity(req) {
+  if (!req.session?.userId) return;
+  const method = String(req.method || 'GET').toUpperCase();
+  const userActive = String(req.headers['x-user-activity'] || '') === '1';
+  if (method !== 'GET' && method !== 'HEAD') {
+    req.session.lastActivityAt = Date.now();
+    return;
+  }
+  if (userActive) req.session.lastActivityAt = Date.now();
+}
+
+async function rejectIfSessionIdle(req, res) {
+  if (!req.session?.userId) return false;
+  if (!sessionIdleExpired(req)) return false;
+  await destroySessionPromise(req);
+  res.status(401).json({
+    error: 'Сессия завершена из‑за бездействия. Войдите снова.',
+    sessionExpired: true,
+  });
+  return true;
+}
+
+async function apiJson(path, options = {}) {
+  const { r, parsed } = await doFetch();
+  return parsed;
+}
+
+function handleSessionAuthFailure(path, status, data) {
+  if (Number(status) !== 401) return;
+  if (isPublicApiPath(path)) return;
+  const expired = data && data.sessionExpired === true;
+  if (!expired && !hadStoredUser()) return;
+  redirectToLoginAfterSessionExpiry();
+}
+
+if (opts.markUserActivity !== false && shouldSendUserActivityHeader()) {
+  headers['X-User-Activity'] = '1';
+}

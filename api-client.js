@@ -16,6 +16,7 @@
     '/api/feedback',
     '/api/auth/login',
     '/api/auth/register',
+    '/api/auth/check-registration',
     '/api/auth/forgot-password',
     '/api/auth/verify-password-reset-code',
     '/api/auth/reset-password-by-email',
@@ -25,6 +26,23 @@
   function isPublicApiPath(path) {
     const p = String(path || '').split('?')[0];
     return PUBLIC_API_PATHS.some((prefix) => p === prefix || p.startsWith(prefix));
+  }
+
+  function isProtectedAppPage() {
+    try {
+      const leaf = String(window.location.pathname || '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .pop()
+        .toLowerCase();
+      return ['admin.html', 'operator.html', 'manager.html', 'driver.html', 'cabinet.html'].includes(leaf);
+    } catch {
+      return false;
+    }
+  }
+
+  function shouldWatchIdleSession() {
+    return hadStoredUser() || isProtectedAppPage();
   }
 
   function hadStoredUser() {
@@ -76,8 +94,40 @@
     if (Number(status) !== 401) return;
     if (isPublicApiPath(path)) return;
     const expired = data && data.sessionExpired === true;
-    if (!expired && !hadStoredUser()) return;
+    if (!expired && !shouldWatchIdleSession()) return;
     redirectToLoginAfterSessionExpiry();
+  }
+
+  async function forceIdleLogout() {
+    if (redirectingForSession) return;
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST', body: {} });
+    } catch {
+      /* ignore */
+    }
+    redirectToLoginAfterSessionExpiry();
+  }
+
+  function checkClientSessionIdle() {
+    if (Date.now() - lastUserActivityAt < sessionIdleMs) return;
+    if (!shouldWatchIdleSession()) return;
+
+    void fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => {
+        if (data && data.sessionExpired) {
+          redirectToLoginAfterSessionExpiry();
+          return;
+        }
+        if (data && data.user) {
+          void forceIdleLogout();
+          return;
+        }
+        redirectToLoginAfterSessionExpiry();
+      })
+      .catch(() => {
+        void forceIdleLogout();
+      });
   }
 
   function markUserActivity() {
@@ -99,21 +149,10 @@
   function startSessionIdleWatch() {
     if (sessionWatchStarted) return;
     sessionWatchStarted = true;
-    window.setInterval(() => {
-      if (Date.now() - lastUserActivityAt < sessionIdleMs) return;
-      if (!hadStoredUser()) return;
-      void fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
-        .then((r) => r.json().catch(() => ({})))
-        .then((data) => {
-          if (data && data.sessionExpired) redirectToLoginAfterSessionExpiry();
-          else if (!data || !data.user) {
-            if (hadStoredUser()) redirectToLoginAfterSessionExpiry();
-          }
-        })
-        .catch(() => {
-          /* сеть недоступна */
-        });
-    }, 45000);
+    window.setInterval(checkClientSessionIdle, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkClientSessionIdle();
+    });
   }
 
   async function ensureCsrf(forceRefresh) {
@@ -246,11 +285,36 @@
 
   const bootReconciliationPromise = reconcileServerBoot();
 
+  /** Нейтральный текст для клиента — без npm, Docker, CSRF и внутренних ошибок. */
+  function humanizeClientApiError(status, rawError, fallback) {
+    const raw = String(rawError || '').trim();
+    if (!raw) {
+      if (status === 401) return 'Сессия истекла. Войдите снова.';
+      if (status === 403) return 'Действие недоступно. Обновите страницу и войдите в аккаунт.';
+      if (Number(status) >= 500) return 'Временная ошибка. Попробуйте через минуту.';
+      return fallback || 'Не удалось выполнить действие. Попробуйте ещё раз.';
+    }
+    if (/csrf|токен/i.test(raw)) return 'Сессия устарела. Обновите страницу и повторите.';
+    if (/внутренн/i.test(raw)) return 'Временная ошибка. Попробуйте через минуту.';
+    if (/npm|docker|node\.?js|server\.js|файл с диска/i.test(raw)) {
+      return 'Сайт временно недоступен. Обновите страницу.';
+    }
+    if (/недостаточно остатка/i.test(raw)) {
+      return 'Товара нет в нужном количестве. Уменьшите заказ или свяжитесь с нами.';
+    }
+    if (/товар.*недоступен|товар не найден/i.test(raw)) {
+      return 'Один из товаров временно недоступен. Обновите каталог и выберите снова.';
+    }
+    if (raw.length <= 140 && !/#\d+/.test(raw) && !/items_json|product_id|stack/i.test(raw)) return raw;
+    return fallback || 'Не удалось выполнить действие. Проверьте данные и попробуйте снова.';
+  }
+
   window.EkvalineAPI = {
     ensureCsrf,
     resetCsrf,
     fetch: apiFetch,
     json: apiJson,
+    humanizeClientApiError,
     markUserActivity,
     redirectToLoginAfterSessionExpiry,
     /** Дождаться проверки перезапуска сервера (очистка LS / reload) до инициализации панелей. */

@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>ЭкваЛайн — Личный кабинет</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,8 +10,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260521client" />
+    <link rel="stylesheet" href="styles.css?v=20260611host" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260611host" />
   </head>
   <body class="client-site cabinet-page-full">
     <header class="topbar">
@@ -56,7 +56,7 @@
               <div class="cabinet-profile-col">
                 <form id="cabinetFullProfileForm" class="cabinet-full-form" novalidate>
                   <label>Имя
-                    <input type="text" name="name" maxlength="40" />
+                    <input type="text" name="name" maxlength="60" autocomplete="name" />
                   </label>
                   <label>Email
                     <input type="email" name="email" />
@@ -197,7 +197,8 @@
             <p class="cabinet-full-muted" id="cabinetBonusStatusHint"></p>
             <div class="cabinet-bonus-stats" id="cabinetBonusStats"></div>
             <p class="cabinet-bonus-expiry" id="cabinetBonusExpiryNote"></p>
-            <h3 class="cabinet-bonus-history-title">История операций</h3>
+            <h3 class="cabinet-bonus-history-title">Последние операции</h3>
+            <p class="cabinet-bonus-history-hint">Показаны 5 последних начислений и списаний.</p>
             <ul class="cabinet-bonus-history" id="cabinetBonusHistory"></ul>
           </section>
 
@@ -248,15 +249,26 @@
       </section>
     </main>
 
-    <script src="mobile-nav.js?v=20260521client"></script>
+    <div id="appToast" class="ek-notify" hidden role="status" aria-live="polite" aria-atomic="true">
+      <div class="ek-notify-card">
+        <span class="ek-notify-icon" aria-hidden="true"></span>
+        <p id="appToastText" class="ek-notify-text"></p>
+        <button type="button" id="appToastClose" class="ek-notify-close" aria-label="Закрыть">×</button>
+      </div>
+    </div>
+
+    <script src="order-display.js?v=20260610orderid"></script>
+    <script src="mobile-nav.js?v=20260611host"></script>
     <script src="app-core.js"></script>
     <script src="api-client.js"></script>
-    <script src="notifications-client.js?v=20260520notif"></script>
-    <script src="orders-sync.js?v=20260520sync"></script>
-    <script src="maps-runtime.js"></script>
+    <script src="client-guard.js?v=20260611host"></script>
+    <script src="notifications-client.js?v=20260611host"></script>
+    <script src="orders-sync.js?v=20260611host"></script>
     <script src="/ekvaline-runtime.js"></script>
-    <script src="auth-password.js?v=20260522pwdrules"></script>
-    <script src="script.js?v=20260524authcart"></script>
-    <script src="cabinet-pg.js?v=20260522pwdrules"></script>
+    <script src="maps-runtime.js?v=20260611host"></script>
+    <script src="auth-password.js?v=20260611host"></script>
+    <script src="password-visibility.js?v=20260610pwdvis"></script>
+    <script src="script.js?v=20260611host"></script>
+    <script src="cabinet-pg.js?v=20260611host"></script>
   </body>
 </html>

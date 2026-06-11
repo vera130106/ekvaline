@@ -689,14 +689,8 @@
 
   function reactionLabel(type) {
     if (type === 'useful') return 'Полезно';
-    if (type === 'new') return 'Узнал новое';
+    if (type === 'new') return 'Интересно';
     return 'Попробую';
-  }
-
-  function reactionIcon(type) {
-    if (type === 'useful') return '💧';
-    if (type === 'new') return '💡';
-    return '🔥';
   }
 
   function renderFeed() {
@@ -728,7 +722,7 @@
                 <div class="blogv2-post-meta">
                   <span class="blogv2-post-date">${formatDate(post.createdAt)}</span>
                   <span class="blogv2-post-reads" title="Сколько раз открыли полный текст («Читать»)">
-                    👁 ${getPostReadsForDisplay(post)}
+                    Просмотры: ${getPostReadsForDisplay(post)}
                   </span>
                 </div>
               </div>
@@ -736,9 +730,18 @@
               <p class="blogv2-post-details" hidden>${escapeHtml(post.details || post.excerpt)}</p>
 
               <div class="blogv2-actions">
-                <button class="blogv2-action" type="button" data-like="${post.id}">❤️ ${post.likes}</button>
-                <button class="blogv2-action blogv2-reaction useful" type="button" data-react-kind="useful" data-react-post="${post.id}"><span class="blogv2-reaction-icon">${reactionIcon('useful')}</span><span>${reactionLabel('useful')}</span><strong>${post.reactions.useful || 0}</strong></button>
-                <button class="blogv2-action blogv2-reaction new" type="button" data-react-kind="new" data-react-post="${post.id}"><span class="blogv2-reaction-icon">${reactionIcon('new')}</span><span>${reactionLabel('new')}</span><strong>${post.reactions.new || 0}</strong></button>
+                <button class="blogv2-action blogv2-like-btn" type="button" data-like="${post.id}">
+                  <span class="blogv2-action-label">Нравится</span>
+                  <span class="blogv2-action-count">${post.likes}</span>
+                </button>
+                <button class="blogv2-action blogv2-reaction useful" type="button" data-react-kind="useful" data-react-post="${post.id}">
+                  <span class="blogv2-action-label">${reactionLabel('useful')}</span>
+                  <span class="blogv2-action-count">${post.reactions.useful || 0}</span>
+                </button>
+                <button class="blogv2-action blogv2-reaction new" type="button" data-react-kind="new" data-react-post="${post.id}">
+                  <span class="blogv2-action-label">${reactionLabel('new')}</span>
+                  <span class="blogv2-action-count">${post.reactions.new || 0}</span>
+                </button>
               </div>
 
               <div class="blogv2-post-footer">
@@ -770,7 +773,10 @@
                           : ''
                       }
                     </div>
-                    <button type="button" class="blogv2-comment-like" data-comment-like="${post.id}:${c.id}">❤️ ${c.likes || 0}</button>
+                    <button type="button" class="blogv2-comment-like" data-comment-like="${post.id}:${c.id}" aria-label="Нравится комментарий">
+                      <span class="blogv2-action-label">Нравится</span>
+                      <span class="blogv2-action-count">${c.likes || 0}</span>
+                    </button>
                   </div>
                 `
                   )

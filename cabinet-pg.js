@@ -13,6 +13,56 @@
   }
 
   const CURRENT_USER_KEY = 'ekvaline_current_user';
+  const PROFILE_NAME_MAX = 60;
+  let cabinetToastTimer = null;
+
+  function showCabinetToast(message, variant = 'info') {
+    const msg = String(message || '').trim();
+    if (!msg) return;
+    const toast = document.getElementById('appToast');
+    const text = document.getElementById('appToastText');
+    if (!(toast instanceof HTMLElement) || !(text instanceof HTMLElement)) {
+      window.alert(msg);
+      return;
+    }
+    text.textContent = msg;
+    const v = variant === 'error' ? 'error' : variant === 'success' ? 'success' : 'info';
+    toast.dataset.variant = v;
+    if (toast.parentElement !== document.body) document.body.appendChild(toast);
+    toast.hidden = false;
+    toast.classList.remove('is-visible');
+    window.requestAnimationFrame(() => toast.classList.add('is-visible'));
+    if (cabinetToastTimer) window.clearTimeout(cabinetToastTimer);
+    cabinetToastTimer = window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      toast.hidden = true;
+    }, v === 'error' ? 5200 : 4200);
+  }
+
+  function markCabinetOrderReasonError(form, hasError) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const reason = form.elements.namedItem('change_reason');
+    if (!(reason instanceof HTMLTextAreaElement)) return;
+    reason.classList.toggle('is-field-error', !!hasError);
+    if (hasError) reason.focus();
+  }
+
+  document.getElementById('appToastClose')?.addEventListener('click', () => {
+    const toast = document.getElementById('appToast');
+    if (!(toast instanceof HTMLElement)) return;
+    if (cabinetToastTimer) window.clearTimeout(cabinetToastTimer);
+    toast.classList.remove('is-visible');
+    toast.hidden = true;
+  });
+
+  document.addEventListener('input', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement && target.name === 'change_reason') {
+      target.classList.remove('is-field-error');
+    }
+  });
+
+  const BONUS_HISTORY_LIMIT = 5;
 
   const userMeta = document.getElementById('cabinetFullUserMeta');
   const profileForm = document.getElementById('cabinetFullProfileForm');
@@ -155,6 +205,220 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
+  const CABINET_SLOT_DEFS = [
+    { key: '09:00-14:00', label: '09:00–14:00' },
+    { key: '14:00-17:00', label: '14:00–17:00' },
+    { key: '17:00-21:00', label: '17:00–21:00' },
+    { key: '09:00-17:00', label: 'Для организаций: 09:00–17:00' },
+  ];
+  const CABINET_BOOKING_DAYS = 30;
+  const CABINET_DELIVERY_HINT =
+    'Серые даты и недоступные интервалы закрыты оператором. Заказы — с завтрашнего дня.';
+
+  let cabinetDeliveryAvailability = { closedDays: [], closedSlots: [] };
+
+  function parseCabinetAvailabilityPayload(data) {
+    const root =
+      data && typeof data === 'object' && data.availability && typeof data.availability === 'object'
+        ? data.availability
+        : data;
+    if (!root || typeof root !== 'object') return { closedDays: [], closedSlots: [] };
+    const closedDays = Array.isArray(root.closedDays)
+      ? root.closedDays.map((d) => String(d).trim()).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      : [];
+    const closedSlots = Array.isArray(root.closedSlots)
+      ? root.closedSlots
+          .map((r) => ({
+            date: String(r?.date ?? r?.delivery_date ?? '').trim(),
+            slot: normalizeCabinetSlotKey(r?.slot ?? r?.delivery_slot),
+          }))
+          .filter((r) => r.date && r.slot)
+      : [];
+    return { closedDays, closedSlots };
+  }
+
+  function normalizeCabinetSlotKey(raw) {
+    const flat = String(raw || '')
+      .trim()
+      .replace(/\u2013|\u2014|\u2212/g, '-')
+      .replace(/\s+/g, '');
+    if (!flat) return '';
+    for (const def of CABINET_SLOT_DEFS) {
+      const k = def.key.replace(/\s/g, '');
+      if (flat === k || flat.includes(k)) return def.key;
+    }
+    const m = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/.exec(flat);
+    if (m) {
+      const cand = `${m[1]}-${m[2]}`;
+      if (CABINET_SLOT_DEFS.some((s) => s.key === cand)) return cand;
+    }
+    return '';
+  }
+
+  function cabinetDeliveryDateAllowed(iso) {
+    const d = String(iso || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= earliestDeliveryDateIso();
+  }
+
+  function isCabinetDayClosed(iso) {
+    return cabinetDeliveryAvailability.closedDays.includes(String(iso || '').trim());
+  }
+
+  function isCabinetSlotClosed(iso, slotKey) {
+    const d = String(iso || '').trim();
+    const slot = normalizeCabinetSlotKey(slotKey);
+    if (!d || !slot) return false;
+    if (isCabinetDayClosed(d)) return true;
+    return cabinetDeliveryAvailability.closedSlots.some((r) => r.date === d && r.slot === slot);
+  }
+
+  function availableCabinetSlots(iso) {
+    if (!cabinetDeliveryDateAllowed(iso) || isCabinetDayClosed(iso)) return [];
+    return CABINET_SLOT_DEFS.filter((s) => !isCabinetSlotClosed(iso, s.key));
+  }
+
+  function addCabinetIsoDays(iso, days) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return iso;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function enumerateCabinetBookingDays(count = CABINET_BOOKING_DAYS) {
+    const out = [];
+    let cur = earliestDeliveryDateIso();
+    for (let i = 0; i < count; i += 1) {
+      out.push(cur);
+      cur = addCabinetIsoDays(cur, 1);
+    }
+    return out;
+  }
+
+  function firstCabinetDateWithSlots(fromIso) {
+    let cur = String(fromIso || earliestDeliveryDateIso()).trim();
+    for (let i = 0; i < 90; i += 1) {
+      if (availableCabinetSlots(cur).length) return cur;
+      cur = addCabinetIsoDays(cur, 1);
+    }
+    return '';
+  }
+
+  function cabinetDateSelectable(iso) {
+    if (!cabinetDeliveryDateAllowed(iso)) return false;
+    if (isCabinetDayClosed(iso)) return false;
+    return availableCabinetSlots(iso).length > 0;
+  }
+
+  function cabinetDateUnavailableReason(iso) {
+    if (!cabinetDeliveryDateAllowed(iso)) return 'Дата недоступна';
+    if (isCabinetDayClosed(iso)) return 'Приём заказов закрыт';
+    if (!availableCabinetSlots(iso).length) return 'Все интервалы закрыты';
+    return '';
+  }
+
+  function cabinetDateChipLabel(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return String(iso || '');
+    return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
+  }
+
+  function cabinetWeekdayShort(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return '';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][d.getDay()] || '';
+  }
+
+  function initialCabinetEditDate(order) {
+    const cur = String(order?.delivery_date || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cur) && cabinetDateSelectable(cur)) return cur;
+    return firstCabinetDateWithSlots(earliestDeliveryDateIso()) || earliestDeliveryDateIso();
+  }
+
+  function initialCabinetEditSlot(order, dateIso) {
+    const cur = normalizeCabinetSlotKey(order?.delivery_slot);
+    if (cur && !isCabinetSlotClosed(dateIso, cur)) return cur;
+    return availableCabinetSlots(dateIso)[0]?.key || '';
+  }
+
+  async function loadCabinetDeliveryAvailability() {
+    try {
+      const res = await fetch(`/api/public/delivery-availability?_=${Date.now()}`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      cabinetDeliveryAvailability = parseCabinetAvailabilityPayload(data);
+    } catch {
+      cabinetDeliveryAvailability = { closedDays: [], closedSlots: [] };
+    }
+  }
+
+  function renderCabinetDatePickerHtml(activeIso) {
+    return enumerateCabinetBookingDays()
+      .map((iso) => {
+        const selectable = cabinetDateSelectable(iso);
+        const active = iso === activeIso;
+        const reason = cabinetDateUnavailableReason(iso);
+        const cls = ['checkout-date-chip', active && selectable ? 'is-active' : '', !selectable ? 'is-unavailable' : '']
+          .filter(Boolean)
+          .join(' ');
+        const dis = selectable ? '' : ' disabled';
+        const title = reason ? ` title="${escapeHtml(reason)}"` : '';
+        return `<button type="button" class="${cls}" data-cabinet-order-date="${escapeHtml(iso)}"${dis}${title} aria-selected="${active && selectable ? 'true' : 'false'}">
+          <span class="checkout-date-chip-date">${escapeHtml(cabinetDateChipLabel(iso))}</span>
+          <span class="checkout-date-chip-wd">${escapeHtml(cabinetWeekdayShort(iso))}</span>
+        </button>`;
+      })
+      .join('');
+  }
+
+  function renderCabinetSlotOptions(dateIso, selectedKey) {
+    const slots = availableCabinetSlots(dateIso);
+    if (!slots.length) {
+      return '<option value="">Нет доступных интервалов на эту дату</option>';
+    }
+    return slots
+      .map((s) => {
+        const sel = s.key === selectedKey ? ' selected' : '';
+        return `<option value="${escapeHtml(s.key)}"${sel}>${escapeHtml(s.label)}</option>`;
+      })
+      .join('');
+  }
+
+  function syncCabinetOrderBookingForm(form) {
+    if (!(form instanceof HTMLFormElement)) return;
+    const hiddenDate = form.elements.namedItem('delivery_date');
+    const selectSlot = form.elements.namedItem('delivery_slot');
+    const picker = form.querySelector('.cabinet-order-date-picker');
+    if (!(hiddenDate instanceof HTMLInputElement) || !(selectSlot instanceof HTMLSelectElement) || !picker) return;
+
+    const orderId = Number(form.getAttribute('data-order-id'));
+    const order = currentOrders.find((o) => Number(o.id) === orderId);
+
+    let date = String(hiddenDate.value || order?.delivery_date || '').trim();
+    if (!cabinetDateSelectable(date)) {
+      date = initialCabinetEditDate(order || { delivery_date: date });
+      hiddenDate.value = date;
+    }
+
+    picker.innerHTML = renderCabinetDatePickerHtml(date);
+
+    const wantSlot = normalizeCabinetSlotKey(selectSlot.value || order?.delivery_slot);
+    const slot = wantSlot && !isCabinetSlotClosed(date, wantSlot) ? wantSlot : initialCabinetEditSlot(order || {}, date);
+    selectSlot.innerHTML = renderCabinetSlotOptions(date, slot);
+    selectSlot.value = slot;
+    selectSlot.disabled = !availableCabinetSlots(date).length;
+  }
+
+  function initCabinetOrderEditForms() {
+    document.querySelectorAll('.cabinet-order-edit-form').forEach((form) => {
+      syncCabinetOrderBookingForm(form);
+    });
+  }
+
   function parseItems(itemsJson) {
     try {
       const parsed = JSON.parse(itemsJson || '[]');
@@ -164,6 +428,36 @@
     } catch {
       return [];
     }
+  }
+
+  function getWaterTierUnitPrice(qty) {
+    const q = Math.max(1, Math.floor(Number(qty) || 0));
+    if (q >= 5) return 175;
+    if (q >= 2) return 190;
+    return 220;
+  }
+
+  function isWaterOrderItem(item) {
+    const title = String(item?.title || item?.name || '');
+    if (/вода\s*18\.?9\s*л/i.test(title)) return true;
+    const n = title.toLowerCase().replace(/ё/g, 'е');
+    if (n.includes('эквалайн') && (n.includes('19') || n.includes('18'))) return true;
+    return n.includes('вода') && (/18\.?9|19\s*л/.test(n) || n.length <= 16);
+  }
+
+  function orderItemLineTotal(item) {
+    const qty = Math.max(1, Math.floor(Number(item?.qty) || 0));
+    const unitStored = Math.round(Number(item?.unit_price ?? item?.price) || 0);
+    const unit = isWaterOrderItem(item) ? getWaterTierUnitPrice(qty) : unitStored;
+    return unit * qty;
+  }
+
+  function orderPayableTotal(order) {
+    const items = parseItems(order?.items_json);
+    if (!items.length) return Math.max(0, Math.round(Number(order?.total_sum) || 0));
+    const gross = items.reduce((sum, item) => sum + orderItemLineTotal(item), 0);
+    const bonuses = Math.max(0, Math.floor(Number(order?.bonuses_used) || 0));
+    return Math.max(0, gross - bonuses);
   }
 
   function splitName(fullName) {
@@ -260,7 +554,7 @@
       }
     }
     if (bonusHistory instanceof HTMLElement) {
-      const rows = Array.isArray(summary.history) ? summary.history : [];
+      const rows = (Array.isArray(summary.history) ? summary.history : []).slice(0, BONUS_HISTORY_LIMIT);
       bonusHistory.innerHTML = rows.length
         ? rows
             .map((row) => {
@@ -311,28 +605,10 @@
     passwordDevCode.innerHTML = '';
   }
 
-  function renderDevCodeBox(boxEl, code, hint) {
-    if (!(boxEl instanceof HTMLElement) || !code) return;
-    boxEl.hidden = false;
-    boxEl.innerHTML = `
-      <p class="cabinet-dev-code-title">Режим без SMTP (разработка)</p>
-      <p class="cabinet-dev-code-value">${escapeHtml(String(code))}</p>
-      <p class="cabinet-dev-code-hint">${escapeHtml(hint || 'Письмо на ящик не отправлено — введите код вручную.')}</p>
-    `;
-  }
-
   function applyEmailCodeDeliveryResponse(data, successEl, errorEl) {
     if (errorEl) errorEl.textContent = '';
     if (!data || typeof data !== 'object') return;
-    if (data.devMode && data.devCode) {
-      renderDevCodeBox(
-        verifyDevCode,
-        data.devCode,
-        'Настройте SMTP в .env на сервере, чтобы коды приходили на реальную почту.'
-      );
-    } else {
-      clearVerifyDevCode();
-    }
+    clearVerifyDevCode();
     if (successEl && data.message) {
       successEl.textContent = data.message;
     }
@@ -341,15 +617,7 @@
   function applyPasswordCodeDeliveryResponse(data) {
     if (passwordError) passwordError.textContent = '';
     if (!data || typeof data !== 'object') return;
-    if (data.devMode && data.devCode) {
-      renderDevCodeBox(
-        passwordDevCode,
-        data.devCode,
-        'Настройте SMTP_HOST, SMTP_USER, SMTP_PASS в .env — тогда код придёт на email.'
-      );
-    } else {
-      clearPasswordDevCode();
-    }
+    clearPasswordDevCode();
     if (passwordSuccess && data.message) {
       passwordSuccess.textContent = data.message;
     }
@@ -403,6 +671,7 @@
       return;
     }
     syncCabinetPasswordSubmitState();
+    window.EkvalinePasswordVisibility?.init(changePasswordForm || document);
   }
 
   function syncCabinetPasswordSubmitState() {
@@ -445,13 +714,13 @@
     clearPasswordDevCode();
   }
 
-  function showPasswordStepAfterCodeSent(devCode) {
+  function showPasswordStepAfterCodeSent() {
     resetPasswordChangeFlow();
     if (verifyPasswordCodeForm instanceof HTMLFormElement) {
       verifyPasswordCodeForm.hidden = false;
       const codeInput = verifyPasswordCodeForm.elements.namedItem('code');
       if (codeInput instanceof HTMLInputElement) {
-        codeInput.value = devCode ? String(devCode) : '';
+        codeInput.value = '';
         codeInput.focus();
       }
     }
@@ -547,17 +816,23 @@
     const badgeClass = orderStatusBadgeClass(order);
     const slotLine = formatDeliverySlotClient(order.delivery_slot);
     const delRu = order.delivery_date ? String(order.delivery_date).split('-').reverse().join('.') : '—';
+    const editDate = initialCabinetEditDate(order);
+    const editSlot = initialCabinetEditSlot(order, editDate);
+    const orderLabel =
+      typeof window.EkvalineOrderDisplay?.displayOrderId === 'function'
+        ? window.EkvalineOrderDisplay.displayOrderId(order.id)
+        : `ЛС-${String(Number(order.id) || 0).padStart(6, '0')}`;
     return `
       <article class="cabinet-full-order">
         <div class="cabinet-full-order-head">
-          <strong>Заявка №${order.id}</strong>
+          <strong>Заявка ${orderLabel}</strong>
           <span>${formatDate(order.created_at)}</span>
         </div>
         <p>Статус: <span class="cabinet-status-badge is-${badgeClass}">${statusText}</span></p>
         <p>Доставка: <strong>${delRu}</strong>${slotLine ? ` · интервал ${slotLine}` : ''}</p>
         <p>Состав: ${items || '—'}</p>
         <p>Адрес: ${escapeHtml(order.address || '—')}</p>
-        <p>Итого: <strong>${Number(order.total_sum || 0)} ₽</strong> · Списано бонусов: ${Number(order.bonuses_used || 0)} · Начислено: ${Number(
+        <p>Итого: <strong>${orderPayableTotal(order)} ₽</strong> · Списано бонусов: ${Number(order.bonuses_used || 0)} · Начислено: ${Number(
           order.bonuses_earned || 0
         )}</p>
         ${
@@ -567,15 +842,19 @@
                   <input type="text" name="address" maxlength="180" value="${escapeHtml(order.address || '')}" />
                 </label>
                 <label>Дата доставки
-                  <input type="date" name="delivery_date" min="${earliestDeliveryDateIso()}" value="${order.delivery_date || ''}" />
+                  <input type="hidden" name="delivery_date" value="${escapeHtml(editDate)}" />
+                  <div class="cabinet-order-date-picker checkout-delivery-date-picker" role="listbox" aria-label="Дата доставки"></div>
+                  <span class="cabinet-order-date-hint">${escapeHtml(CABINET_DELIVERY_HINT)}</span>
                 </label>
                 <label>Интервал
-                  <input type="text" name="delivery_slot" maxlength="64" value="${escapeHtml(order.delivery_slot || '')}" />
+                  <select name="delivery_slot" required>
+                    ${renderCabinetSlotOptions(editDate, editSlot)}
+                  </select>
                 </label>
                 <label>Причина изменения или переноса (обязательно при сохранении)
                   <textarea name="change_reason" maxlength="2000" rows="3" placeholder="Укажите, почему меняются адрес или доставка"></textarea>
                 </label>
-                <button type="submit" class="ghost-btn">Сохранить изменения</button>
+                <button type="submit" class="cabinet-order-save-btn">Сохранить изменения</button>
               </form>
               <button type="button" class="ghost-btn cabinet-order-cancel" data-order-id="${order.id}">Отменить заказ…</button>`
             : ''
@@ -597,6 +876,7 @@
         ? history.map(renderOrderCard).join('')
         : '<p class="cabinet-full-muted">История покупок пуста.</p>';
     }
+    initCabinetOrderEditForms();
   }
 
   function resetAddressForm() {
@@ -637,7 +917,9 @@
   function openCabinetAddressMap(initialAddress, onPicked) {
     const picker = window.EkvalineMapPicker;
     if (!picker || typeof picker.open !== 'function') {
-      window.alert('Карта недоступна. Обновите страницу или откройте каталог.');
+      if (addressesError) {
+        addressesError.textContent = 'Карта не загрузилась. Обновите страницу (Ctrl+F5) и попробуйте снова.';
+      }
       return;
     }
     picker.open({
@@ -750,7 +1032,7 @@
 
   async function reloadOrders() {
     if (!api) return;
-    const response = await api.json('/api/orders/my');
+    const [response] = await Promise.all([api.json('/api/orders/my'), loadCabinetDeliveryAvailability()]);
     if (!response.ok) return;
     currentOrders = Array.isArray(response.data?.orders) ? response.data.orders : [];
     renderOrders();
@@ -775,24 +1057,9 @@
       window.__ekvalineUpdateHeaderAuth();
     }
     renderProfile(currentUser);
+    await loadCabinetDeliveryAvailability();
     await Promise.all([reloadOrders(), reloadAddresses(), reloadBonusProgram()]);
     scrollToCabinetHash();
-    if (currentUser && !currentUser.email_verified) {
-      try {
-        const hint = sessionStorage.getItem('ekvaline_email_verify_dev');
-        if (hint) {
-          const parsed = JSON.parse(hint);
-          sessionStorage.removeItem('ekvaline_email_verify_dev');
-          applyEmailCodeDeliveryResponse(parsed, verifySuccess, verifyError);
-          if (parsed?.devCode && verifyEmailForm instanceof HTMLFormElement) {
-            const codeInput = verifyEmailForm.elements.namedItem('code');
-            if (codeInput instanceof HTMLInputElement) codeInput.value = String(parsed.devCode);
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-    }
     const ORDERS_POLL_MS = 10000;
     window.setInterval(() => {
       if (!document.hidden) {
@@ -841,7 +1108,11 @@
       const phoneDigits = normalizePhoneDigits(String(profileForm.elements.namedItem('phone')?.value || ''));
 
       if (name.length < 2) {
-        if (profileError) profileError.textContent = 'Имя должно содержать минимум 2 символа.';
+        if (profileError) profileError.textContent = 'Имя: минимум 2 символа.';
+        return;
+      }
+      if (name.length > PROFILE_NAME_MAX) {
+        if (profileError) profileError.textContent = `Имя: не более ${PROFILE_NAME_MAX} символов.`;
         return;
       }
       if (!validateEmail(email)) {
@@ -864,7 +1135,12 @@
         },
       });
       if (!response.ok) {
-        if (profileError) profileError.textContent = response.data?.error || 'Не удалось сохранить профиль.';
+        const rawErr = String(response.data?.error || '').trim();
+        const friendlyErr =
+          /pattern|required pattern|fails to match/i.test(rawErr)
+            ? `Имя: не более ${PROFILE_NAME_MAX} символов.`
+            : rawErr || 'Не удалось сохранить профиль.';
+        if (profileError) profileError.textContent = friendlyErr;
         return;
       }
       api.resetCsrf();
@@ -947,10 +1223,6 @@
             (response.data?.message || 'Код отправлен.') +
             ' Если нажимали кнопку повторно — используйте код из последнего письма.';
         }
-        if (response.data?.devCode && verifyEmailForm instanceof HTMLFormElement) {
-          const codeInput = verifyEmailForm.elements.namedItem('code');
-          if (codeInput instanceof HTMLInputElement) codeInput.value = String(response.data.devCode);
-        }
       });
     });
   }
@@ -970,7 +1242,7 @@
         }
         api.resetCsrf();
         applyPasswordCodeDeliveryResponse(response.data);
-        showPasswordStepAfterCodeSent(response.data?.devCode);
+        showPasswordStepAfterCodeSent();
       });
     });
   }
@@ -1175,7 +1447,7 @@
     const entered = window.prompt('Укажите причину отмены заказа (обязательно, не менее 3 символов):', '');
     const reason = String(entered || '').trim();
     if (reason.length < 3) {
-      window.alert('Без указания причины отмена невозможна.');
+      showCabinetToast('Без указания причины отмена невозможна.', 'error');
       return;
     }
     const response = await api.json(`/api/orders/${encodeURIComponent(orderId)}/cancel`, {
@@ -1183,7 +1455,7 @@
       body: { reason },
     });
     if (!response.ok) {
-      window.alert(response.data?.error || 'Не удалось отменить заказ.');
+      showCabinetToast(response.data?.error || 'Не удалось отменить заказ.', 'error');
       return;
     }
     api.resetCsrf();
@@ -1194,6 +1466,19 @@
       currentUser = me.data.user;
       if (bonusValue) bonusValue.textContent = `${Number(currentUser.bonus_balance || 0)}`;
     }
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    const chip = target instanceof Element ? target.closest('[data-cabinet-order-date]') : null;
+    if (!(chip instanceof HTMLButtonElement) || chip.disabled) return;
+    const form = chip.closest('.cabinet-order-edit-form');
+    if (!(form instanceof HTMLFormElement)) return;
+    const iso = String(chip.getAttribute('data-cabinet-order-date') || '').trim();
+    if (!cabinetDateSelectable(iso)) return;
+    const hiddenDate = form.elements.namedItem('delivery_date');
+    if (hiddenDate instanceof HTMLInputElement) hiddenDate.value = iso;
+    syncCabinetOrderBookingForm(form);
   });
 
   document.addEventListener('submit', async (event) => {
@@ -1210,20 +1495,34 @@
     const changeReasonRaw = form.elements.namedItem('change_reason');
     const changeReason =
       changeReasonRaw instanceof HTMLTextAreaElement ? String(changeReasonRaw.value || '').trim() : '';
+    if (deliveryDate && !cabinetDateSelectable(deliveryDate)) {
+      showCabinetToast(cabinetDateUnavailableReason(deliveryDate) || 'Выбранная дата недоступна.', 'error');
+      return;
+    }
+    if (deliverySlot && isCabinetSlotClosed(deliveryDate, deliverySlot)) {
+      showCabinetToast('Выбранный интервал закрыт оператором. Выберите другой.', 'error');
+      return;
+    }
     const payload = {};
     if (address) payload.address = address;
     if (deliveryDate) payload.delivery_date = deliveryDate;
     if (deliverySlot) payload.delivery_slot = deliverySlot;
     if (!Object.keys(payload).length) return;
     if (changeReason.length < 3) {
-      window.alert('Укажите причину изменения заказа (не менее 3 символов).');
+      markCabinetOrderReasonError(form, true);
+      showCabinetToast('Укажите причину изменения заказа (не менее 3 символов).', 'error');
       return;
     }
+    markCabinetOrderReasonError(form, false);
     payload.change_reason = changeReason;
     const response = await api.json(`/api/orders/${orderId}`, { method: 'PATCH', body: payload });
-    if (!response.ok) return;
+    if (!response.ok) {
+      showCabinetToast(String(response.data?.error || 'Не удалось сохранить изменения.'), 'error');
+      return;
+    }
     api.resetCsrf();
     await reloadOrders();
+    showCabinetToast('Изменения заказа сохранены.', 'success');
   });
 
   bootstrap();

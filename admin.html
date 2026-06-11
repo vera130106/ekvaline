@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>ЭкваЛайн — Админ-панель</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,8 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260521staff" />
+    <link rel="stylesheet" href="styles.css?v=20260611host" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260611host" />
+    <link rel="stylesheet" href="staff-mobile.css?v=20260611host" />
   </head>
   <body class="admin-page">
     <header class="topbar">
@@ -58,11 +59,14 @@
             <header class="admin-card-head">
               <h2>Формирование отчёта</h2>
               <p class="admin-muted admin-card-desc">
-                Укажите период по дате доставки заказа (если дата доставки не задана — по дате создания). Нажмите
-                «Сформировать отчёт», затем при необходимости скачайте PDF или Excel.
+                Период считается по <strong>дате доставки</strong> (если не задана — по дате создания). У оператора заказы
+                на «завтра» попадут в отчёт только если дата «по» включает этот день. Нажмите «Сформировать отчёт», затем
+                при необходимости скачайте PDF.
               </p>
             </header>
-            <p class="admin-stats-date-hint admin-muted">Формат даты: день.месяц.год. Дата «по» не может быть позже сегодняшнего дня.</p>
+            <p class="admin-stats-date-hint admin-muted">
+              Формат: день.месяц.год. Дата «по» может быть в будущем (до 60 дней) — так учитываются запланированные доставки.
+            </p>
             <div class="admin-stats-toolbar">
               <label class="admin-stats-field admin-stats-field--date">
                 <span class="admin-stats-field-lbl">Дата с</span>
@@ -71,7 +75,7 @@
                   id="adminStatsFrom"
                   class="admin-input admin-date-input"
                   lang="ru"
-                  title="Не позже сегодняшнего дня"
+                  title="Можно указать будущую дату доставки"
                 />
               </label>
               <label class="admin-stats-field admin-stats-field--date">
@@ -81,7 +85,7 @@
                   id="adminStatsTo"
                   class="admin-input admin-date-input"
                   lang="ru"
-                  title="Не позже сегодняшнего дня"
+                  title="Включая запланированные доставки вперёд"
                 />
               </label>
               <div class="admin-stats-presets" role="group" aria-label="Быстрый период">
@@ -93,8 +97,6 @@
               <button type="button" class="solid-btn" id="adminStatsBuildBtn">Сформировать отчёт</button>
             </div>
             <div class="admin-stats-export-row">
-              <span class="admin-stats-export-label">Скачать отчёт:</span>
-              <button type="button" class="ghost-btn" id="adminStatsExcelBtn" disabled>Скачать Excel</button>
               <button type="button" class="ghost-btn" id="adminStatsPdfBtn" disabled>Скачать PDF</button>
             </div>
             <p id="adminStatsPeriodMeta" class="admin-stats-period-meta"></p>
@@ -919,6 +921,53 @@
         </div>
       </div>
 
+      <div id="adminStaffPasswordModal" class="admin-edit-modal admin-staff-password-modal" hidden aria-hidden="true">
+        <div class="admin-edit-modal-backdrop" data-close-staff-password></div>
+        <div
+          class="admin-edit-modal-card admin-product-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="adminStaffPasswordTitle"
+        >
+          <h3 id="adminStaffPasswordTitle">Сменить пароль сотрудника</h3>
+          <p id="adminStaffPasswordWho" class="admin-muted admin-staff-gate-hint"></p>
+          <form id="adminStaffPasswordForm">
+            <label class="admin-field">
+              <span class="admin-field-label">Новый пароль</span>
+              <div class="auth-password-wrap">
+                <input
+                  type="password"
+                  id="adminStaffNewPassword"
+                  class="admin-input"
+                  maxlength="128"
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
+            </label>
+            <p id="adminStaffPasswordStrength" class="admin-password-strength-line" aria-live="polite"></p>
+            <label class="admin-field">
+              <span class="admin-field-label">Повторите пароль</span>
+              <div class="auth-password-wrap">
+                <input
+                  type="password"
+                  id="adminStaffNewPasswordConfirm"
+                  class="admin-input"
+                  maxlength="128"
+                  autocomplete="new-password"
+                  required
+                />
+              </div>
+            </label>
+            <p id="adminStaffPasswordMsg" class="admin-msg" role="alert"></p>
+            <div class="admin-edit-modal-actions">
+              <button type="button" class="ghost-btn" data-close-staff-password>Отмена</button>
+              <button type="submit" class="solid-btn">Сохранить пароль</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <div id="adminConfirmModal" class="admin-edit-modal admin-confirm-modal" hidden aria-hidden="true">
         <div class="admin-edit-modal-backdrop" data-admin-confirm-dismiss="true"></div>
         <div
@@ -931,23 +980,22 @@
           <h3 id="adminConfirmTitle">Подтверждение</h3>
           <p id="adminConfirmMessage" class="admin-confirm-modal-message"></p>
           <div class="admin-edit-modal-actions admin-confirm-modal-actions">
-            <button type="button" class="ghost-btn" id="adminConfirmCancel" data-admin-confirm-dismiss="true">
+            <button type="button" class="admin-confirm-btn" id="adminConfirmCancel" data-admin-confirm-dismiss="true">
               Отмена
             </button>
-            <button type="button" class="solid-btn" id="adminConfirmOk">Продолжить</button>
+            <button type="button" class="admin-confirm-btn admin-confirm-btn-primary" id="adminConfirmOk">Продолжить</button>
           </div>
         </div>
       </div>
     </div>
 
     <script src="api-client.js"></script>
-    <script src="orders-sync.js?v=20260520stats"></script>
-    <script src="vendor/xlsx.full.min.js"></script>
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
-    <script src="admin.js?v=20260520stats"></script>
+    <script src="client-guard.js?v=20260611host"></script>
+    <script src="auth-password.js?v=20260611host"></script>
+    <script src="password-visibility.js?v=20260610pwdvis"></script>
+    <script src="orders-sync.js?v=20260611host"></script>
+    <script src="pdf-export-boot.js?v=20260611pdf"></script>
+    <script src="vendor/html2pdf.bundle.min.js?v=20260611pdf"></script>
+    <script src="admin.js?v=20260611host"></script>
   </body>
 </html>

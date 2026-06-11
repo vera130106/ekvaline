@@ -62,10 +62,20 @@ const ROOT_JS = [
   'cabinet-pg.js',
   'reset-password-page.js',
   'auth-password.js',
+  'auth-security.js',
   'notifications-client.js',
   'clientNotifications.js',
   'mailer.js',
   'waterCalcEngine.js',
+  'client-guard.js',
+  'bonusProgram.js',
+  'pollVotes.js',
+  'order-payment.js',
+  'maps-runtime.js',
+  'orders-sync.js',
+  'catalog-cart-boot.js',
+  'mobile-nav.js',
+  'password-visibility.js',
 ];
 
 function read(rel) {
@@ -200,7 +210,19 @@ function checkCatalogImages() {
   for (const s of ['assets/product-18-9-white.png', 'assets/product-2-4.png', 'assets/product-5.png']) {
     if (!html.includes(s)) fail(`catalog.html: ожидалось изображение "${s}"`);
   }
+  if (!html.includes('ЭкваЛайн') || /[?]{4,}/.test(html)) {
+    fail('catalog.html: битая кодировка (кириллица заменена на ?) — восстановите UTF-8');
+  }
   ok('Каталог: ключевые изображения 18.9 л');
+}
+
+function checkPublicHtmlUtf8() {
+  for (const name of ['index.html', 'catalog.html', 'cabinet.html', 'about.html', 'delivery.html', 'contacts.html']) {
+    const html = read(name);
+    if (!html.includes('ЭкваЛайн')) fail(`${name}: нет «ЭкваЛайн» — возможна битая кодировка`);
+    if (/[?]{6,}/.test(html)) fail(`${name}: подозрительные «??????» — проверьте UTF-8`);
+  }
+  ok('Публичные HTML: кириллица на месте (UTF-8)');
 }
 
 /** Опечатка `bottles.pn` не должна совпадать с корректным `bottles.png` (подстрока). */
@@ -242,6 +264,9 @@ function checkSecurityModules() {
   if (!srv.includes('resolveOperatorOrderLines')) {
     fail('server.js: operator create должен вызывать resolveOperatorOrderLines');
   }
+  if (!srv.includes('resolveClientOrderLines')) {
+    fail('server.js: client POST /api/orders должен вызывать resolveClientOrderLines');
+  }
   if (!srv.includes('resolveStaffOrderItemsPatch')) {
     fail('server.js: staff PATCH должен пересчитывать items_json');
   }
@@ -257,20 +282,101 @@ function checkSecurityModules() {
   if (/OperatorEkva2026!|AdminEkva2026!/.test(scr)) {
     fail('script.js: не должно быть паролей сотрудников в исходнике');
   }
-  ok('Безопасность: middleware, цены на сервере, сессия staff');
+  if (!read('server.js').includes('check-registration')) {
+    fail('server.js: нет /api/auth/check-registration для проверки email при регистрации');
+  }
+  if (!scr.includes('checkRegistrationEmailAvailability')) {
+    fail('script.js: нет проверки email перед регистрацией');
+  }
+  if (scr.includes('send-register-code') || scr.includes('authRegSendCode')) {
+    fail('script.js: код на email не должен требоваться при регистрации (только смена пароля в кабинете)');
+  }
+  if (/user\.password\s*!==\s*password/.test(scr) || scr.includes('ekvaline_users')) {
+    fail('script.js: не должно быть localStorage-входа с паролем в открытом виде');
+  }
+  const authSec = read('auth-security.js');
+  if (!authSec.includes('canSelfServicePasswordReset')) {
+    fail('auth-security.js: нет canSelfServicePasswordReset');
+  }
+  if (!read('server.js').includes('canSelfServicePasswordReset')) {
+    fail('server.js: подключите auth-security для блокировки сброса пароля staff');
+  }
+  const secMw = read('security-middleware.js');
+  if (!secMw.includes('Content-Security-Policy')) {
+    fail('security-middleware.js: нет Content-Security-Policy');
+  }
+  if (!read('server.js').includes('noCacheProtectedHtml')) {
+    fail('server.js: подключите noCacheProtectedHtml');
+  }
+  if (!read('server.js').includes('denySensitiveStaticFiles')) {
+    fail('server.js: подключите denySensitiveStaticFiles (закрыть server.js, .env, db.js)');
+  }
+  const guard = read('client-guard.js');
+  if (!guard.includes('requirePageSession')) {
+    fail('client-guard.js: нет проверки сессии для staff-страниц');
+  }
+  for (const page of ['admin.html', 'operator.html', 'manager.html', 'driver.html', 'cabinet.html']) {
+    const html = read(page);
+    if (!html.includes('client-guard.js')) {
+      fail(`${page}: подключите client-guard.js после api-client.js`);
+    }
+  }
+  const pricing = read('order-pricing.js');
+  if (!pricing.includes('getWaterTierUnitPrice')) {
+    fail('order-pricing.js: цена воды должна зависеть от количества (getWaterTierUnitPrice)');
+  }
+  if (/custom:\s*true/.test(pricing)) {
+    fail('order-pricing.js: не должно быть custom-цен с клиента');
+  }
+  ok('Безопасность: middleware, CSP, guard, цены на сервере, блок сброса пароля');
 }
 
 checkSecurityModules();
 
 function checkDockerFiles() {
-  for (const f of ['Dockerfile', 'docker-compose.yml', 'docker/entrypoint.sh', '.dockerignore']) {
-    if (!existsSync(join(ROOT, f))) fail(`Нет файла Docker: ${f}`);
+  for (const f of [
+    'Dockerfile',
+    'docker-compose.yml',
+    'docker/entrypoint.sh',
+    '.dockerignore',
+    'docker/nginx/ekvaline.conf.example',
+    'deploy/update-on-server.sh',
+    'scripts/check-deploy-ready.mjs',
+    '.env.docker.example',
+  ]) {
+    if (!existsSync(join(ROOT, f))) fail(`Нет файла Docker/deploy: ${f}`);
   }
-  ok('Docker: Dockerfile, compose, entrypoint');
+  const adminHtml = read('admin.html');
+  if (adminHtml.includes('adminStatsExcelBtn') || /PDF или Excel|Скачать Excel/i.test(adminHtml)) {
+    fail('admin.html: уберите Excel из отчётов (только PDF)');
+  }
+  if (adminHtml.includes('cdnjs.cloudflare.com/ajax/libs/html2pdf')) {
+    fail('admin.html: html2pdf должен быть в vendor/ (CSP блокирует CDN)');
+  }
+  if (!existsSync(join(ROOT, 'vendor/html2pdf.bundle.min.js'))) {
+    fail('Нет vendor/html2pdf.bundle.min.js для PDF-отчётов');
+  }
+  ok('Docker: Dockerfile, compose, entrypoint, nginx, deploy-check');
 }
 
 checkDockerFiles();
+checkMapsWiring();
+
+function checkMapsWiring() {
+  const delivery = read('delivery.html');
+  if (!delivery.includes('id="deliveryZoneMap"')) fail('delivery.html: нет #deliveryZoneMap');
+  const catalog = read('catalog.html');
+  if (!catalog.includes('maps-runtime.js')) fail('catalog.html: нет maps-runtime.js');
+  if (!existsSync(join(ROOT, 'scripts/verify-maps.mjs'))) fail('Нет scripts/verify-maps.mjs');
+  ok('Карты: delivery, catalog, verify-maps.mjs');
+  if (!existsSync(join(ROOT, 'scripts/verify-mobile-modals.mjs'))) {
+    fail('Нет scripts/verify-mobile-modals.mjs');
+  } else {
+    ok('Mobile: verify-mobile-modals.mjs');
+  }
+}
 checkCatalogImages();
+checkPublicHtmlUtf8();
 
 function checkResponsiveCss() {
   for (const name of CLIENT_PAGES_RESPONSIVE) {
@@ -326,8 +432,8 @@ function checkAuthEmailPassword() {
       fail(`server.js: нет маршрута ${route}`);
     }
   }
-  if (!srv.includes('Аккаунт с таким email не найден')) {
-    fail('server.js: forgot-password должен отклонять несуществующий email');
+  if (!srv.includes('PASSWORD_RESET_NOT_FOUND_MSG') && !srv.includes('Аккаунт с таким email не найден')) {
+    fail('server.js: forgot-password должен отклонять несуществующий email / staff');
   }
   const bp = read('bonusProgram.js');
   if (!bp.includes('reverseBonusesForCancelledOrder')) {
@@ -342,6 +448,16 @@ function checkAuthEmailPassword() {
   const ap = read('auth-password.js');
   if (!ap.includes('validatePassword')) {
     fail('auth-password.js: нет validatePassword');
+  }
+  if (ap.includes('А-Я') || ap.includes('а-яё')) {
+    fail('auth-password.js: пароль должен принимать только латиницу');
+  }
+  const sch = read('schemas.js');
+  if (/pattern\(\/\[A-ZА-Я/.test(sch) || sch.includes('[a-zа-яё]')) {
+    fail('schemas.js: passwordSchema должен требовать только латиницу');
+  }
+  if (!sch.includes('validatePasswordValue')) {
+    fail('schemas.js: нет validatePasswordValue для пароля');
   }
   if (!mail.includes('mailRecipientGreeting') || !mail.includes("'Клиент'")) {
     fail('mailer.js: приветствие в письме — имя клиента или «Клиент»');
@@ -372,7 +488,78 @@ function checkAuthEmailPassword() {
   ok('Почта и пароли: API, mailer, кабинет, auth-password.js');
 }
 
+const ASSET_VERSION = '20260611host';
+const SCRIPT_VERSION = '20260611host';
+const MAPS_RUNTIME_VERSION = '20260611host';
+
+function checkAssetVersionsAndMobile() {
+  const clientPages = [
+    'index.html',
+    'catalog.html',
+    'about.html',
+    'delivery.html',
+    'contacts.html',
+    'community.html',
+    'cabinet.html',
+    'reset-password.html',
+  ];
+  const viewportPages = [...clientPages, 'verify-email.html'];
+  for (const name of viewportPages) {
+    const html = read(name);
+    if (!html.includes('viewport-fit=cover')) {
+      fail(`${name}: нет viewport-fit=cover`);
+    }
+  }
+  for (const name of clientPages) {
+    const html = read(name);
+    if (!html.includes(`script.js?v=${SCRIPT_VERSION}`)) {
+      fail(`${name}: script.js?v=${SCRIPT_VERSION}`);
+    }
+    if (!html.includes(`responsive-mobile.css?v=${ASSET_VERSION}`)) {
+      fail(`${name}: responsive-mobile.css?v=${ASSET_VERSION}`);
+    }
+  }
+  const catalog = read('catalog.html');
+  if (!catalog.includes(`catalog-cart-boot.js?v=${ASSET_VERSION}`)) {
+    fail(`catalog.html: catalog-cart-boot.js?v=${ASSET_VERSION}`);
+  }
+  if (!catalog.includes(`maps-runtime.js?v=${MAPS_RUNTIME_VERSION}`)) {
+    fail('catalog.html: maps-runtime.js с версией');
+  }
+  for (const name of ['delivery.html', 'cabinet.html']) {
+    const html = read(name);
+    if (!html.includes(`maps-runtime.js?v=${MAPS_RUNTIME_VERSION}`)) {
+      fail(`${name}: maps-runtime.js с версией`);
+    }
+  }
+  const op = read('operator.html');
+  if (!op.includes(`operator-mobile.css?v=${ASSET_VERSION}`)) {
+    fail('operator.html: operator-mobile.css');
+  }
+  if (!op.includes(`maps-runtime.js?v=${MAPS_RUNTIME_VERSION}`)) {
+    fail('operator.html: maps-runtime.js с версией');
+  }
+  for (const name of ['admin.html', 'manager.html']) {
+    const html = read(name);
+    if (!html.includes(`staff-mobile.css?v=${ASSET_VERSION}`)) {
+      fail(`${name}: staff-mobile.css`);
+    }
+  }
+  for (const name of ['admin.html', 'operator.html', 'manager.html', 'driver.html', 'cabinet.html']) {
+    const html = read(name);
+    if (!html.includes(`client-guard.js?v=${ASSET_VERSION}`)) {
+      fail(`${name}: client-guard.js?v=${ASSET_VERSION}`);
+    }
+  }
+  const scr = read('script.js');
+  if (!scr.includes('syncClientAuthFromServer') || !scr.includes('ensureServerSessionForCheckout')) {
+    fail('script.js: нет syncClientAuthFromServer / ensureServerSessionForCheckout (корзина на хостинге)');
+  }
+  ok(`HTML: единая версия ассетов ${ASSET_VERSION}, guard, mobile CSS, checkout-сессия`);
+}
+
 checkResponsiveCss();
 checkAuthEmailPassword();
+checkAssetVersionsAndMobile();
 
 console.log('\n\x1b[32mПроверки пройдены.\x1b[0m');

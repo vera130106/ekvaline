@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Адаптивное мобильное меню (гамбургер) для страниц с шапкой .topbar.
  */
 (function () {
@@ -65,6 +65,7 @@
     panelInner.className = 'site-nav-panel-inner';
 
     const drawerMenu = menu.cloneNode(true);
+    drawerMenu.classList.remove('menu');
     drawerMenu.classList.add('site-nav-drawer-menu');
     stripIds(drawerMenu);
     panelInner.appendChild(drawerMenu);
@@ -72,16 +73,16 @@
     const contact = inner.querySelector('.contact-area');
     const logoutBtn = inner.querySelector('.admin-topbar-logout');
 
-    if (contact || logoutBtn) {
-      const contactClone = document.createElement('div');
-      contactClone.className = 'site-nav-drawer-actions';
+    function fillDrawerActions(target) {
+      if (!target) return;
+      target.replaceChildren();
 
       if (contact) {
         const hotline = contact.querySelector('.hotline');
         if (hotline) {
           const hl = hotline.cloneNode(true);
           stripIds(hl);
-          contactClone.appendChild(hl);
+          target.appendChild(hl);
         }
 
         contact.querySelectorAll('button, a[href]').forEach((btn) => {
@@ -89,7 +90,7 @@
           const c = btn.cloneNode(true);
           stripIds(c);
           wireClone(c, btn);
-          contactClone.appendChild(c);
+          target.appendChild(c);
         });
       }
 
@@ -97,11 +98,14 @@
         const c = logoutBtn.cloneNode(true);
         stripIds(c);
         wireClone(c, logoutBtn);
-        contactClone.appendChild(c);
+        target.appendChild(c);
       }
-
-      if (contactClone.childElementCount) panelInner.appendChild(contactClone);
     }
+
+    const contactClone = document.createElement('div');
+    contactClone.className = 'site-nav-drawer-actions';
+    fillDrawerActions(contactClone);
+    panelInner.appendChild(contactClone);
 
     panel.appendChild(panelHead);
     panel.appendChild(panelInner);
@@ -112,6 +116,7 @@
     document.body.classList.add('site-nav-ready');
 
     function setOpen(open) {
+      if (open) fillDrawerActions(contactClone);
       document.body.classList.toggle('site-nav-open', open);
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggle.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');

@@ -39,7 +39,7 @@ async function main() {
   ({ r, data } = await json('/api/auth/login', {
     method: 'POST',
     headers: { ...hdr(), 'X-CSRF-Token': csrf },
-    body: JSON.stringify({ credential: 'operatorekva@mail.ru', password: 'OperatorEkva2026!' }),
+    body: JSON.stringify({ credential: 'opekva@mail.ru', password: 'ekva2026E' }),
   }));
   absorb(r);
   if (!r.ok) throw new Error(`Operator login failed: ${r.status} ${JSON.stringify(data)}`);
@@ -114,6 +114,7 @@ async function main() {
   console.log('OK PATCH /api/orders/:id (courier_note)');
 
   const today = new Date();
+  today.setDate(today.getDate() + 1);
   const deliveryDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   ({ r, data } = await json('/api/csrf', { headers: hdr() }));

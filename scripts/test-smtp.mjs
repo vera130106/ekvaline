@@ -28,7 +28,7 @@ console.log('Проверка подключения к', process.env.SMTP_HOST,
 const check = await mailer.verifySmtpConnection();
 if (!check.ok) {
   console.error('Ошибка SMTP:', check.error);
-  console.error('\nЧастые причины: неверный пароль приложения, порт 465 + SECURE=1.');
+  console.error('\nПодсказка:', mailer.formatSmtpUserError(new Error(check.error)));
   process.exit(1);
 }
 console.log('Подключение OK. Отправка тестового письма на', to, '…');

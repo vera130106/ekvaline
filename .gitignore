@@ -3,3 +3,7 @@ data/app-data.json
 !data/.gitkeep
 .env
 data/feedback-fallback.ndjson
+docs/HTML-ВСЕ-СТРАНИЦЫ.html
+docs/HTML-ВСЕ-СТРАНИЦЫ.source.txt
+docs/JS-КЛИЕНТСКИЕ-СТРАНИЦЫ.txt
+docs/СКРИПТЫ-И-КОД-ПРИЛОЖЕНИЯ.txt

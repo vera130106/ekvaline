@@ -205,6 +205,114 @@ function buildYandexGeocodeQuery(q, city, street, house, bounded) {
   return s;
 }
 
+function normalizeHouseComparable(raw) {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/^д\.?\s*/, '')
+    .replace(/^дом\.?\s*/, '')
+    .replace(/[^a-zа-я0-9/]/gi, '');
+}
+
+function rowHouseComparable(row) {
+  const addr = row?.address || {};
+  let h = normalizeHouseComparable(addr.house_number);
+  if (h) return h;
+  const display = String(row?.display_name || row?.name || '');
+  const dm = /(?:д\.?|дом\.?)\s*(\d+[a-zа-я0-9/\-]*)/iu.exec(display);
+  if (dm) return normalizeHouseComparable(dm[1]);
+  return '';
+}
+
+function housesComparableMatch(wantRaw, gotRaw) {
+  const want = normalizeHouseComparable(wantRaw);
+  const got = normalizeHouseComparable(gotRaw);
+  if (!want || !got) return false;
+  if (want === got) return true;
+  const wantNum = (want.match(/^\d+/) || [''])[0];
+  const gotNum = (got.match(/^\d+/) || [''])[0];
+  if (wantNum && gotNum && wantNum === gotNum) {
+    const wantSuffix = want.slice(wantNum.length);
+    const gotSuffix = got.slice(gotNum.length);
+    if (!wantSuffix || !gotSuffix || wantSuffix === gotSuffix) return true;
+    if (wantSuffix.startsWith(gotSuffix) || gotSuffix.startsWith(wantSuffix)) return true;
+  }
+  return false;
+}
+
+function rowMatchesHouse(row, house) {
+  const houseStr = String(house || '').trim();
+  if (!houseStr) return true;
+  const got = rowHouseComparable(row);
+  if (got && housesComparableMatch(houseStr, got)) return true;
+  const want = normalizeHouseComparable(houseStr);
+  const display = normalizeHouseComparable(row?.display_name || row?.name || '');
+  return Boolean(want && display.includes(want));
+}
+
+function rowsHaveHouseMatch(rows, house) {
+  return Array.isArray(rows) && rows.some((r) => rowMatchesHouse(r, house));
+}
+
+function preferHouseMatches(rows, house) {
+  if (!String(house || '').trim() || !Array.isArray(rows) || !rows.length) return rows;
+  const matched = rows.filter((r) => rowMatchesHouse(r, house));
+  return matched.length ? matched : rows;
+}
+
+function buildHouseGeocodeQueries(city, street, house, bounded) {
+  const cityStr = String(city || '').trim() || (bounded ? 'Оренбург' : '');
+  const streetStr = String(street || '').trim();
+  const houseStr = String(house || '').trim();
+  if (!streetStr || !houseStr) return [];
+  const out = new Set();
+  out.add(`${cityStr}, ул. ${streetStr}, д. ${houseStr}, Россия`);
+  out.add(`${cityStr}, ${streetStr}, дом ${houseStr}, Россия`);
+  out.add(`${cityStr}, ${streetStr}, ${houseStr}, Россия`);
+  out.add(`${cityStr}, д. ${houseStr}, ул. ${streetStr}, Россия`);
+  out.add(buildYandexGeocodeQuery('', cityStr, streetStr, houseStr, bounded));
+  return [...out].filter(Boolean);
+}
+
+async function nominatimFreeformSearch(q, limit, viewbox, bounded, countrycodes) {
+  const params = new URLSearchParams({
+    format: 'jsonv2',
+    limit: String(limit),
+    'accept-language': 'ru',
+    addressdetails: '1',
+    q: String(q || '').trim(),
+  });
+  if (countrycodes) params.set('countrycodes', countrycodes);
+  if (viewbox) params.set('viewbox', viewbox);
+  if (bounded) params.set('bounded', '1');
+  return nominatimSearch(params);
+}
+
+async function geocodeHouseFallbacks(city, street, house, limit, viewbox, bounded, countrycodes) {
+  const queries = buildHouseGeocodeQueries(city, street, house, bounded);
+  for (const eq of queries) {
+    let rows = [];
+    if (YGEO_KEY) {
+      try {
+        rows = await yandexGeocode(eq, limit);
+      } catch (e) {
+        console.warn('[geocode-search] yandex house fallback:', e?.message || e);
+      }
+    }
+    if (!rows.length) {
+      try {
+        rows = await nominatimFreeformSearch(eq, limit, viewbox, bounded, countrycodes);
+      } catch (e) {
+        console.warn('[geocode-search] nominatim house fallback:', e?.message || e);
+      }
+    }
+    rows = preferHouseMatches(rows, house);
+    if (rowsHaveHouseMatch(rows, house)) return rows;
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
 async function nominatimSearch(params) {
   await nominatimThrottleMs();
   const u = new URL('https://nominatim.openstreetmap.org/search');
@@ -217,7 +325,11 @@ async function nominatimSearch(params) {
       'User-Agent': 'EkvalineMapsProxy/1',
     },
   });
-  if (!res.ok) throw new Error(`nominatim_${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`nominatim_${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const json = await res.json();
   return Array.isArray(json) ? json : [];
 }
@@ -250,6 +362,7 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
     res.json({
       provider: YMAPS_KEY ? 'yandex' : 'none',
       yandexMapsKey: YMAPS_KEY || null,
+      geocoderConfigured: Boolean(YGEO_KEY),
     });
   });
 
@@ -283,14 +396,21 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         try {
           const yq = buildYandexGeocodeQuery(q, city, street, house, bounded);
           rows = await yandexGeocode(yq, limit);
+          if (house) rows = preferHouseMatches(rows, house);
         } catch (e) {
           console.warn('[geocode-search] yandex:', e?.message || e);
         }
       }
 
-      if (!rows.length) {
+      const houseRequested = Boolean(house);
+      const houseMatched = !houseRequested || rowsHaveHouseMatch(rows, house);
+
+      if (!rows.length || (houseRequested && !houseMatched)) {
         const streetForNom =
           street && house ? `${house} ${street}`.trim() : street || house || '';
+        const freeformQ =
+          q ||
+          (house && street && city ? `${city}, ул. ${street}, д. ${house}, Россия` : '');
         const params = new URLSearchParams({
           format: 'jsonv2',
           limit: String(limit),
@@ -300,10 +420,39 @@ function mountGeocodeRoutes(app, { asyncHandler }) {
         if (countrycodes) params.set('countrycodes', countrycodes);
         if (viewbox) params.set('viewbox', viewbox);
         if (bounded) params.set('bounded', '1');
-        if (q) params.set('q', q);
-        if (city) params.set('city', city);
-        if (streetForNom) params.set('street', streetForNom);
-        rows = await nominatimSearch(params);
+        if (freeformQ) {
+          params.set('q', freeformQ);
+        } else {
+          if (city) params.set('city', city);
+          if (streetForNom) params.set('street', streetForNom);
+        }
+        let nomRows = [];
+        try {
+          nomRows = await nominatimSearch(params);
+        } catch (e) {
+          console.warn('[geocode-search] nominatim:', e?.message || e);
+        }
+        if (house) nomRows = preferHouseMatches(nomRows, house);
+        if (nomRows.length && (!rows.length || !houseMatched)) {
+          rows = nomRows;
+        }
+      }
+
+      if (house && street && !rowsHaveHouseMatch(rows, house)) {
+        const houseRows = await geocodeHouseFallbacks(
+          city,
+          street,
+          house,
+          limit,
+          viewbox,
+          bounded,
+          countrycodes
+        );
+        if (rowsHaveHouseMatch(houseRows, house)) {
+          rows = houseRows;
+        } else if (!rows.length && houseRows.length) {
+          rows = houseRows;
+        }
       }
 
       if (!rows.length && q && !city && !street) {

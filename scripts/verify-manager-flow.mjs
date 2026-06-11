@@ -32,7 +32,7 @@ async function main() {
   ({ r, data } = await json('/api/auth/login', {
     method: 'POST',
     headers: { ...hdr(), 'X-CSRF-Token': csrf },
-    body: JSON.stringify({ credential: 'managerekva@mail.ru', password: 'ManagerEkva2026!' }),
+    body: JSON.stringify({ credential: 'menekva@mail.ru', password: 'men2026M' }),
   }));
   absorb(r);
   if (!r.ok) throw new Error(`Manager login failed: ${r.status} ${JSON.stringify(data)}`);
@@ -47,6 +47,11 @@ async function main() {
   if (!r.ok) throw new Error(`/api/auth/me failed: ${r.status}`);
   if (String(data?.user?.role).toLowerCase() !== role) throw new Error('auth/me role mismatch');
   console.log('OK /api/auth/me');
+
+  ({ r, data } = await json('/api/manager/feedback', { headers: hdr() }));
+  if (!r.ok) throw new Error(`GET /api/manager/feedback failed: ${r.status}`);
+  if (!Array.isArray(data?.messages)) throw new Error('feedback: messages must be array');
+  console.log('OK manager feedback list', `(${data.messages.length})`);
 
   ({ r, data } = await json('/api/csrf', { headers: hdr() }));
   absorb(r);

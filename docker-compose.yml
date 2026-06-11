@@ -1,6 +1,7 @@
-# Запуск: docker compose up --build
-# Сайт: http://localhost:3001
-# Перед первым запуском скопируйте .env.example → .env и задайте SESSION_SECRET (≥32 символов).
+# Запуск: docker compose up -d --build
+# Сайт: http://localhost:3001 (или https://домен через nginx)
+# Перед первым запуском: cp .env.docker.example .env && npm run deploy:check
+# Инструкция: docs/ВЫКЛАДКА-GIT-И-VPS.md
 
 services:
   db:
@@ -32,6 +33,8 @@ services:
       PORT: 3001
       DATABASE_URL: postgres://ekvaline:ekvaline@db:5432/ekvaline
       SESSION_SECRET: ${SESSION_SECRET:-docker-local-dev-secret-min-32-chars!!}
+      USE_SECURE_COOKIES: ${USE_SECURE_COOKIES:-}
+      SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-30}
       YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
       YANDEX_GEOCODER_API_KEY: ${YANDEX_GEOCODER_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -41,6 +44,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3001}
+      SEED_DEMO_ORDERS: ${SEED_DEMO_ORDERS:-0}
     depends_on:
       db:
         condition: service_healthy

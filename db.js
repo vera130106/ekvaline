@@ -89,7 +89,12 @@ class PgDatabase {
     await this.pool.query('SELECT 1');
     await migrate(this.pool);
     await migrateDemoStaffEmails(this.pool);
+    await migrateOperatorStaffCredentials(this.pool);
+    await migrateManagerStaffCredentials(this.pool);
+    await migrateAdminStaffCredentials(this.pool);
+    await migrateDriverStaffCredentials(this.pool);
     await seedIfEmpty(this.pool);
+    await ensureDefaultDriverUser(this.pool);
     await ensureDefaultDeliveryAddresses(this.pool);
     await ensureDeliveryAddressesBackfillZoneId(this.pool);
     await ensureExtendedCatalog(this.pool);
@@ -99,7 +104,9 @@ class PgDatabase {
     );
     if (seedDemoOrders) {
       await ensureDemoClientUser(this.pool);
+      await ensureDemoDriverUsers(this.pool);
       await ensureDemoOperatorOrders(this.pool);
+      await syncDemoOrderDrivers(this.pool);
     }
   }
 
@@ -213,6 +220,7 @@ async function migrate(pool) {
       name TEXT NOT NULL,
       phone TEXT NOT NULL,
       message TEXT NOT NULL,
+      contacted INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -289,8 +297,10 @@ async function migrate(pool) {
   await ensurePollVotesIndexes(pool);
   await ensureIdentityDefault(pool, 'client_notifications');
   await ensureClientNotificationsIndexes(pool);
+  await migrateClientNotificationTimestamps(pool);
 
   await ensureColumnDefault(pool, 'feedback_messages', 'created_at', 'NOW()');
+  await ensureFeedbackMessagesContacted(pool);
   await ensureColumnDefault(pool, 'audit_log', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'orders', 'created_at', 'NOW()');
   await ensureColumnDefault(pool, 'orders', 'updated_at', 'NOW()');
@@ -300,10 +310,12 @@ async function migrate(pool) {
   await ensureOrderAuditEvents(pool);
   await ensureIdentityDefault(pool, 'order_audit_events');
   await ensureUserDriverRouteLabel(pool);
+  await ensureUserDriverOnDuty(pool);
   await ensureOrdersZoneForeignKey(pool);
   await ensureDeliveryAddressesZoneForeignKey(pool);
   await ensureLegacyClientsOrdersFk(pool);
   await ensureDeclarativeForeignKeysPublic(pool);
+  await migrateOrderAuditEventsRetainOnDelete(pool);
   await ensurePublicRussianTableComments(pool);
   await ensureAboutCertificatesDeclarationPdf(pool);
 }
@@ -386,9 +398,19 @@ async function ensureAboutCertificatesDeclarationPdf(pool) {
   );
 }
 
+/** Менеджер отмечает, что связался с клиентом по обращению с сайта. */
+async function ensureFeedbackMessagesContacted(pool) {
+  await ensureColumnExists(pool, 'feedback_messages', 'contacted', 'INTEGER NOT NULL DEFAULT 0');
+}
+
 /** Метка в учётке водителя = точное совпадение с полем orders.driver из панели оператора. */
 async function ensureUserDriverRouteLabel(pool) {
   await ensureColumnExists(pool, 'users', 'driver_route_label', 'TEXT');
+}
+
+/** 1 — водитель на смене (виден оператору и в панели водителя). */
+async function ensureUserDriverOnDuty(pool) {
+  await ensureColumnExists(pool, 'users', 'driver_on_duty', 'INTEGER NOT NULL DEFAULT 0');
 }
 
 /**
@@ -501,7 +523,7 @@ async function ensureOrderAuditEvents(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS order_audit_events (
       id SERIAL PRIMARY KEY,
-      order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
       action TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '',
       actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -655,6 +677,49 @@ async function tryAddForeignKey(pool, sql, label) {
     }
     console.warn(`[db] FK ${label}:`, e.message || e);
   }
+}
+
+/** События отмены/удаления сохраняются после DELETE заказа (order_id → NULL). */
+async function migrateOrderAuditEventsRetainOnDelete(pool) {
+  const marker = 'order_audit_retain_on_delete_v1';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+  if (!(await pgTableExists(pool, 'order_audit_events'))) return;
+  if (!(await pgColumnExists(pool, 'order_audit_events', 'order_id'))) return;
+
+  const fkRows = await pool.query(`
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    WHERE t.relname = 'order_audit_events'
+      AND c.contype = 'f'
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey) AND a.attname = 'order_id'
+      )`);
+  for (const row of fkRows.rows) {
+    await pool.query(`ALTER TABLE order_audit_events DROP CONSTRAINT IF EXISTS "${row.conname}"`).catch(() => {});
+  }
+
+  await pool.query(`ALTER TABLE order_audit_events ALTER COLUMN order_id DROP NOT NULL`).catch(() => {});
+
+  const hasFk = await publicForeignKeyExists(pool, 'order_audit_events', 'order_id', 'orders');
+  if (!hasFk) {
+    await tryAddForeignKey(
+      pool,
+      `ALTER TABLE order_audit_events ADD CONSTRAINT order_audit_events_order_id_fkey
+       FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE SET NULL`,
+      'order_audit_events.order_id→orders SET NULL'
+    );
+  }
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
 }
 
 /**
@@ -916,14 +981,15 @@ async function ensureDeclarativeForeignKeysPublic(pool) {
     if (!has) {
       const bad = await pool.query(`
         SELECT COUNT(*)::int AS n FROM order_audit_events e
-        WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id)`);
+        WHERE e.order_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = e.order_id)`);
       if (bad.rows[0].n > 0) {
         console.warn(`[db] Пропуск FK order_audit_events→orders: ${bad.rows[0].n} строк без заказа.`);
       } else {
         await tryAddForeignKey(
           pool,
           `ALTER TABLE order_audit_events ADD CONSTRAINT order_audit_events_order_id_decl_fkey
-           FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE`,
+           FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE SET NULL`,
           'order_audit_events.order_id→orders'
         );
       }
@@ -1040,6 +1106,36 @@ async function ensureClientNotificationsIndexes(pool) {
       `CREATE INDEX IF NOT EXISTS client_notifications_user_id_idx ON client_notifications (user_id, id DESC)`
     )
     .catch(() => {});
+  await pool
+    .query(
+      `CREATE INDEX IF NOT EXISTS client_notifications_user_created_idx ON client_notifications (user_id, created_at DESC)`
+    )
+    .catch(() => {});
+}
+
+/** Привязать время уведомлений к дате регистрации / заказа, а не к моменту массовой вставки. */
+async function migrateClientNotificationTimestamps(pool) {
+  const marker = 'client_notif_event_times_v1';
+  const hit = await pool.query(`SELECT value FROM site_settings WHERE key = $1 LIMIT 1`, [marker]);
+  if (hit.rowCount > 0) return;
+
+  await pool.query(`
+    UPDATE client_notifications cn
+    SET created_at = o.created_at::timestamptz
+    FROM orders o
+    WHERE cn.order_id = o.id
+      AND cn.title LIKE 'Заказ №%'`);
+  await pool.query(`
+    UPDATE client_notifications cn
+    SET created_at = u.created_at::timestamptz
+    FROM users u
+    WHERE cn.user_id = u.id
+      AND cn.title IN ('Добро пожаловать в ЭкваЛайн', 'Доставка в удобном окне')`);
+  await pool.query(
+    `INSERT INTO site_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [marker, new Date().toISOString()]
+  );
 }
 
 async function ensurePollVotesIndexes(pool) {
@@ -1202,20 +1298,20 @@ async function migrateDemoStaffEmails(pool) {
     {
       phone: '70000000001',
       role: 'admin',
-      email: 'adminekva@mail.ru',
-      legacyEmails: ['admin@ekvaline.mail', 'admin@ekvaline.demo'],
+      email: 'admekva@mail.ru',
+      legacyEmails: ['adminekva@mail.ru', 'admin@ekvaline.mail', 'admin@ekvaline.demo'],
     },
     {
       phone: '70000000002',
       role: 'manager',
-      email: 'managerekva@mail.ru',
-      legacyEmails: ['manager@ekvaline.mail', 'manager@ekvaline.demo'],
+      email: 'menekva@mail.ru',
+      legacyEmails: ['managerekva@mail.ru', 'manager@ekvaline.mail', 'manager@ekvaline.demo'],
     },
     {
       phone: '70000000003',
       role: 'operator',
-      email: 'operatorekva@mail.ru',
-      legacyEmails: ['operator@ekvaline.mail', 'operator@ekvaline.demo'],
+      email: 'opekva@mail.ru',
+      legacyEmails: ['operatorekva@mail.ru', 'operator@ekvaline.mail', 'operator@ekvaline.demo'],
     },
   ];
   for (const r of rows) {
@@ -1231,15 +1327,160 @@ async function migrateDemoStaffEmails(pool) {
   }
 }
 
+/** Актуальный email и пароль оператора (однократная миграция существующих БД). */
+async function migrateOperatorStaffCredentials(pool) {
+  const marker = 'operator_staff_cred_v2';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+
+  const email = 'opekva@mail.ru';
+  const password = 'ekva2026E';
+  const legacyEmails = [
+    'operatorekva@mail.ru',
+    'operator@ekvaline.mail',
+    'operator@ekvaline.demo',
+  ].map((x) => x.toLowerCase());
+  const hash = bcrypt.hashSync(password, 12);
+  await pool
+    .query(
+      `UPDATE users SET email = $1, password_hash = $2, password_changed_at = NOW()::text
+       WHERE role = 'operator' AND (
+         phone = '70000000003' OR lower(email) = ANY($3::text[])
+       )`,
+      [email, hash, legacyEmails]
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
+}
+
+/** Актуальный email и пароль менеджера (однократная миграция существующих БД). */
+async function migrateManagerStaffCredentials(pool) {
+  const marker = 'manager_staff_cred_v1';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+
+  const email = 'menekva@mail.ru';
+  const password = 'men2026M';
+  const legacyEmails = [
+    'managerekva@mail.ru',
+    'manager@ekvaline.mail',
+    'manager@ekvaline.demo',
+  ].map((x) => x.toLowerCase());
+  const hash = bcrypt.hashSync(password, 12);
+  await pool
+    .query(
+      `UPDATE users SET email = $1, password_hash = $2, password_changed_at = NOW()::text
+       WHERE role = 'manager' AND (
+         phone = '70000000002' OR lower(email) = ANY($3::text[])
+       )`,
+      [email, hash, legacyEmails]
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
+}
+
+/** Актуальный email и пароль администратора (однократная миграция существующих БД). */
+async function migrateAdminStaffCredentials(pool) {
+  const marker = 'admin_staff_cred_v1';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+
+  const email = 'admekva@mail.ru';
+  const password = 'adm2026A';
+  const legacyEmails = [
+    'adminekva@mail.ru',
+    'admin@ekvaline.mail',
+    'admin@ekvaline.demo',
+  ].map((x) => x.toLowerCase());
+  const hash = bcrypt.hashSync(password, 12);
+  await pool
+    .query(
+      `UPDATE users SET email = $1, password_hash = $2, password_changed_at = NOW()::text
+       WHERE role = 'admin' AND (
+         phone = '70000000001' OR lower(email) = ANY($3::text[])
+       )`,
+      [email, hash, legacyEmails]
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
+}
+
+/** Один водитель по умолчанию, пока админ не создаст других. */
+const DEFAULT_DRIVER_ACCOUNT = {
+  label: 'Иван Петров',
+  email: 'driverekva@mail.ru',
+  phone: '70000000004',
+  password: 'DriverEkva2026!',
+  first_name: 'Иван',
+  last_name: 'Петров',
+};
+
+/** Демо-водитель: актуальный email и пароль (не трогает водителей, созданных админом). */
+async function migrateDriverStaffCredentials(pool) {
+  const marker = 'driver_staff_cred_v1';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+
+  const email = DEFAULT_DRIVER_ACCOUNT.email;
+  const password = DEFAULT_DRIVER_ACCOUNT.password;
+  const label = DEFAULT_DRIVER_ACCOUNT.label;
+  const legacyEmails = [
+    'driver1@ekvaline.local',
+    'driver.demo.1@ekvaline.local',
+    'driver@ekvaline.mail',
+    'driver@ekvaline.demo',
+  ].map((x) => x.toLowerCase());
+  const hash = bcrypt.hashSync(password, 12);
+  await pool
+    .query(
+      `UPDATE users SET email = $1, password_hash = $2, password_changed_at = NOW()::text,
+       driver_route_label = COALESCE(NULLIF(trim(driver_route_label), ''), $4)
+       WHERE role = 'driver' AND (
+         phone = $3 OR lower(email) = ANY($5::text[])
+       )`,
+      [email, hash, DEFAULT_DRIVER_ACCOUNT.phone, label, legacyEmails]
+    )
+    .catch(() => {});
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
+}
+
 async function seedIfEmpty(pool) {
   const count = await pool.query('SELECT COUNT(*)::int AS c FROM users');
   if (count.rows[0].c > 0) return;
 
   const rounds = 12;
   const staff = [
-    ['adminekva@mail.ru', '70000000001', 'AdminEkva2026!', 'Администратор', 'Системы', 'admin'],
-    ['managerekva@mail.ru', '70000000002', 'ManagerEkva2026!', 'Менеджер', 'Контента', 'manager'],
-    ['operatorekva@mail.ru', '70000000003', 'OperatorEkva2026!', 'Оператор', 'Линии', 'operator'],
+    ['admekva@mail.ru', '70000000001', 'adm2026A', 'Администратор', 'Системы', 'admin'],
+    ['menekva@mail.ru', '70000000002', 'men2026M', 'Менеджер', 'Контента', 'manager'],
+    ['opekva@mail.ru', '70000000003', 'ekva2026E', 'Оператор', 'Линии', 'operator'],
   ];
 
     for (const s of staff) {
@@ -1688,13 +1929,17 @@ async function ensureDemoOperatorOrders(pool) {
   const now = new Date();
   const todayIso = isoCalendarDay(now);
   const zones = ['Центр', 'Степной', 'Доп. зона', 'Подхват'];
-  const drivers = [
-    'Петров Пётр Петрович',
-    'Сидоров Сергей Сергеевич',
-    'Казаченко Сергей',
-    'Комаров Сергей',
-    'Лукашин Евгений',
-  ];
+  const driverRows = await pool.query(
+    `SELECT driver_route_label, first_name, last_name FROM users
+     WHERE lower(role) = 'driver' AND COALESCE(blocked, 0) = 0`
+  );
+  const drivers = [];
+  for (const row of driverRows.rows) {
+    let lbl = String(row.driver_route_label || '').trim();
+    if (!lbl) lbl = [row.first_name, row.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (lbl.length >= 2) drivers.push(lbl);
+  }
+  if (!drivers.length) drivers.push(DEFAULT_DRIVER_ACCOUNT.label);
   const payments = ['cash', 'card', 'noncash', 'cash', 'card', 'noncash'];
   const slots = ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00', '09:00 – 17:00'];
   const addresses = [
@@ -1801,6 +2046,114 @@ async function ensureDemoOperatorOrders(pool) {
   }
 }
 
+const DEMO_DRIVER_ROUTE_LABELS = [DEFAULT_DRIVER_ACCOUNT.label];
+
+function splitDriverRouteLabel(label) {
+  const parts = String(label || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return { first_name: 'Водитель', last_name: 'Демо' };
+  if (parts.length === 1) return { first_name: parts[0], last_name: 'Демо' };
+  if (parts.length === 2) return { first_name: parts[0], last_name: parts[1] };
+  return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+}
+
+async function upsertDriverAccount(pool, spec) {
+  await ensureColumnExists(pool, 'users', 'driver_route_label', 'TEXT');
+  await ensureColumnExists(pool, 'users', 'driver_on_duty', 'INTEGER NOT NULL DEFAULT 0');
+  const label = String(spec.label || '').trim();
+  if (label.length < 2) return;
+  const hash = bcrypt.hashSync(String(spec.password || 'DriverDemo2026!'), 12);
+  const byLabel = await pool.query(
+    `SELECT id FROM users
+     WHERE lower(role) = 'driver'
+       AND lower(trim(COALESCE(driver_route_label, ''))) = lower(trim($1))
+     LIMIT 1`,
+    [label]
+  );
+  if (byLabel.rowCount > 0) {
+    await pool.query(
+      `UPDATE users SET email = $1, phone = $2, password_hash = $3, first_name = $4, last_name = $5,
+       role = 'driver', driver_route_label = $6, driver_on_duty = 1, blocked = 0
+       WHERE id = $7`,
+      [
+        spec.email,
+        spec.phone,
+        hash,
+        spec.first_name,
+        spec.last_name,
+        label,
+        byLabel.rows[0].id,
+      ]
+    );
+    return;
+  }
+  const ex = await pool.query('SELECT id FROM users WHERE lower(email) = lower($1) OR phone = $2 LIMIT 1', [
+    spec.email,
+    spec.phone,
+  ]);
+  if (ex.rowCount > 0) {
+    await pool.query(
+      `UPDATE users SET email = $1, phone = $2, password_hash = $3, first_name = $4, last_name = $5,
+       role = 'driver', driver_route_label = $6, driver_on_duty = 1, blocked = 0
+       WHERE id = $7`,
+      [spec.email, spec.phone, hash, spec.first_name, spec.last_name, label, ex.rows[0].id]
+    );
+    return;
+  }
+  await pool.query(
+    `INSERT INTO users (email, phone, password_hash, first_name, last_name, role, password_changed_at, driver_route_label, driver_on_duty)
+     VALUES ($1, $2, $3, $4, $5, 'driver', NOW()::text, $6, 1)`,
+    [spec.email, spec.phone, hash, spec.first_name, spec.last_name, label]
+  );
+}
+
+/** Если водителей ещё нет — один учётный водитель для оператора и входа на driver.html. */
+async function ensureDefaultDriverUser(pool) {
+  const count = await pool.query(`SELECT COUNT(*)::int AS c FROM users WHERE lower(role) = 'driver'`);
+  if (Number(count.rows[0]?.c || 0) > 0) return;
+  await upsertDriverAccount(pool, DEFAULT_DRIVER_ACCOUNT);
+}
+
+/** Учётки водителей с метками = полю «Водитель» в заказе оператора (демо-заказы). */
+async function ensureDemoDriverUsers(pool) {
+  for (const label of DEMO_DRIVER_ROUTE_LABELS) {
+    const { first_name, last_name } = splitDriverRouteLabel(label);
+    const ix = DEMO_DRIVER_ROUTE_LABELS.indexOf(label);
+    await upsertDriverAccount(pool, {
+      label,
+      email: ix === 0 ? DEFAULT_DRIVER_ACCOUNT.email : `driver.demo.${ix + 1}@ekvaline.local`,
+      phone: ix === 0 ? DEFAULT_DRIVER_ACCOUNT.phone : `7000000${String(2000 + ix).padStart(4, '0')}`,
+      password: DEFAULT_DRIVER_ACCOUNT.password,
+      first_name,
+      last_name,
+    });
+  }
+}
+
+/** Приводит orders.driver к канонической метке из users.driver_route_label. */
+async function syncDemoOrderDrivers(pool) {
+  const drivers = await pool.query(
+    `SELECT driver_route_label, first_name, last_name FROM users WHERE lower(role) = 'driver'`
+  );
+  const byLower = new Map();
+  for (const row of drivers.rows) {
+    let lbl = String(row.driver_route_label || '').trim();
+    if (!lbl) lbl = [row.first_name, row.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (lbl.length < 2) continue;
+    byLower.set(lbl.toLocaleLowerCase('ru'), lbl);
+  }
+  const orders = await pool.query(`SELECT id, driver FROM orders WHERE trim(COALESCE(driver, '')) <> ''`);
+  for (const row of orders.rows) {
+    const raw = String(row.driver || '').trim();
+    const canon = byLower.get(raw.toLocaleLowerCase('ru'));
+    if (canon && canon !== raw) {
+      await pool.query('UPDATE orders SET driver = $1 WHERE id = $2', [canon, row.id]);
+    }
+  }
+}
+
 let singleton;
 
 function openDatabase() {
@@ -1832,6 +2185,8 @@ async function checkPostgresConnection() {
 module.exports = {
   openDatabase,
   ensureDemoOperatorOrders,
+  ensureDemoDriverUsers,
+  syncDemoOrderDrivers,
   syncDemoOperatorOrderClients,
   checkPostgresConnection,
 };

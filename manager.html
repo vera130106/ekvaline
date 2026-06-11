@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>ЭкваЛайн — Менеджер блога</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,8 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260521staff" />
+    <link rel="stylesheet" href="styles.css?v=20260611host" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260611host" />
+    <link rel="stylesheet" href="staff-mobile.css?v=20260611host" />
   </head>
   <body class="manager-page">
     <main class="manager-shell">
@@ -27,6 +28,15 @@
           <button type="button" class="manager-btn is-secondary" id="managerLogoutBtn">Выйти</button>
         </div>
       </header>
+
+      <section class="manager-card manager-wide" id="managerFeedbackSection">
+        <h2>Обращения с сайта</h2>
+        <p class="manager-note">
+          Заявки с формы обратной связи на главной и в контактах. Отметьте «Связались», когда перезвонили клиенту.
+        </p>
+        <div id="managerFeedbackList" class="manager-feedback-list" aria-live="polite"></div>
+        <p id="managerFeedbackStatus" class="manager-feedback-status" hidden role="status"></p>
+      </section>
 
       <section class="manager-card manager-wide" id="managerQualitySection">
         <h2>Контроль качества публикаций</h2>
@@ -248,6 +258,7 @@
     </div>
 
     <script src="api-client.js"></script>
-    <script src="manager.js?v=20260520insights"></script>
+    <script src="client-guard.js?v=20260611host"></script>
+    <script src="manager.js?v=20260611host"></script>
   </body>
 </html>

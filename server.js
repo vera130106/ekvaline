@@ -23,9 +23,16 @@ const {
 } = require('./delivery-slots');
 const {
   securityHeaders,
+  noCacheProtectedHtml,
+  denySensitiveStaticFiles,
   createRateLimiter,
   assertProductionSessionSecret,
 } = require('./security-middleware');
+const {
+  isStaffRole,
+  canSelfServicePasswordReset,
+  PASSWORD_RESET_NOT_FOUND_MSG,
+} = require('./auth-security');
 const mailer = require('./mailer');
 const bonusProgram = require('./bonusProgram');
 const pollVotes = require('./pollVotes');
@@ -55,6 +62,14 @@ function earliestDeliveryDateIso() {
   return isoCalendarDayLocal(d);
 }
 
+function validateDeliveryDateFormat(deliveryDate) {
+  const raw = String(deliveryDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { ok: false, error: 'Дата доставки: формат ГГГГ-ММ-ДД.' };
+  }
+  return { ok: true, value: raw };
+}
+
 function validateDeliveryDateForBooking(deliveryDate) {
   const raw = String(deliveryDate || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
@@ -80,7 +95,9 @@ async function loadDeliveryAvailability() {
 }
 
 async function saveDeliveryAvailability(payload, actorUser) {
-  const normalized = deliveryAvailability.parseAvailabilityStored(payload);
+  const normalized = deliveryAvailability.pruneAvailabilityToBookingWindow(
+    deliveryAvailability.parseAvailabilityStored(payload)
+  );
   const meta = actorUser ? deliveryAvailability.buildChangeMeta(actorUser) : null;
   const stored = meta ? { ...normalized, meta } : normalized;
   await db
@@ -353,6 +370,7 @@ let resolvedListenPort = LISTEN_PREF;
 app.set('trust proxy', 1);
 
 app.use(securityHeaders);
+app.use(noCacheProtectedHtml);
 
 const authRateLimit = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -360,6 +378,15 @@ const authRateLimit = createRateLimiter({
   message: 'Слишком много попыток входа. Подождите 15 минут.',
   keyFn: (req) => `auth:${req.ip || req.socket?.remoteAddress || 'unknown'}`,
 });
+
+const apiRateLimit = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 180,
+  message: 'Слишком много запросов. Подождите минуту.',
+  keyFn: (req) => `api:${req.ip || req.socket?.remoteAddress || 'unknown'}`,
+});
+
+app.use('/api', apiRateLimit);
 
 const feedbackRateLimit = createRateLimiter({
   windowMs: 60 * 1000,
@@ -497,14 +524,33 @@ function publicUser(row) {
     bonus_balance: row.bonus_balance,
     blocked: !!row.blocked,
     email_verified: !!Number(row.email_verified),
+    created_at: row.created_at || null,
   };
-  if (row.role === 'driver') base.driver_route_label = drl || '';
-  else if (drl) base.driver_route_label = drl;
+  if (row.role === 'driver') {
+    base.driver_route_label = drl || '';
+    base.driver_on_duty = !!Number(row.driver_on_duty);
+  } else if (drl) base.driver_route_label = drl;
   return base;
 }
 
 /** Отображаются у водителей: заказы, которые оператор ведёт как «в работе», уже с назначенным экспедитором. */
 const DRIVER_ORDER_STATUSES = ['pending_operator', 'confirmed', 'processing', 'courier', 'on_way'];
+const DRIVER_ROUTE_TZ = 'Europe/Moscow';
+/** Статусы, которые водитель может видеть в маршруте на сегодня (без отменённых и «новых»). */
+const DRIVER_VISIBLE_STATUSES = [...DRIVER_ORDER_STATUSES, 'delivered'];
+
+function moscowTodayIso() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: DRIVER_ROUTE_TZ });
+}
+
+function driverOrderDaySql(alias = 'o') {
+  const p = alias ? `${alias}.` : '';
+  return `COALESCE(NULLIF(trim(${p}delivery_date), ''), to_char(${p}created_at AT TIME ZONE '${DRIVER_ROUTE_TZ}', 'YYYY-MM-DD'))`;
+}
+
+function driverTodayMoscowSql() {
+  return `to_char((NOW() AT TIME ZONE '${DRIVER_ROUTE_TZ}')::date, 'YYYY-MM-DD')`;
+}
 
 async function assertDriverRouteLabelUnique(label, excludeUserId) {
   const t = String(label || '').trim();
@@ -529,10 +575,22 @@ function deriveDriverRouteLabelFromProfile(row) {
   return [row.first_name, row.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
+function isDriverRole(role) {
+  return String(role || '').trim().toLowerCase() === 'driver';
+}
+
+function normalizeDriverRouteKey(raw) {
+  return String(raw || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('ru');
+}
+
 async function ensureDriverRouteLabelForUser(targetId) {
   const row = await getUserById(targetId);
-  if (!row || String(row.role) !== 'driver') return;
-  let lbl = String(row.driver_route_label || '').trim();
+  if (!row || !isDriverRole(row.role)) return;
+  let lbl = String(row.driver_route_label || '').trim().replace(/\s+/g, ' ');
   if (lbl.length >= 2) return;
   lbl = deriveDriverRouteLabelFromProfile(row);
   if (lbl.length < 2) return;
@@ -541,7 +599,54 @@ async function ensureDriverRouteLabelForUser(targetId) {
 }
 
 function driverAssignedLabel(row) {
-  return row && row.role === 'driver' ? String(row.driver_route_label || '').trim() : '';
+  if (!row) return '';
+  if (row.role != null && !isDriverRole(row.role)) return '';
+  let lbl = String(row.driver_route_label || '').trim().replace(/\s+/g, ' ');
+  if (lbl.length >= 2) return lbl;
+  return deriveDriverRouteLabelFromProfile(row);
+}
+
+async function loadDriverRouteLabelIndex() {
+  const rows = await db
+    .prepare(
+      `SELECT first_name, last_name, driver_route_label, role FROM users
+       WHERE lower(role) = 'driver' AND COALESCE(blocked, 0) = 0`
+    )
+    .all();
+  const byLower = new Map();
+  for (const row of rows) {
+    const lbl = driverAssignedLabel(row);
+    if (lbl.length < 2) continue;
+    byLower.set(normalizeDriverRouteKey(lbl), lbl);
+    const profileKey = normalizeDriverRouteKey(deriveDriverRouteLabelFromProfile(row));
+    if (profileKey.length >= 2 && !byLower.has(profileKey)) {
+      byLower.set(profileKey, lbl);
+    }
+  }
+  return byLower;
+}
+
+async function resolveDriverRouteLabel(raw) {
+  const key = normalizeDriverRouteKey(raw);
+  if (!key) return '';
+  const idx = await loadDriverRouteLabelIndex();
+  return idx.get(key) || null;
+}
+
+/** Назначение экспедитора: каноническая метка из учётки водителя + перевод «новый» → «в обработке». */
+async function normalizeOperatorOrderDriverInput(rawDriver, currentStatus) {
+  const raw = String(rawDriver ?? '').trim().replace(/\s+/g, ' ');
+  if (!raw) return { driver: '', statusBump: null };
+  const resolved = await resolveDriverRouteLabel(raw);
+  if (!resolved) {
+    return {
+      error:
+        `Водитель «${raw}» не найден. Создайте учётную запись с ролью «Водитель» в админке (ФИО как в списке) и обновите страницу оператора (F5).`,
+    };
+  }
+  const statusBump =
+    String(currentStatus || 'new').trim().toLowerCase() === 'new' ? 'pending_operator' : null;
+  return { driver: resolved, statusBump };
 }
 
 async function getUserById(id) {
@@ -741,22 +846,13 @@ function verifyAuthCode(code, hash) {
 
 function emailCodeDeliveryPayload(mailResult, email) {
   const addr = String(email || '').trim();
-  if (!mailer.isMailConfigured() && String(process.env.NODE_ENV || '').trim() === 'production') {
+  if (!mailer.isMailConfigured() || mailResult?.dev) {
     return {
       ok: false,
       status: 503,
-      error:
-        'Отправка писем не настроена на сервере. Укажите SMTP в .env (SMTP_HOST, SMTP_USER, SMTP_PASS) и перезапустите сайт.',
-    };
-  }
-  if (mailResult?.dev && mailResult?.devCode) {
-    return {
-      ok: true,
-      message:
-        'Почта не настроена (SMTP): письмо на ящик не ушло. Введите код ниже — он сгенерирован для этой сессии (режим разработки).',
-      devMode: true,
-      devCode: String(mailResult.devCode),
-      email: addr,
+      error: mailer.formatSmtpClientError(
+        new Error('SMTP не настроен или письмо ушло только в консоль (режим без SMTP)')
+      ),
     };
   }
   return {
@@ -786,6 +882,11 @@ async function sendEmailVerificationForUser(user) {
 }
 
 async function sendPasswordResetForUser(user) {
+  if (!canSelfServicePasswordReset(user)) {
+    const err = new Error('password_self_service_denied');
+    err.status = 403;
+    throw err;
+  }
   if (!user || !user.id) return null;
   const code = generateAuthCode();
   const codeHash = hashAuthCode(code);
@@ -999,7 +1100,10 @@ app.get('/api/csrf', (req, res) => {
 
 app.get('/api/client-boot', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ bootId: CLIENT_BOOT_ID, sessionIdleMinutes: SESSION_IDLE_MINUTES });
+  res.json({
+    bootId: CLIENT_BOOT_ID,
+    sessionIdleMinutes: SESSION_IDLE_MINUTES,
+  });
 });
 
 app.get('/api/public/settings', asyncHandler(async (req, res) => {
@@ -1099,7 +1203,9 @@ app.get('/api/public/checkout-options', asyncHandler(async (req, res) => {
 
 app.get('/api/public/delivery-availability', asyncHandler(async (_req, res) => {
   const record = await loadDeliveryAvailabilityRecord();
-  const availability = record.availability || deliveryAvailability.emptyAvailability();
+  const availability = deliveryAvailability.pruneAvailabilityToBookingWindow(
+    record.availability || deliveryAvailability.emptyAvailability()
+  );
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
   res.json({
@@ -1146,15 +1252,85 @@ app.get('/api/auth/me', asyncHandler(async (req, res) => {
   res.json({ user: publicUser(user) });
 }));
 
+async function getRegistrationEmailAvailability(email) {
+  const row = await db
+    .prepare('SELECT id, role FROM users WHERE lower(email) = lower(?)')
+    .get(email);
+  if (!row) {
+    return {
+      available: true,
+      message:
+        'Email свободен. Нажмите «Отправить код» — на этот адрес придёт письмо для подтверждения.',
+    };
+  }
+  const role = String(row.role || '').toLowerCase();
+  if (isStaffRole(role)) {
+    return {
+      available: false,
+      reason: 'staff',
+      message:
+        'Этот email зарезервирован для служебного входа. Используйте форму «Вход», а не регистрацию.',
+    };
+  }
+  return {
+    available: false,
+    reason: 'taken',
+    message:
+      'Этот email уже зарегистрирован. Войдите в аккаунт или нажмите «Забыли пароль?» на вкладке входа.',
+  };
+}
+
+app.post('/api/auth/check-registration', authRateLimit, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.checkRegistrationSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  const out = {};
+
+  if (v.value.email) {
+    out.email = await getRegistrationEmailAvailability(v.value.email);
+  }
+
+  if (v.value.phone) {
+    const phone = v.value.phone;
+    const row = await db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
+    if (row) {
+      out.phone = {
+        available: false,
+        reason: 'taken',
+        message: 'Этот телефон уже привязан к аккаунту. Войдите или укажите другой номер.',
+      };
+    } else {
+      out.phone = {
+        available: true,
+        message: 'Номер свободен.',
+      };
+    }
+  }
+
+  res.json(out);
+}));
+
 app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.registerSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const { first_name, last_name, email, phone, password } = v.value;
-  const exists = await db
-    .prepare('SELECT id FROM users WHERE lower(email) = lower(?) OR phone = ?')
-    .get(email, phone);
-  if (exists) return res.status(409).json({ error: 'Email или телефон уже зарегистрированы.' });
+
+  const availability = await getRegistrationEmailAvailability(email);
+  if (!availability.available) {
+    return res.status(409).json({
+      error: availability.message,
+      field: 'email',
+    });
+  }
+
+  const phoneRow = await db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
+  if (phoneRow) {
+    return res.status(409).json({
+      error: 'Этот телефон уже привязан к другому аккаунту. Войдите или укажите другой номер.',
+      field: 'phone',
+    });
+  }
 
   const password_hash = bcrypt.hashSync(password, 12);
   let info;
@@ -1208,6 +1384,13 @@ app.post('/api/auth/register', authRateLimit, csrfMiddleware, asyncHandler(async
 
   audit(db, user.id, 'register', `email=${email}`, req.ip);
 
+  try {
+    await clientNotifications.notifyWelcomeRegistration(db, user.id);
+  } catch (notifErr) {
+    // eslint-disable-next-line no-console
+    console.error('[register] welcome notification', notifErr && notifErr.message);
+  }
+
   req.session.userId = user.id;
   markSessionActive(req);
   try {
@@ -1244,8 +1427,8 @@ app.post('/api/auth/login', authRateLimit, csrfMiddleware, asyncHandler(async (r
     if (user && roleLower === 'client' && credNorm.kind === 'phone') {
       return res.status(401).json({ error: 'Вход в личный кабинет возможен только по email.' });
     }
-    if (['operator', 'manager', 'admin'].includes(roleLower) && credNorm.kind === 'phone') {
-      return res.status(401).json({ error: 'Вход оператора, менеджера и администратора возможен только по email.' });
+    if (['operator', 'manager', 'admin', 'driver'].includes(roleLower) && credNorm.kind === 'phone') {
+      return res.status(401).json({ error: 'Вход сотрудника и водителя возможен только по email.' });
     }
   }
 
@@ -1303,20 +1486,17 @@ app.post('/api/auth/send-email-verify-code', requireAuth, csrfMiddleware, asyncH
   } catch (mailErr) {
     // eslint-disable-next-line no-console
     console.error('[send-email-verify-code]', mailErr && mailErr.message);
-    return res.status(500).json({ error: 'Не удалось отправить код. Попробуйте позже.' });
+    console.error('[send-email-verify-code] SMTP:', mailer.formatSmtpUserError(mailErr));
+    return res.status(500).json({ error: mailer.formatSmtpClientError(mailErr) });
   }
 
   const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
   if (!delivery.ok) {
+    console.error('[send-email-verify-code] delivery:', delivery.error);
     return res.status(delivery.status || 503).json({ error: delivery.error });
   }
 
-  const body = { ok: true, email: delivery.email, message: delivery.message };
-  if (delivery.devMode) {
-    body.devMode = true;
-    body.devCode = delivery.devCode;
-  }
-  res.json(body);
+  res.json({ ok: true, email: delivery.email, message: delivery.message });
 }));
 
 app.post('/api/auth/confirm-email-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
@@ -1374,20 +1554,8 @@ app.post('/api/auth/forgot-password', authRateLimit, asyncHandler(async (req, re
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const user = await findUserByEmail(v.value.email);
-  if (!user) {
-    return res.status(404).json({
-      error: 'Аккаунт с таким email не найден. Проверьте адрес или зарегистрируйтесь.',
-    });
-  }
-  if (String(user.role || '').toLowerCase() !== 'client') {
-    return res.status(400).json({
-      error: 'Восстановление пароля доступно только для клиентских аккаунтов.',
-    });
-  }
-  if (schemas.isPseudoClientEmail(user.email)) {
-    return res.status(400).json({
-      error: 'Для этой учётной записи восстановление по email недоступно. Зарегистрируйтесь с вашим email.',
-    });
+  if (!canSelfServicePasswordReset(user)) {
+    return res.status(404).json({ error: PASSWORD_RESET_NOT_FOUND_MSG });
   }
 
   let delivery;
@@ -1397,59 +1565,54 @@ app.post('/api/auth/forgot-password', authRateLimit, asyncHandler(async (req, re
   } catch (mailErr) {
     // eslint-disable-next-line no-console
     console.error('[forgot-password]', mailErr && mailErr.message);
-    return res.status(500).json({ error: 'Не удалось отправить письмо. Попробуйте позже.' });
+    console.error('[forgot-password] SMTP:', mailer.formatSmtpUserError(mailErr));
+    return res.status(500).json({ error: mailer.formatSmtpClientError(mailErr) });
   }
   if (!delivery?.ok) {
-    // eslint-disable-next-line no-console
     console.error('[forgot-password] mail not sent:', delivery?.error);
-    return res.status(500).json({
-      error: delivery?.error || 'Не удалось отправить письмо. Проверьте SMTP на сервере.',
+    return res.status(delivery?.status || 500).json({
+      error: delivery?.error || mailer.formatSmtpClientError(new Error('mail_not_sent')),
     });
   }
 
-  const body = {
+  res.json({
     ok: true,
-    message: 'Код отправлен на email. Введите его ниже.',
-  };
-  if (delivery.devMode && delivery.devCode) {
-    body.devMode = true;
-    body.devCode = delivery.devCode;
-    body.message = delivery.message;
-  }
-  res.json(body);
+    message: delivery.message || 'Код отправлен на email. Введите его ниже.',
+  });
 }));
 
 app.post('/api/auth/send-password-code', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const user = await getUserById(req.user.id);
   if (!user) return res.status(401).json({ error: 'Требуется вход.' });
-  if (String(user.role || '').toLowerCase() !== 'client') {
-    return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
-  }
-  if (schemas.isPseudoClientEmail(user.email)) {
-    return res.status(400).json({ error: 'Для этой учётной записи смена пароля недоступна.' });
+  if (!canSelfServicePasswordReset(user)) {
+    return res.status(403).json({
+      error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+    });
   }
 
   let sent;
   try {
     sent = await sendPasswordResetForUser(user);
   } catch (mailErr) {
+    if (Number(mailErr?.status) === 403) {
+      return res.status(403).json({
+        error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+      });
+    }
     // eslint-disable-next-line no-console
     console.error('[send-password-code]', mailErr && mailErr.message);
-    return res.status(500).json({ error: 'Не удалось отправить письмо. Проверьте SMTP на сервере.' });
+    console.error('[send-password-code] SMTP:', mailer.formatSmtpUserError(mailErr));
+    return res.status(500).json({ error: mailer.formatSmtpClientError(mailErr) });
   }
 
   const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
   if (!delivery.ok) {
+    console.error('[send-password-code] delivery:', delivery.error);
     return res.status(delivery.status || 503).json({ error: delivery.error });
   }
 
   audit(db, user.id, 'password_reset_requested', user.email, req.ip);
-  const body = { ok: true, email: delivery.email, message: delivery.message };
-  if (delivery.devMode) {
-    body.devMode = true;
-    body.devCode = delivery.devCode;
-  }
-  res.json(body);
+  res.json({ ok: true, email: delivery.email, message: delivery.message });
 }));
 
 app.post('/api/auth/verify-password-reset-code', authRateLimit, asyncHandler(async (req, res) => {
@@ -1457,7 +1620,7 @@ app.post('/api/auth/verify-password-reset-code', authRateLimit, asyncHandler(asy
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const user = await findUserByEmail(v.value.email);
-  if (!user || String(user.role || '').toLowerCase() !== 'client' || schemas.isPseudoClientEmail(user.email)) {
+  if (!canSelfServicePasswordReset(user)) {
     return res.status(400).json({ error: 'Неверный код или email. Запросите новый код.' });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
@@ -1479,8 +1642,10 @@ app.post('/api/auth/verify-password-code', requireAuth, csrfMiddleware, asyncHan
 
   const user = await getUserById(req.user.id);
   if (!user) return res.status(401).json({ error: 'Требуется вход.' });
-  if (String(user.role || '').toLowerCase() !== 'client') {
-    return res.status(403).json({ error: 'Смена пароля доступна только клиентам.' });
+  if (!canSelfServicePasswordReset(user)) {
+    return res.status(403).json({
+      error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+    });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
     return res.status(400).json({ error: 'Код истёк. Нажмите «Отправить код на email» ещё раз.' });
@@ -1501,6 +1666,11 @@ app.post('/api/auth/change-password-with-code', requireAuth, csrfMiddleware, asy
 
   const user = await getUserById(req.user.id);
   if (!user) return res.status(401).json({ error: 'Требуется вход.' });
+  if (!canSelfServicePasswordReset(user)) {
+    return res.status(403).json({
+      error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+    });
+  }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
     return res.status(400).json({ error: 'Код истёк. Запросите новый код на email.' });
   }
@@ -1522,38 +1692,39 @@ app.post('/api/auth/change-password-with-code', requireAuth, csrfMiddleware, asy
 app.post('/api/auth/request-password-reset', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
   const user = await getUserById(req.user.id);
   if (!user) return res.status(401).json({ error: 'Требуется вход.' });
-  if (String(user.role || '').toLowerCase() !== 'client') {
-    return res.status(403).json({ error: 'Смена пароля через email доступна только клиентам.' });
-  }
-  if (schemas.isPseudoClientEmail(user.email)) {
-    return res.status(400).json({ error: 'Для этой учётной записи смена пароля по email недоступна.' });
+  if (!canSelfServicePasswordReset(user)) {
+    return res.status(403).json({
+      error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+    });
   }
 
   let sent;
   try {
     sent = await sendPasswordResetForUser(user);
   } catch (mailErr) {
+    if (Number(mailErr?.status) === 403) {
+      return res.status(403).json({
+        error: 'Смена пароля по email недоступна. Обратитесь к администратору.',
+      });
+    }
     // eslint-disable-next-line no-console
     console.error('[request-password-reset]', mailErr && mailErr.message);
-    return res.status(500).json({ error: 'Не удалось отправить письмо. Проверьте SMTP на сервере.' });
+    console.error('[request-password-reset] SMTP:', mailer.formatSmtpUserError(mailErr));
+    return res.status(500).json({ error: mailer.formatSmtpClientError(mailErr) });
   }
 
   const delivery = emailCodeDeliveryPayload(sent?.mailResult, user.email);
   if (!delivery.ok) {
+    console.error('[request-password-reset] delivery:', delivery.error);
     return res.status(delivery.status || 503).json({ error: delivery.error });
   }
 
   audit(db, user.id, 'password_reset_requested', user.email, req.ip);
-  const body = {
+  res.json({
     ok: true,
     email: delivery.email,
     message: delivery.message,
-  };
-  if (delivery.devMode) {
-    body.devMode = true;
-    body.devCode = delivery.devCode;
-  }
-  res.json(body);
+  });
 }));
 
 async function handleResetPasswordByEmail(req, res) {
@@ -1561,7 +1732,7 @@ async function handleResetPasswordByEmail(req, res) {
   if (!v.ok) return res.status(400).json({ error: v.error });
 
   const user = await findUserByEmail(v.value.email);
-  if (!user || String(user.role || '').toLowerCase() !== 'client' || schemas.isPseudoClientEmail(user.email)) {
+  if (!canSelfServicePasswordReset(user)) {
     return res.status(400).json({ error: 'Неверный код или email. Запросите новый код на email.' });
   }
   if (!user.password_reset_token || authCodeExpired(user.password_reset_expires)) {
@@ -1594,7 +1765,7 @@ app.post('/api/auth/reset-password', authRateLimit, asyncHandler(async (req, res
   if (legacy.ok) {
     const { token, password } = legacy.value;
     const user = await db.prepare('SELECT * FROM users WHERE password_reset_token = ?').get(token);
-    if (!user || authCodeExpired(user.password_reset_expires)) {
+    if (!user || authCodeExpired(user.password_reset_expires) || !canSelfServicePasswordReset(user)) {
       return res.status(400).json({ error: 'Код или ссылка недействительны. Запросите новый код.' });
     }
     const password_hash = bcrypt.hashSync(password, 12);
@@ -1626,6 +1797,10 @@ app.patch('/api/profile', requireAuth, csrfMiddleware, asyncHandler(async (req, 
   const prev = await getUserById(req.user.id);
   const emailChanged = prev && String(prev.email || '').toLowerCase() !== String(email).toLowerCase();
   const isClient = String(prev?.role || '').toLowerCase() === 'client';
+
+  if (emailChanged && isStaffRole(prev?.role)) {
+    return res.status(403).json({ error: 'Email сотрудника может изменить только администратор.' });
+  }
 
   if (emailChanged && isClient) {
     await db
@@ -1866,31 +2041,15 @@ app.post('/api/orders', requireAuth, csrfMiddleware, asyncHandler(async (req, re
   const addrCheck = orenburgAddress.validateDeliveryAddressLine(address);
   if (!addrCheck.ok) return res.status(400).json({ error: addrCheck.error });
 
-  let subtotal = 0;
-  const lineItems = [];
-  for (const it of items) {
-    const p = await db
-      .prepare('SELECT id, name, price, stock, hidden FROM products WHERE id = ?')
-      .get(it.product_id);
-    if (!p || p.hidden) return res.status(400).json({ error: `Товар #${it.product_id} недоступен.` });
-    if (p.stock < it.qty) return res.status(400).json({ error: `Недостаточно остатка для товара #${it.product_id}.` });
-    const qty = Math.max(1, Math.floor(Number(it.qty) || 0));
-    const unit_price = Math.round(Number(p.price) || 0);
-    subtotal += unit_price * qty;
-    lineItems.push({
-      title: String(p.name || 'Товар').trim(),
-      qty,
-      unit_price,
-      product_id: it.product_id,
-    });
-  }
+  const priced = await orderPricing.resolveClientOrderLines(db, items);
+  if (!priced.ok) return res.status(400).json({ error: priced.error });
+  const { lineItems, subtotal, itemsJson } = priced;
 
   const freshBalance = await bonusProgram.getAvailableBonusBalance(db, req.user.id);
   const bonusSpend = Math.min(bonuses_used || 0, freshBalance, Math.floor(subtotal));
   let payable = Math.max(0, subtotal - bonusSpend);
 
   const earn = bonusProgram.computeOrderBonusEarn(subtotal, bonusSpend);
-  const itemsJson = JSON.stringify(lineItems);
 
   let orderId;
   try {
@@ -1959,7 +2118,7 @@ app.post(
   asyncHandler(async (req, res) => {
     const v = schemas.validate(schemas.operatorOrderCreateSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
-    const dateCheck = validateDeliveryDateForBooking(v.value.delivery_date);
+    const dateCheck = validateDeliveryDateFormat(v.value.delivery_date);
     if (!dateCheck.ok) return res.status(400).json({ error: dateCheck.error });
     const addrCheckOp = orenburgAddress.validateDeliveryAddressLine(v.value.address);
     if (!addrCheckOp.ok) return res.status(400).json({ error: addrCheckOp.error });
@@ -1973,7 +2132,14 @@ app.post(
 
     const pickupVal = Number(v.value.pickup) === 1 ? 1 : 0;
     const zoneVal = String(v.value.zone || '').trim() || null;
-    const driverVal = String(v.value.driver || '').trim() || null;
+    let driverVal = String(v.value.driver || '').trim() || null;
+    let insertStatus = 'new';
+    if (driverVal) {
+      const driverNorm = await normalizeOperatorOrderDriverInput(driverVal, 'new');
+      if (driverNorm.error) return res.status(400).json({ error: driverNorm.error });
+      driverVal = driverNorm.driver || null;
+      if (driverNorm.statusBump) insertStatus = driverNorm.statusBump;
+    }
 
     const customer = await ensurePhoneCallerUser(phoneDigits, v.value.customer_name);
     const priced = await orderPricing.resolveOperatorOrderLines(db, v.value);
@@ -1986,13 +2152,14 @@ app.post(
         .prepare(
           `INSERT INTO orders (user_id, address, delivery_date, delivery_slot, status, payment_method,
             bonuses_used, bonuses_earned, items_json, courier_note, zone, driver, pickup, total_sum)
-           VALUES (?, ?, ?, ?, 'new', ?, 0, 0, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           customer.id,
           v.value.address,
           dateCheck.value,
           v.value.delivery_slot,
+          insertStatus,
           v.value.payment_method,
           itemsJson,
           String(v.value.courier_note || '').trim(),
@@ -2015,14 +2182,19 @@ app.post(
       // eslint-disable-next-line no-console
       console.error('[order] operator create notification', notifErr && notifErr.message);
     }
-    res.json({ order: orderRow });
+    res.json({ order: { ...orderRow, create_action: 'order_operator_create' } });
   })
 );
 
 app.get('/api/orders', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (req, res) => {
   const rows = await db
     .prepare(
-      `SELECT o.*, u.email, u.phone, u.first_name, u.last_name
+      `SELECT o.*, u.email, u.phone, u.first_name, u.last_name,
+              (SELECT e.action FROM order_audit_events e
+               WHERE e.order_id = o.id
+                 AND e.action IN ('order_create', 'order_operator_create')
+               ORDER BY e.id ASC
+               LIMIT 1) AS create_action
        FROM orders o
        LEFT JOIN users u ON u.id = o.user_id
        ORDER BY o.id DESC LIMIT 5000`
@@ -2034,24 +2206,24 @@ app.get('/api/orders', requireAuth, requireRole('operator', 'manager', 'admin'),
 app.get('/api/orders/operator/drivers', requireAuth, requireRole('operator', 'manager', 'admin'), asyncHandler(async (_req, res) => {
   const rows = await db
     .prepare(
-      `SELECT first_name, last_name, driver_route_label
+      `SELECT first_name, last_name, driver_route_label, driver_on_duty, role
        FROM users
        WHERE lower(role) = 'driver'
+         AND COALESCE(blocked, 0) = 0
        ORDER BY id ASC`
     )
     .all();
   const list = [];
   const seenLower = new Set();
   for (const row of rows) {
-    let lbl = String(row.driver_route_label || '').trim();
-    if (!lbl) lbl = deriveDriverRouteLabelFromProfile(row);
+    const lbl = driverAssignedLabel(row);
     if (lbl.length < 2) continue;
-    const key = lbl.toLocaleLowerCase('ru');
+    const key = normalizeDriverRouteKey(lbl);
     if (seenLower.has(key)) continue;
     seenLower.add(key);
-    list.push(lbl);
+    list.push({ label: lbl, on_duty: !!Number(row.driver_on_duty) });
   }
-  list.sort((a, b) => a.localeCompare(b, 'ru'));
+  list.sort((a, b) => a.label.localeCompare(b.label, 'ru'));
   res.json({ drivers: list });
 }));
 
@@ -2062,9 +2234,12 @@ app.get(
   asyncHandler(async (_req, res) => {
     try {
       const record = await loadDeliveryAvailabilityRecord();
+      const availability = deliveryAvailability.pruneAvailabilityToBookingWindow(
+        record.availability || deliveryAvailability.emptyAvailability()
+      );
       res.set('Cache-Control', 'no-store');
       res.json({
-        availability: record.availability,
+        availability,
         lastChange: record.meta,
         slotDefs: deliveryAvailability.BOOKING_SLOT_DEFS,
         days: deliveryAvailability.enumerateBookingDays(30),
@@ -2144,7 +2319,7 @@ app.get('/api/orders/:id/journal', requireAuth, asyncHandler(async (req, res) =>
       actor_name: row.actor_name,
       actor_role: row.actor_role,
     })),
-    ...auditRows,
+    ...auditRows.filter((row) => !/^id=\d+$/i.test(String(row.detail || '').trim())),
   ].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
   res.json({ journal: journal.slice(0, 300) });
@@ -2167,7 +2342,6 @@ app.get('/api/orders/operator/audit-report', requireAuth, requireRole('operator'
        WHERE (e.created_at AT TIME ZONE 'Europe/Moscow')::date >= ?::date
          AND (e.created_at AT TIME ZONE 'Europe/Moscow')::date <= ?::date
          ${operatorView ? "AND e.action NOT LIKE 'admin_%' AND e.action <> 'manager_settings'" : ''}
-         ${operatorView ? "AND COALESCE(u.role, '') IN ('operator', 'driver', '')" : ''}
        ORDER BY e.created_at DESC
        LIMIT 3000`
     )
@@ -2202,11 +2376,63 @@ app.post('/api/orders/:id/cancel', requireAuth, csrfMiddleware, asyncHandler(asy
   res.json({ order: updated });
 }));
 
+app.delete(
+  '/api/orders/:id',
+  requireAuth,
+  requireRole('operator', 'manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id заказа.' });
+    const vr = schemas.validate(schemas.orderCancelReasonSchema, req.body || {});
+    if (!vr.ok) return res.status(400).json({ error: vr.error });
+    const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден.' });
+
+    const reason = String(vr.value.reason || '').trim();
+    const prevStatus = String(order.status || '').toLowerCase();
+    const displayId = `ЛС-${String(id).padStart(6, '0')}`;
+    const deleteDetail = JSON.stringify({
+      deleted: true,
+      display_id: displayId,
+      status: prevStatus,
+      address: String(order.address || '').trim(),
+      delivery_date: String(order.delivery_date || '').trim(),
+    });
+
+    await insertOrderAuditEvent(db, id, 'order_delete', reason, req.user.id, deleteDetail);
+
+    await db.withTransaction(async (tx) => {
+      if (prevStatus !== 'cancelled') {
+        await bonusProgram.reverseBonusesForCancelledOrder(tx, order, tx);
+      }
+      await tx.prepare('DELETE FROM bonus_operations WHERE order_id = ?').run(id);
+      await tx.prepare('DELETE FROM orders WHERE id = ?').run(id);
+    });
+
+    audit(db, req.user.id, 'order_delete', `id=${id}; reason=${reason}`, req.ip);
+    res.json({ ok: true, deletedId: id });
+  })
+);
+
 /** Маршруты до параметрических `/api/orders/:id`. */
+app.patch('/api/driver/duty', requireAuth, requireRole('driver'), csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.driverDutySchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const on = v.value.on_duty ? 1 : 0;
+  await db.prepare('UPDATE users SET driver_on_duty = ? WHERE id = ?').run(on, req.user.id);
+  audit(db, req.user.id, 'driver_duty', on ? 'on' : 'off', req.ip);
+  const updated = await getUserById(req.user.id);
+  res.json({ user: publicUser(updated) });
+}));
+
 app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(async (req, res) => {
   const label = driverAssignedLabel(req.user);
   if (!label) return res.json({ orders: [], warn: 'Администратор не указал вашу метку экспедитора.' });
-  const orderDaySql = `COALESCE(NULLIF(trim(o.delivery_date), ''), to_char(o.created_at, 'YYYY-MM-DD'))`;
+  const routeDay = moscowTodayIso();
+  const orderDaySql = driverOrderDaySql('o');
+  const todaySql = driverTodayMoscowSql();
+  const statusPlaceholders = DRIVER_VISIBLE_STATUSES.map(() => '?').join(', ');
   const rows = await db
     .prepare(
       `SELECT o.*,
@@ -2217,20 +2443,15 @@ app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(a
        JOIN users u ON u.id = o.user_id
        WHERE trim(COALESCE(o.driver, '')) = trim(?)
          AND trim(COALESCE(o.driver, '')) <> ''
-         AND o.status IN ('pending_operator', 'confirmed', 'processing', 'courier', 'on_way', 'delivered')
-         AND (
-           ${orderDaySql} = to_char(CURRENT_DATE, 'YYYY-MM-DD')
-           OR (
-             ${orderDaySql} < to_char(CURRENT_DATE, 'YYYY-MM-DD')
-             AND o.status NOT IN ('delivered', 'cancelled')
-           )
-         )
+         AND lower(trim(o.status)) <> 'cancelled'
+         AND o.status IN (${statusPlaceholders})
+         AND ${orderDaySql} = ${todaySql}
        ORDER BY CASE WHEN o.status = 'delivered' THEN 2 WHEN o.status IN ('courier', 'on_way', 'processing') THEN 0 ELSE 1 END,
               o.delivery_date ASC NULLS LAST,
               o.created_at DESC,
               o.id DESC`
     )
-    .all(label);
+    .all(label, ...DRIVER_VISIBLE_STATUSES);
   const orders = rows.map((r) => {
     const { join_client_name, join_client_email, join_client_phone, ...order } = r;
     const nm = join_client_name && String(join_client_name).trim();
@@ -2242,7 +2463,7 @@ app.get('/api/driver/orders', requireAuth, requireRole('driver'), asyncHandler(a
       email_hint: join_client_email || null,
     };
   });
-  res.json({ orders });
+  res.json({ orders, route_day: routeDay });
 }));
 
 app.post(
@@ -2257,11 +2478,29 @@ app.post(
     if (!label) return res.status(403).json({ error: 'Нет метки экспедитора в учётной записи.' });
     const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
     if (!order) return res.status(404).json({ error: 'Заказ не найден.' });
-    if (String(order.driver || '').trim() !== label) return res.status(403).json({ error: 'Это не ваш заказ.' });
+    if (String(order.status || '').trim().toLowerCase() === 'cancelled') {
+      return res.status(400).json({ error: 'Заказ отменён и больше не в маршруте.' });
+    }
+    const orderDriver = String(order.driver || '').trim();
+    if (
+      !orderDriver ||
+      orderDriver.toLocaleLowerCase('ru') !== label.toLocaleLowerCase('ru')
+    ) {
+      return res.status(403).json({ error: 'Это не ваш заказ.' });
+    }
     if (!DRIVER_ORDER_STATUSES.includes(order.status)) {
       return res.status(400).json({
         error: 'Заказ уже доставлен, отменён или ещё не передан водителю оператором.',
       });
+    }
+    const orderDayRaw = String(order.delivery_date || '').trim().slice(0, 10);
+    const orderDay =
+      orderDayRaw ||
+      (order.created_at
+        ? new Date(order.created_at).toLocaleDateString('en-CA', { timeZone: DRIVER_ROUTE_TZ })
+        : '');
+    if (orderDay && orderDay !== moscowTodayIso()) {
+      return res.status(400).json({ error: 'Этот заказ не на сегодня — отметить доставку нельзя.' });
     }
     const prevStatus = order.status;
     await db
@@ -2298,11 +2537,11 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
     const v = schemas.validate(schemas.orderPatchSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
     if (v.value.delivery_date != null) {
-      const dateCheck = validateDeliveryDateForBooking(v.value.delivery_date);
+      const dateCheck = validateDeliveryDateFormat(v.value.delivery_date);
       if (!dateCheck.ok) return res.status(400).json({ error: dateCheck.error });
       v.value.delivery_date = dateCheck.value;
     }
-    const changeReason = String(v.value.change_reason || '').trim();
+    let changeReason = String(v.value.change_reason || '').trim();
     const requiresReason =
       (v.value.delivery_date != null &&
         deliveryDateStoredChanged(order.delivery_date, v.value.delivery_date)) ||
@@ -2310,18 +2549,39 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
         deliverySlotStoredChanged(order.delivery_slot, v.value.delivery_slot)) ||
       (v.value.status != null && v.value.status === 'cancelled' && order.status !== 'cancelled');
     if (requiresReason && changeReason.length < 3) {
-      return res.status(400).json({
-        error: 'Укажите причину переноса доставки или отмены заказа (не менее 3 символов).',
-      });
+      changeReason =
+        v.value.status === 'cancelled' && order.status !== 'cancelled'
+          ? 'Отмена оператором'
+          : 'Изменение оператором';
     }
 
     if (v.value.items_json != null) {
-      const pricedPatch = await orderPricing.resolveStaffOrderItemsPatch(db, v.value.items_json);
-      if (!pricedPatch.ok) return res.status(400).json({ error: pricedPatch.error });
-      v.value.items_json = pricedPatch.itemsJson;
-      v.value.total_sum = pricedPatch.total_sum;
+      if (orderPricing.itemsJsonSemanticallyEqual(v.value.items_json, order.items_json)) {
+        delete v.value.items_json;
+        delete v.value.total_sum;
+      } else {
+        const pricedPatch = await orderPricing.resolveStaffOrderItemsPatch(db, v.value.items_json);
+        if (!pricedPatch.ok) return res.status(400).json({ error: pricedPatch.error });
+        v.value.items_json = pricedPatch.itemsJson;
+        v.value.total_sum = pricedPatch.total_sum;
+      }
     } else {
       delete v.value.total_sum;
+    }
+
+    if (v.value.driver !== undefined) {
+      const driverNorm = await normalizeOperatorOrderDriverInput(
+        v.value.driver,
+        v.value.status != null ? v.value.status : order.status
+      );
+      if (driverNorm.error) return res.status(400).json({ error: driverNorm.error });
+      v.value.driver = driverNorm.driver;
+      if (
+        driverNorm.statusBump &&
+        (v.value.status == null || String(v.value.status).trim().toLowerCase() === 'new')
+      ) {
+        v.value.status = driverNorm.statusBump;
+      }
     }
 
     const fields = [];
@@ -2434,7 +2694,7 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
 
 /** Дата заказа для отчётов: доставка или дата создания. */
 const ADMIN_ORDER_DATE_EXPR = `COALESCE(NULLIF(trim(o.delivery_date), ''), to_char(o.created_at, 'YYYY-MM-DD'))`;
-/** В статистику админа — только реальные заказы оператора (без демо-маркеров и demo-клиентов). */
+/** В статистику админа — только реальные заказы (без демо-маркеров и demo-клиентов). */
 const ADMIN_STATS_DEMO_EXCLUDE = `(
   COALESCE(o.courier_note, '') NOT LIKE '%§ekva_seed%'
   AND COALESCE(o.courier_note, '') NOT LIKE '%§demo_op%'
@@ -2442,6 +2702,27 @@ const ADMIN_STATS_DEMO_EXCLUDE = `(
   AND lower(COALESCE(u.email, '')) NOT LIKE 'demo.%@ekvaline.local'
   AND lower(COALESCE(u.email, '')) <> 'clienteekva@mail.ru'
 )`;
+/** Заказы на доставку планируются вперёд — «дата по» может быть в будущем. */
+const ADMIN_STATS_MAX_FUTURE_DAYS = 60;
+
+function shiftIsoDateLocalServer(iso, deltaDays) {
+  const parts = String(iso || '')
+    .trim()
+    .split('-')
+    .map((x) => Number(x));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return todayIsoLocal();
+  const base = new Date(parts[0], parts[1] - 1, parts[2]);
+  base.setDate(base.getDate() + deltaDays);
+  return todayIsoLocalFromDate(base);
+}
+
+function todayIsoLocalFromDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function maxAdminStatsToIso() {
+  return shiftIsoDateLocalServer(todayIsoLocal(), ADMIN_STATS_MAX_FUTURE_DAYS);
+}
 
 function todayIsoLocal() {
   const d = new Date();
@@ -2452,12 +2733,14 @@ function parseAdminStatsPeriodQuery(req) {
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   let from = iso.test(String(req.query.from || '').trim()) ? String(req.query.from).trim() : null;
   let to = iso.test(String(req.query.to || '').trim()) ? String(req.query.to).trim() : null;
-  const today = todayIsoLocal();
-  if (from && from > today) {
-    return { error: 'Дата «с» не может быть позже сегодняшнего дня.' };
+  const maxTo = maxAdminStatsToIso();
+  if (from && from > maxTo) {
+    return { error: `Дата «с» не может быть позже ${maxTo}.` };
   }
-  if (to && to > today) {
-    return { error: 'Дата «по» не может быть в будущем.' };
+  if (to && to > maxTo) {
+    return {
+      error: `Дата «по» не может быть позже ${maxTo} (доставка планируется не более чем на ${ADMIN_STATS_MAX_FUTURE_DAYS} дней вперёд).`,
+    };
   }
   if (from && to && from > to) {
     return { error: 'Дата «с» не может быть позже даты «по».' };
@@ -2576,16 +2859,41 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), asyncHandler(asyn
       sum: Math.round((Number(x.sum) || 0) * 100) / 100,
     }));
 
+  let deliverySpan = null;
+  const ordersTotal = Number(summaryRow.orders_total ?? 0);
+  if (ordersTotal === 0) {
+    const spanRow =
+      (await db
+        .prepare(
+          `SELECT COUNT(*)::int AS c,
+                  MIN(${ADMIN_ORDER_DATE_EXPR}) AS min_d,
+                  MAX(${ADMIN_ORDER_DATE_EXPR}) AS max_d
+           FROM orders o
+           JOIN users u ON u.id = o.user_id
+           WHERE ${ADMIN_STATS_DEMO_EXCLUDE}`
+        )
+        .get()) || {};
+    const spanCount = Number(spanRow.c) || 0;
+    if (spanCount > 0) {
+      deliverySpan = {
+        count: spanCount,
+        minDate: spanRow.min_d != null ? String(spanRow.min_d) : null,
+        maxDate: spanRow.max_d != null ? String(spanRow.max_d) : null,
+      };
+    }
+  }
+
   res.json({
     period: { from, to },
     usersByRole,
     summary: {
-      ordersTotal: Number(summaryRow.orders_total ?? 0),
+      ordersTotal,
       ordersSum: Math.round((Number(summaryRow.orders_sum) || 0) * 100) / 100,
       deliveredCount: Number(summaryRow.delivered_count ?? 0),
       deliveredSum: Math.round((Number(summaryRow.delivered_sum) || 0) * 100) / 100,
       cancelledCount: Number(summaryRow.cancelled_count ?? 0),
     },
+    deliverySpan,
     ordersByStatus: mapRows(ordersByStatus).map((x) => ({
       status: x.status || x.label,
       count: x.count,
@@ -2665,6 +2973,64 @@ app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), csrfMiddlew
   res.json({ user: publicUser(updated) });
 }));
 
+app.delete('/api/admin/users/:id', requireAuth, requireRole('admin'), csrfMiddleware, asyncHandler(async (req, res) => {
+  const targetId = Number(req.params.id);
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    return res.status(400).json({ error: 'Некорректный пользователь.' });
+  }
+  if (targetId === req.user.id) {
+    return res.status(400).json({ error: 'Нельзя удалить собственную учётную запись.' });
+  }
+
+  const target = await getUserById(targetId);
+  if (!target) return res.status(404).json({ error: 'Пользователь не найден.' });
+  if (!isStaffRole(target.role)) {
+    return res.status(400).json({ error: 'Удалять можно только учётные записи сотрудников.' });
+  }
+
+  if (String(target.role || '').toLowerCase() === 'admin') {
+    const row = await db.prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'admin'`).get();
+    if (Number(row?.n) <= 1) {
+      return res.status(400).json({ error: 'Нельзя удалить последнего администратора.' });
+    }
+  }
+
+  await db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  audit(db, req.user.id, 'admin_user_delete', `target=${targetId} email=${target.email}`, req.ip);
+  res.json({ ok: true, message: 'Учётная запись удалена.' });
+}));
+
+app.post(
+  '/api/admin/users/:id/staff-password',
+  requireAuth,
+  requireRole('admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.adminStaffPasswordSetSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    const targetId = Number(req.params.id);
+    const target = await getUserById(targetId);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден.' });
+    if (!isStaffRole(target.role)) {
+      return res.status(400).json({ error: 'Пароль можно менять только у сотрудников.' });
+    }
+
+    const password_hash = bcrypt.hashSync(v.value.password, 12);
+    await db
+      .prepare(
+        `UPDATE users SET password_hash = ?, password_changed_at = NOW()::text, login_attempts = 0, locked_until = NULL, password_reset_token = NULL, password_reset_expires = NULL WHERE id = ?`
+      )
+      .run(password_hash, targetId);
+
+    audit(db, req.user.id, 'admin_staff_password_set', `target=${targetId}`, req.ip);
+    res.json({
+      ok: true,
+      message: 'Новый пароль сохранён. Сообщите его сотруднику.',
+    });
+  })
+);
+
 app.post('/api/admin/users', requireAuth, requireRole('admin'), csrfMiddleware, asyncHandler(async (req, res) => {
   const v = schemas.validate(schemas.adminUserCreateSchema, req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
@@ -2700,8 +3066,9 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), csrfMiddleware, 
     )
     .run(email, phone, password_hash, first_name, last_name || '', role, role === 'driver' ? drvLbl : null);
   const user = await getUserById(info.lastInsertRowid);
+  if (role === 'driver') await ensureDriverRouteLabelForUser(user.id);
   audit(db, req.user.id, 'admin_user_create', `target=${user.id} role=${role}`, req.ip);
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(await getUserById(user.id)) });
 }));
 
 app.get('/api/admin/products', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
@@ -2759,7 +3126,7 @@ app.patch('/api/admin/products/:id', requireAuth, requireRole('admin'), csrfMidd
   const values = [];
   const keys = ['category_id', 'name', 'description', 'price', 'volume_liters', 'stock', 'sort_order', 'hidden', 'preorder'];
   keys.forEach((k) => {
-    if (p[k] == null && p[k] !== 0) return;
+    if (!Object.prototype.hasOwnProperty.call(p, k)) return;
     fields.push(`${k} = ?`);
     values.push(p[k]);
   });
@@ -2960,24 +3327,77 @@ app.patch('/api/admin/delivery-zones/:id', requireAuth, requireRole('admin'), cs
   res.json({ zone: await db.prepare('SELECT * FROM delivery_zones WHERE id = ?').get(id) });
 }));
 
+function normalizeFeedbackMessageRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  return {
+    ...row,
+    contacted: Boolean(Number(row.contacted)),
+  };
+}
+
 app.get('/api/admin/feedback', requireAuth, requireRole('admin', 'manager', 'operator'), asyncHandler(async (req, res) => {
   const messages = await db
     .prepare(
-      `SELECT f.id, f.user_id, f.name, f.phone, f.message, f.created_at, u.email AS user_email
+      `SELECT f.id, f.user_id, f.name, f.phone, f.message, f.contacted, f.created_at, u.email AS user_email
        FROM feedback_messages f
        LEFT JOIN users u ON u.id = f.user_id
        ORDER BY f.id DESC LIMIT 300`
     )
     .all();
-  res.json({ messages });
+  res.json({ messages: messages.map(normalizeFeedbackMessageRow) });
 }));
 
-/** Передаёт клиенту реальный PORT — fallback формы при Live Server/IP не промахиваются мимо сервера. */
+app.get('/api/manager/feedback', requireAuth, requireRole('manager', 'admin'), asyncHandler(async (req, res) => {
+  const messages = await db
+    .prepare(
+      `SELECT f.id, f.user_id, f.name, f.phone, f.message, f.contacted, f.created_at, u.email AS user_email
+       FROM feedback_messages f
+       LEFT JOIN users u ON u.id = f.user_id
+       ORDER BY COALESCE(f.contacted, 0) ASC, f.id DESC
+       LIMIT 500`
+    )
+    .all();
+  res.json({ messages: messages.map(normalizeFeedbackMessageRow) });
+}));
+
+app.patch(
+  '/api/manager/feedback/:id/contacted',
+  requireAuth,
+  requireRole('manager', 'admin'),
+  csrfMiddleware,
+  asyncHandler(async (req, res) => {
+    const v = schemas.validate(schemas.feedbackContactedPatchSchema, req.body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id.' });
+    const existing = await db.prepare('SELECT id FROM feedback_messages WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Обращение не найдено.' });
+    const contacted = v.value.contacted ? 1 : 0;
+    await db.prepare('UPDATE feedback_messages SET contacted = ? WHERE id = ?').run(contacted, id);
+    const row = await db
+      .prepare(
+        `SELECT f.id, f.user_id, f.name, f.phone, f.message, f.contacted, f.created_at, u.email AS user_email
+         FROM feedback_messages f
+         LEFT JOIN users u ON u.id = f.user_id
+         WHERE f.id = ?`
+      )
+      .get(id);
+    audit(db, req.user.id, 'feedback_contacted', `id=${id} contacted=${contacted}`, req.ip);
+    res.json({ message: normalizeFeedbackMessageRow(row) });
+  })
+);
+
+/** Передаёт клиенту PORT и ключ Яндекс.Карт (fallback, если fetch maps-config недоступен). */
 app.get('/ekvaline-runtime.js', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.type('application/javascript');
   const p = Number(resolvedListenPort);
-  res.send(`window.__EKVALINE_LISTEN_PORT__=${Number.isFinite(p) ? p : 3001};\n`);
+  const mapsKey = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
+  const lines = [`window.__EKVALINE_LISTEN_PORT__=${Number.isFinite(p) ? p : 3001};`];
+  if (mapsKey) {
+    lines.push(`window.__EKVALINE_YANDEX_MAPS_KEY__=${JSON.stringify(mapsKey)};`);
+  }
+  res.send(`${lines.join('\n')}\n`);
 });
 
 /** На VPS/хосте браузер иначе держит старый script.js — корзина «не работает» после деплоя. */
@@ -2989,7 +3409,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(ROOT, { index: 'index.html' }));
+app.use(denySensitiveStaticFiles);
+app.use(
+  express.static(ROOT, {
+    index: 'index.html',
+    setHeaders(res, filePath) {
+      if (String(filePath || '').toLowerCase().endsWith('.html')) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      }
+    },
+  })
+);
 
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) {
@@ -3018,18 +3448,16 @@ server.on('listening', () => {
     // eslint-disable-next-line no-console
     console.warn(`(порт ${LISTEN_PREF} был занят — слушаем на ${port})`);
   }
-  // eslint-disable-next-line no-console
-  console.log('Учётные записи демо: оператор / менеджер / админ — вход только по email (форма «Вход»):');
-  // eslint-disable-next-line no-console
-  console.log('  adminekva@mail.ru       / AdminEkva2026!');
-  // eslint-disable-next-line no-console
-  console.log('  managerekva@mail.ru      / ManagerEkva2026!');
-  // eslint-disable-next-line no-console
-  console.log('  operatorekva@mail.ru     / OperatorEkva2026!');
   if (!String(process.env.YANDEX_MAPS_API_KEY || '').trim()) {
     // eslint-disable-next-line no-console
     console.warn(
       'Карты: задайте YANDEX_MAPS_API_KEY в .env (JavaScript API) — без ключа карта не загрузится.'
+    );
+  } else {
+    const base = String(process.env.APP_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+    // eslint-disable-next-line no-console
+    console.log(
+      `Карты: ключ JavaScript API задан. В кабинете developer.tech.yandex.ru → ключ JS API → HTTP Referer: ${base}/* (и ${base.replace(/^http:/, 'https:')}/* при HTTPS)`
     );
   }
   const geocoderKey = String(
@@ -3038,13 +3466,28 @@ server.on('listening', () => {
   if (!geocoderKey) {
     // eslint-disable-next-line no-console
     console.warn(
-      'Геокодер: задайте YANDEX_GEOCODER_API_KEY в .env (HTTP API Геокодера) — поиск адресов не будет работать.'
+      'Геокодер: задайте YANDEX_GEOCODER_API_KEY в .env (HTTP API Геокодера) — поиск адресов медленнее (резерв Nominatim).'
+    );
+  }
+  const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const baseUrl = String(process.env.APP_BASE_URL || '').trim();
+  const secureCookies = String(process.env.USE_SECURE_COOKIES || '').toLowerCase() === 'true';
+  if (isProd && baseUrl.startsWith('https://') && !secureCookies) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[deploy] APP_BASE_URL=https, но USE_SECURE_COOKIES не true — вход и оформление заказа могут не работать (cookie сессии).'
+    );
+  }
+  if (isProd && secureCookies && baseUrl.startsWith('http://')) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[deploy] USE_SECURE_COOKIES=true при http:// в APP_BASE_URL — cookie не сохранятся. Нужен HTTPS или отключите USE_SECURE_COOKIES.'
     );
   }
   if (!mailer.isMailConfigured()) {
     // eslint-disable-next-line no-console
     console.warn(
-      'Почта (SMTP): не настроена — коды подтверждения выводятся в консоль и в кабинете (режим разработки). Задайте SMTP_HOST, SMTP_USER, SMTP_PASS в .env.'
+      'Почта (SMTP): не настроена — коды подтверждения email и смены пароля не отправляются. Задайте SMTP_HOST, SMTP_USER, SMTP_PASS в .env.'
     );
   } else {
     mailer

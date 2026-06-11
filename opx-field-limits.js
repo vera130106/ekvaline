@@ -9,7 +9,9 @@
   const NOTE_MAX = 500;
   const CHANGE_REASON_MAX = 2000;
   const ORDER_NOTE_TEXT_MAX = 2000;
-  const PHONE_INPUT_MAX = 20;
+  const PHONE_DIGITS_MAX = 11;
+  const PHONE_MASK_MAX = 18;
+  const PHONE_INPUT_MAX = PHONE_MASK_MAX;
   const SEARCH_MAX = 120;
   const MAP_STREET_MAX = 120;
   const MAP_HOUSE_MAX = 24;
@@ -188,6 +190,66 @@
     return { ok: true, client: nm.value, address: addrLine };
   }
 
+  function phoneDigitsFromRaw(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (!d) return '';
+    if (d[0] === '8') d = `7${d.slice(1)}`;
+    else if (d[0] === '9') d = `7${d}`;
+    else if (d[0] !== '7') d = `7${d}`;
+    return d.slice(0, PHONE_DIGITS_MAX);
+  }
+
+  function formatPhoneMaskRu(raw) {
+    const cleaned = phoneDigitsFromRaw(raw);
+    if (!cleaned) return '';
+    const p1 = cleaned.slice(1, 4);
+    const p2 = cleaned.slice(4, 7);
+    const p3 = cleaned.slice(7, 9);
+    const p4 = cleaned.slice(9, 11);
+    let result = '+7';
+    if (p1) result += ` (${p1}`;
+    if (p1.length === 3) result += ')';
+    if (p2) result += ` ${p2}`;
+    if (p3) result += `-${p3}`;
+    if (p4) result += `-${p4}`;
+    return result;
+  }
+
+  function phoneInputWouldExceedLimit(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (!d) return false;
+    if (d[0] === '8') d = `7${d.slice(1)}`;
+    else if (d[0] === '9') d = `7${d}`;
+    else if (d[0] !== '7') d = `7${d}`;
+    return d.length > PHONE_DIGITS_MAX;
+  }
+
+  function syncPhoneDigitCounter(el, counterEl) {
+    if (!(el instanceof HTMLInputElement) || !(counterEl instanceof HTMLElement)) return;
+    const len = phoneDigitsFromRaw(el.value).length;
+    counterEl.textContent = `${len}/${PHONE_DIGITS_MAX}`;
+  }
+
+  function bindPhoneInput(el, onTrim) {
+    if (!(el instanceof HTMLInputElement)) return;
+    const counterId = el.getAttribute('data-phone-digits-count-for');
+    const counterEl = counterId ? document.getElementById(counterId) : null;
+    el.maxLength = PHONE_MASK_MAX;
+    el.setAttribute('inputmode', 'tel');
+    el.setAttribute('autocomplete', 'tel');
+
+    const apply = () => {
+      const trimmed = phoneInputWouldExceedLimit(el.value);
+      const formatted = formatPhoneMaskRu(el.value);
+      if (el.value !== formatted) el.value = formatted;
+      syncPhoneDigitCounter(el, counterEl);
+      if (trimmed && typeof onTrim === 'function') onTrim(PHONE_DIGITS_MAX);
+    };
+
+    el.addEventListener('input', apply);
+    apply();
+  }
+
   function bindTextLimit(el, max, onTrim) {
     if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
     el.maxLength = max;
@@ -201,15 +263,17 @@
 
   function bindOperatorFormLimits(handlers) {
     const onTrim = handlers && typeof handlers.onTrim === 'function' ? handlers.onTrim : null;
+    const onPhoneTrim =
+      handlers && typeof handlers.onPhoneTrim === 'function' ? handlers.onPhoneTrim : onTrim;
+    bindPhoneInput(handlers?.modalPhone, onPhoneTrim);
+    bindPhoneInput(handlers?.clientPhone, onPhoneTrim);
     const fields = [
       [handlers?.modalClient, NAME_MAX],
-      [handlers?.modalPhone, PHONE_INPUT_MAX],
       [handlers?.modalAddress, ADDRESS_MAX],
       [handlers?.modalNote, NOTE_MAX],
       [handlers?.reasonText, CHANGE_REASON_MAX],
       [handlers?.search, SEARCH_MAX],
       [handlers?.clientName, NAME_MAX],
-      [handlers?.clientPhone, PHONE_INPUT_MAX],
       [handlers?.clientAddress, ADDRESS_MAX],
       [handlers?.mapStreet, MAP_STREET_MAX],
       [handlers?.mapHouse, MAP_HOUSE_MAX],
@@ -229,7 +293,13 @@
     NOTE_MAX,
     CHANGE_REASON_MAX,
     ORDER_NOTE_TEXT_MAX,
+    PHONE_DIGITS_MAX,
+    PHONE_MASK_MAX,
     PHONE_INPUT_MAX,
+    phoneDigitsFromRaw,
+    formatPhoneMaskRu,
+    syncPhoneDigitCounter,
+    bindPhoneInput,
     SEARCH_MAX,
     MAP_STREET_MAX,
     MAP_HOUSE_MAX,

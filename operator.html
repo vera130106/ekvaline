@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>ЭкваЛайн — Панель оператора</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,8 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260520notify" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260521staff" />
+    <link rel="stylesheet" href="styles.css?v=20260611host" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260611host" />
+    <link rel="stylesheet" href="operator-mobile.css?v=20260611host" />
   </head>
   <body class="operator-page">
     <main class="opx-shell">
@@ -37,16 +38,26 @@
       </header>
 
       <section class="opx-controls">
+        <div class="opx-controls-primary">
         <button type="button" class="opx-btn" id="opxCreateOrderBtn">Создать</button>
         <button type="button" class="opx-icon-btn" title="Обновить" id="opxRefreshBtn">⟳</button>
         <input
-          type="search"
+          type="text"
           id="opxSearchInput"
           class="opx-input"
+          name="opx-orders-filter-q"
           placeholder="улица, имя, номер заказа, телефон…"
           maxlength="120"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          inputmode="search"
+          role="searchbox"
           aria-label="Поиск заказов в выбранном дне"
         />
+        </div>
+        <div class="opx-controls-dates">
         <label class="opx-date-label" for="opxDateFilter" title="Дата доставки">Дата:</label>
         <button type="button" class="opx-step-btn" id="opxDatePrevBtn" aria-label="Предыдущий день">
           ◀
@@ -59,6 +70,7 @@
         </button>
         <input type="date" id="opxDateFilter" class="opx-input opx-date-input" />
         <button type="button" class="opx-icon-btn" title="Сброс даты" id="opxClearDateBtn">✕</button>
+        </div>
         <div class="opx-controls-tail">
           <button
             type="button"
@@ -98,6 +110,8 @@
         </div>
       </section>
 
+      <details class="opx-legend-fold">
+        <summary class="opx-legend-fold-summary">Подсветка строк заказов</summary>
       <div class="opx-row-legend" aria-label="Подсветка строк заказов">
         <span class="opx-row-legend-item"
           ><span class="opx-row-legend-dot is-unassigned" aria-hidden="true"></span>Не назначен, не в работе</span
@@ -112,6 +126,7 @@
           >Обновление в реальном времени</span
         >
       </div>
+      </details>
       <section class="opx-grid-wrap">
         <table class="opx-grid">
           <colgroup>
@@ -173,22 +188,25 @@
     <div id="opxZoneMapOverlay" class="opx-zone-map-overlay" hidden>
       <div class="opx-zone-map-toolbar">
         <div class="opx-zone-map-toolbar-head">
-          <div class="opx-zone-map-title">Карта зон и заказов</div>
+          <div class="opx-zone-map-title">Карта заказов</div>
           <button type="button" class="opx-modal-btn" id="opxCloseZoneMap">Закрыть карту</button>
         </div>
-        <div class="opx-row-legend opx-row-legend--map" aria-label="Подсветка заказов на карте">
+        <div class="opx-row-legend opx-row-legend--map" aria-label="Цвета меток на карте">
           <span class="opx-row-legend-item"
-            ><span class="opx-row-legend-dot is-unassigned" aria-hidden="true"></span>Не назначен, не в работе</span
+            ><span class="opx-row-legend-dot is-confirmed" aria-hidden="true"></span>Подтверждён</span
           >
           <span class="opx-row-legend-item"
-            ><span class="opx-row-legend-dot is-in-work" aria-hidden="true"></span>В пути (назначен водитель)</span
+            ><span class="opx-row-legend-dot is-on-map-way" aria-hidden="true"></span>В пути</span
           >
           <span class="opx-row-legend-item"
             ><span class="opx-row-legend-dot is-delivered" aria-hidden="true"></span>Доставлен</span
           >
         </div>
       </div>
-      <div id="opxZoneMapCanvas" class="opx-zone-map-canvas"></div>
+      <div class="opx-zone-map-body">
+        <div id="opxZoneMapCanvas" class="opx-zone-map-canvas"></div>
+        <aside id="opxZoneMapAddressList" class="opx-zone-map-address-list" hidden aria-label="Адреса заказов"></aside>
+      </div>
     </div>
 
     <div id="opxReportsOverlay" class="opx-reports-overlay" hidden>
@@ -204,12 +222,7 @@
         <div class="opx-reports-toolbar-head">
           <div class="opx-reports-title-wrap">
             <div class="opx-reports-title">Отчёты оператора</div>
-            <p class="opx-reports-subtitle">Заказы и журнал за период · действия оператора и водителей</p>
-          </div>
-          <div class="opx-reports-periods" role="group" aria-label="Быстрый выбор периода">
-            <button type="button" class="opx-reports-period-btn" data-opx-report-period="7">7 дней</button>
-            <button type="button" class="opx-reports-period-btn is-active" data-opx-report-period="30">Месяц</button>
-            <button type="button" class="opx-reports-period-btn" data-opx-report-period="90">Квартал</button>
+            <p class="opx-reports-subtitle">Данные из заказов оператора и журнала событий за выбранный период</p>
           </div>
         </div>
         <div class="opx-reports-toolbar-dates">
@@ -217,10 +230,8 @@
           <label>по <input type="date" id="opxReportsDateTo" class="opx-input opx-date-input" /></label>
           <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxReportsBuildBtn">Сформировать</button>
         </div>
-        <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsExcelBtn">Скачать Excel</button>
         <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPrintBtn">Печать</button>
         <button type="button" class="opx-modal-btn opx-reports-no-print" id="opxReportsPdfBtn">Скачать PDF</button>
-        <button type="button" class="opx-modal-btn" id="opxCloseReports">Закрыть отчёты</button>
       </div>
       <div class="opx-reports-content">
         <div class="opx-reports-layout">
@@ -351,15 +362,12 @@
           <h2 class="opx-settings-title">Приём заказов на доставку</h2>
           <p class="opx-settings-intro">
             Закройте целый день или отдельные интервалы — клиент не увидит их при оформлении заказа на сайте. Оператор
-            по-прежнему может создавать заказы вручную.
+            по-прежнему может создавать заказы вручную. Изменения сохраняются автоматически при установке галочки.
           </p>
           <p id="opxSettingsLastChange" class="opx-settings-last-change" hidden></p>
         </div>
         <div id="opxSettingsDaysList" class="opx-settings-days" aria-live="polite"></div>
-        <footer class="opx-settings-foot">
-          <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxSettingsSaveBtn">Сохранить</button>
-          <span id="opxSettingsStatus" class="opx-settings-status" role="status"></span>
-        </footer>
+        <p id="opxSettingsStatus" class="opx-settings-status" role="status"></p>
       </div>
     </div>
 
@@ -433,8 +441,21 @@
               </div>
             </label>
             <label class="opx-modal-field">
-              <span class="opx-modal-label">Телефон</span>
-              <input id="opxModalPhone" type="tel" class="opx-modal-input" autocomplete="tel" maxlength="20" />
+              <span class="opx-modal-field-head">
+                <span class="opx-modal-label">Телефон</span>
+                <span class="opx-char-count" id="opxModalPhoneCount">0/11</span>
+              </span>
+              <input
+                id="opxModalPhone"
+                type="tel"
+                class="opx-modal-input"
+                autocomplete="tel"
+                inputmode="tel"
+                maxlength="18"
+                placeholder="+7 (999) 123-45-67"
+                data-phone-digits-count-for="opxModalPhoneCount"
+              />
+              <span class="opx-modal-hint">11 цифр номера России (+7 или 8 в начале)</span>
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Адрес доставки</span>
@@ -509,7 +530,28 @@
             <div class="opx-order-cart-head">
               <h3 class="opx-modal-section-title">Товары заказа</h3>
               <div class="opx-order-cart-actions">
-                <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxOrderCartAddBtn">+ Добавить товар</button>
+                <div class="opx-order-cart-add-wrap">
+                  <button
+                    type="button"
+                    class="opx-modal-btn opx-modal-btn-primary"
+                    id="opxOrderCartAddBtn"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="opxOrderCartCatalogPicker"
+                  >
+                    + Добавить товар
+                  </button>
+                  <div
+                    id="opxOrderCartCatalogPicker"
+                    class="opx-cart-catalog-picker"
+                    hidden
+                    role="listbox"
+                    aria-label="Выбор товара из каталога"
+                  >
+                    <div class="opx-cart-catalog-picker-head">Выберите товар</div>
+                    <div id="opxOrderCartCatalogPickerBody" class="opx-cart-catalog-picker-body"></div>
+                  </div>
+                </div>
               </div>
             </div>
             <div id="opxOrderCartList" class="opx-order-cart-list" role="list"></div>
@@ -534,7 +576,8 @@
 
         <section class="opx-ord-panel" data-opx-ord-panel="notes" hidden>
           <section class="opx-modal-section">
-            <h3 class="opx-modal-section-title">Заметки по клиенту</h3>
+            <h3 class="opx-modal-section-title">Заметки</h3>
+            <p class="opx-order-notes-hint">Обычные заметки — по клиенту. «Закреплённое примечание к заказу» — только для этого заказа.</p>
             <div class="opx-order-notes-tools">
               <button type="button" class="opx-order-notes-btn opx-order-notes-add" id="opxOrderNotesAdd">Добавить</button>
               <button type="button" class="opx-order-notes-btn opx-order-notes-remove" id="opxOrderNotesDelete">Удалить</button>
@@ -565,6 +608,9 @@
               Отменить заказ
             </button>
             <button type="button" class="opx-modal-btn opx-modal-btn-soft" id="opxModalRescheduleBtn">Перенести</button>
+            <button type="button" class="opx-modal-btn opx-modal-btn-delete" id="opxModalDeleteOrderBtn">
+              Удалить заказ
+            </button>
           </div>
           <div class="opx-modal-actions-save">
             <button type="button" class="opx-modal-btn opx-modal-btn-primary" id="opxModalSaveBtn">
@@ -574,7 +620,7 @@
           </div>
         </div>
       </section>
-      <aside id="opxOrderNotesDock" class="opx-order-notes-dock" aria-label="Заметки по клиенту" hidden>
+      <aside id="opxOrderNotesDock" class="opx-order-notes-dock" aria-label="Заметки по заказу и клиенту" hidden>
         <h3 class="opx-order-notes-dock-title">Заметки</h3>
         <ul id="opxOrderNotesDockList" class="opx-order-notes-dock-list" aria-live="polite"></ul>
         <button type="button" class="opx-order-notes-dock-details" id="opxOrderNotesDockDetails">Подробно</button>
@@ -623,12 +669,29 @@
           <h3 class="opx-modal-section-title">Данные клиента</h3>
           <div class="opx-modal-grid">
             <label class="opx-modal-field">
-              <span class="opx-modal-label">Имя / организация</span>
+              <span class="opx-modal-field-head">
+                <span class="opx-modal-label">Имя / организация</span>
+                <span class="opx-char-count" id="opxClientNameCount">0/60</span>
+              </span>
               <input id="opxClientNameInput" class="opx-modal-input" maxlength="60" />
+              <span class="opx-modal-hint opx-modal-hint-spacer" aria-hidden="true">&#8203;</span>
             </label>
             <label class="opx-modal-field">
-              <span class="opx-modal-label">Телефон</span>
-              <input id="opxClientPhoneInput" class="opx-modal-input" maxlength="20" />
+              <span class="opx-modal-field-head">
+                <span class="opx-modal-label">Телефон</span>
+                <span class="opx-char-count" id="opxClientPhoneCount">0/11</span>
+              </span>
+              <input
+                id="opxClientPhoneInput"
+                type="tel"
+                class="opx-modal-input"
+                autocomplete="tel"
+                inputmode="tel"
+                maxlength="18"
+                placeholder="+7 (999) 123-45-67"
+                data-phone-digits-count-for="opxClientPhoneCount"
+              />
+              <span class="opx-modal-hint">11 цифр номера России (+7 или 8 в начале)</span>
             </label>
             <label class="opx-modal-field opx-modal-field-wide">
               <span class="opx-modal-label">Адрес доставки</span>
@@ -831,24 +894,22 @@
     </div>
 
     <div id="opxToast" class="ek-notify opx-toast" hidden role="status" aria-live="polite" aria-atomic="true">
-      <div class="ek-notify-card">
-        <span class="ek-notify-icon" aria-hidden="true"></span>
-        <p id="opxToastText" class="ek-notify-text"></p>
-        <button type="button" id="opxToastClose" class="ek-notify-close" aria-label="Закрыть">×</button>
+      <div class="ek-notify-card opx-notice-card">
+        <span id="opxToastTag" class="opx-notice-tag">Сообщение</span>
+        <p id="opxToastText" class="ek-notify-text opx-notice-text"></p>
+        <button type="button" id="opxToastClose" class="opx-notice-close" aria-label="Закрыть">×</button>
       </div>
     </div>
 
     <script src="api-client.js"></script>
-    <script src="orders-sync.js?v=20260520stats"></script>
-    <script src="maps-runtime.js?v=20260520mapchrome"></script>
+    <script src="client-guard.js?v=20260611host"></script>
+    <script src="/ekvaline-runtime.js"></script>
+    <script src="orders-sync.js?v=20260611host"></script>
+    <script src="maps-runtime.js?v=20260611host"></script>
     <script src="delivery-slots.js?v=20260519cleanup"></script>
-    <script src="opx-field-limits.js?v=20260519cleanup"></script>
-    <script src="operator.js?v=20260524orderqty"></script>
-    <script src="vendor/xlsx.full.min.js"></script>
-    <script
-      src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
+    <script src="opx-field-limits.js?v=20260610phone"></script>
+    <script src="pdf-export-boot.js?v=20260611pdf"></script>
+    <script src="vendor/html2pdf.bundle.min.js?v=20260611pdf"></script>
+    <script src="operator.js?v=20260611host"></script>
   </body>
 </html>

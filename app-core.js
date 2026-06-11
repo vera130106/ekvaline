@@ -1,6 +1,5 @@
 /**
- * Общие данные (localStorage): уведомления, лента сообщества, опросы, режим работы.
- * Для демонстрации без бэкенда; в продакшене — API + HTTPS + серверный bcrypt.
+ * Клиентский кэш уведомлений (localStorage); контент блога и заказы — с сервера.
  */
 (function () {
   const NS = 'ekvaline_';
@@ -11,6 +10,27 @@
     settings: NS + 'site_settings',
     seeded: NS + 'data_seeded_v2',
   };
+
+  /** Уведомления в колокольчике живут 3 суток с момента события. */
+  const NOTIFICATION_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+
+  function notificationTimestampMs(n) {
+    const t = new Date(n?.createdAt || 0).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  function isNotificationFresh(n) {
+    return notificationTimestampMs(n) >= Date.now() - NOTIFICATION_TTL_MS;
+  }
+
+  function pruneExpiredNotifications(list, persist) {
+    const src = Array.isArray(list) ? list : [];
+    const fresh = src.filter(isNotificationFresh);
+    if (persist && fresh.length !== src.length) {
+      writeJson(KEYS.notifs, fresh);
+    }
+    return fresh;
+  }
 
   function readJson(key, fallback) {
     try {
@@ -41,74 +61,8 @@
     return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function seedIfNeeded(options) {
-    if (localStorage.getItem(KEYS.seeded)) return;
-    const now = new Date().toISOString();
-    const notifTime =
-      options && typeof options.notificationCreatedAt === 'string' && options.notificationCreatedAt
-        ? options.notificationCreatedAt
-        : now;
-
-    writeJson(KEYS.notifs, [
-      {
-        id: uid(),
-        preset: 'welcome',
-        title: 'Добро пожаловать в ЭкваЛайн',
-        body: 'Следите за акциями и статусом заказов в этом центре уведомлений.',
-        createdAt: notifTime,
-        read: false,
-        type: 'info',
-      },
-      {
-        id: uid(),
-        preset: 'delivery_intro',
-        title: 'Доставка в удобном окне',
-        body: 'Выберите интервал 09:00 – 14:00, 14:00 – 17:00 или 17:00 – 21:00 при оформлении заказа.',
-        createdAt: notifTime,
-        read: false,
-        type: 'delivery',
-      },
-    ]);
-
-    writeJson(KEYS.settings, {
-      workLine: 'Пн–Сб 8:00–21:00, Вс 9:00–18:00',
-      deliverySlots: ['09:00 – 14:00', '14:00 – 17:00', '17:00 – 21:00'],
-      communityIntro: 'Новости, советы о воде и здоровом образе жизни от ЭкваЛайн.',
-    });
-
-    writeJson(KEYS.posts, [
-      {
-        id: uid(),
-        title: 'Почему важно пить воду утром',
-        body: 'Стакан чистой воды после сна запускает обмен веществ и помогает организму проснуться без лишней нагрузки на сердце.',
-        createdAt: now,
-        likes: [],
-        comments: [],
-      },
-      {
-        id: uid(),
-        title: 'Как хранить бутилированную воду',
-        body: 'Держите бутыль в прохладном месте, вдали от прямых солнечных лучей и бытовой химии.',
-        createdAt: now,
-        likes: [],
-        comments: [],
-      },
-    ]);
-
-    writeJson(KEYS.polls, [
-      {
-        id: uid(),
-        question: 'Сколько литров воды вы пьёте в день?',
-        options: [
-          { id: 'a', text: 'До 1 л', votes: [] },
-          { id: 'b', text: '1–2 л', votes: [] },
-          { id: 'c', text: 'Более 2 л', votes: [] },
-        ],
-        createdAt: now,
-      },
-    ]);
-
-    localStorage.setItem(KEYS.seeded, '1');
+  function seedIfNeeded() {
+    /* Демо-данные отключены: уведомления приходят с сервера после входа. */
   }
 
   /** Совпадает с приветственной парой из seed / старыми записями без preset. */
@@ -169,7 +123,7 @@
 
   const Api = {
     getNotifications() {
-      return readJson(KEYS.notifs, []);
+      return pruneExpiredNotifications(readJson(KEYS.notifs, []), true);
     },
     addNotification(item) {
       const list = this.getNotifications();
@@ -179,7 +133,7 @@
         createdAt: new Date().toISOString(),
         ...item,
       });
-      writeJson(KEYS.notifs, list);
+      writeJson(KEYS.notifs, pruneExpiredNotifications(list, false));
     },
     markNotificationRead(id) {
       const list = this.getNotifications().map((n) => (n.id === id ? { ...n, read: true } : n));
@@ -196,20 +150,30 @@
       }
     },
     mergeServerNotifications(serverRows) {
-      const presets = this.getNotifications().filter((n) => isRegistrationWelcomeNotification(n));
-      const fromServer = (Array.isArray(serverRows) ? serverRows : []).map((s) => ({
-        id: `srv_${s.id}`,
-        serverId: s.id,
-        title: s.title || '',
-        body: s.body || '',
-        read: !!s.read,
-        createdAt: s.created_at || new Date().toISOString(),
-        type: s.type || 'order',
-        orderId: s.order_id != null ? Number(s.order_id) : null,
-      }));
-      const merged = [...fromServer, ...presets];
-      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const fromServer = (Array.isArray(serverRows) ? serverRows : [])
+        .map((s) => ({
+          id: `srv_${s.id}`,
+          serverId: s.id,
+          title: s.title || '',
+          body: s.body || '',
+          read: !!s.read,
+          createdAt: s.created_at || new Date().toISOString(),
+          type: s.type || 'order',
+          orderId: s.order_id != null ? Number(s.order_id) : null,
+        }))
+        .filter(isNotificationFresh);
+      const serverWelcomeTitles = new Set(
+        fromServer
+          .filter((n) => n.type === 'info' || n.type === 'delivery' || isRegistrationWelcomeNotification(n))
+          .map((n) => n.title)
+      );
+      const localPresets = this.getNotifications()
+        .filter((n) => isRegistrationWelcomeNotification(n))
+        .filter((n) => !serverWelcomeTitles.has(n.title));
+      const merged = pruneExpiredNotifications([...fromServer, ...localPresets], false);
+      merged.sort((a, b) => notificationTimestampMs(b) - notificationTimestampMs(a));
       writeJson(KEYS.notifs, merged.slice(0, 60));
+      window.dispatchEvent(new CustomEvent('ekvaline-storage'));
     },
     unreadCount() {
       return this.getNotifications().filter((n) => !n.read).length;
@@ -449,7 +413,6 @@
     renderNotificationsPanel(wrap, listEl);
   }
 
-  seedIfNeeded();
   migrateNotifDeliveryIntervals();
 
   window.EkvalineApp = {

@@ -3,6 +3,7 @@
 const BONUS_VALIDITY_DAYS = 365;
 const BONUS_EARN_RATE = 0.05;
 const BONUS_EXPIRES_SOON_DAYS = 30;
+const BONUS_HISTORY_LIMIT = 5;
 
 function accrualExpiresAt(fromDate = new Date()) {
   return new Date(fromDate.getTime() + BONUS_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
@@ -258,7 +259,7 @@ async function getBonusProgramSummary(db, userId) {
 
   const historyRows = await db
     .prepare(
-      `SELECT * FROM bonus_operations WHERE user_id = ? ORDER BY id DESC LIMIT 40`
+      `SELECT * FROM bonus_operations WHERE user_id = ? ORDER BY id DESC LIMIT ${BONUS_HISTORY_LIMIT}`
     )
     .all(userId);
 
@@ -287,6 +288,7 @@ module.exports = {
   BONUS_VALIDITY_DAYS,
   BONUS_EARN_RATE,
   BONUS_EXPIRES_SOON_DAYS,
+  BONUS_HISTORY_LIMIT,
   accrualExpiresAt,
   computeOrderBonusEarn,
   expireUserBonuses,

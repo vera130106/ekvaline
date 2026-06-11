@@ -35,7 +35,7 @@ async function main() {
   ({ r, data } = await json('/api/auth/login', {
     method: 'POST',
     headers: { ...hdr(), 'X-CSRF-Token': csrf },
-    body: JSON.stringify({ credential: 'adminekva@mail.ru', password: 'AdminEkva2026!' }),
+    body: JSON.stringify({ credential: 'admekva@mail.ru', password: 'adm2026A' }),
   }));
   absorb(r);
   if (!r.ok) throw new Error(`Admin login failed: ${r.status} ${JSON.stringify(data)}`);

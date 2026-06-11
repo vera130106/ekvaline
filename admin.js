@@ -5,6 +5,9 @@
   const adminAppRoot = document.getElementById('adminAppRoot');
 
   const createUserForm = document.getElementById('adminCreateUserForm');
+  const createUserRoleSelect = document.getElementById('adminCreateUserRole');
+  const driverLabelWrap = document.getElementById('adminStaffDriverLabelWrap');
+  const driverRouteLabelInput = document.getElementById('adminStaffDriverRouteLabel');
   const createProductForm = document.getElementById('adminCreateProductForm');
   const settingsForm = document.getElementById('adminSettingsForm');
   const categorySelect = document.getElementById('adminProductCategory');
@@ -19,6 +22,14 @@
   const adminConfirmMessage = document.getElementById('adminConfirmMessage');
   const adminConfirmOk = document.getElementById('adminConfirmOk');
   const adminConfirmCancel = document.getElementById('adminConfirmCancel');
+
+  const adminStaffPasswordModal = document.getElementById('adminStaffPasswordModal');
+  const adminStaffPasswordWho = document.getElementById('adminStaffPasswordWho');
+  const adminStaffPasswordForm = document.getElementById('adminStaffPasswordForm');
+  const adminStaffNewPassword = document.getElementById('adminStaffNewPassword');
+  const adminStaffNewPasswordConfirm = document.getElementById('adminStaffNewPasswordConfirm');
+  const adminStaffPasswordStrength = document.getElementById('adminStaffPasswordStrength');
+  const adminStaffPasswordMsg = document.getElementById('adminStaffPasswordMsg');
 
   const listEls = {
     admin: document.getElementById('adminListAdmin'),
@@ -36,7 +47,6 @@
   const statsFromEl = document.getElementById('adminStatsFrom');
   const statsToEl = document.getElementById('adminStatsTo');
   const statsBuildBtn = document.getElementById('adminStatsBuildBtn');
-  const statsExcelBtn = document.getElementById('adminStatsExcelBtn');
   const statsPdfBtn = document.getElementById('adminStatsPdfBtn');
   const statsPeriodMetaEl = document.getElementById('adminStatsPeriodMeta');
   const statsMsgEl = document.getElementById('adminStatsMsg');
@@ -98,10 +108,7 @@
   const adminAboutCertEditImageFile = document.getElementById('adminAboutCertEditImageFile');
   const adminAboutCertAddImageFile = document.getElementById('adminAboutCertAddImageFile');
 
-  const adminFaqBlockSaveBtn = document.getElementById('adminFaqBlockSave');
-  const adminAboutCertsBlockSaveBtn = document.getElementById('adminAboutCertsBlockSave');
   const adminCoverageCardsNav = document.getElementById('adminCoverageCardsNav');
-  const adminCoverageBlockSaveBtn = document.getElementById('adminCoverageBlockSave');
   const adminDeliveryCoverageTitle = document.getElementById('adminDeliveryCoverageTitle');
   const adminCoverageCardAddBtn = document.getElementById('adminCoverageCardAdd');
   const adminCoverageCardEditModal = document.getElementById('adminCoverageCardEditModal');
@@ -206,6 +213,14 @@
     invoice: 'Расчётный счёт',
   };
 
+  /** Дата «по» в отчёте: учитываем доставку на ближайшие дни (как у оператора). */
+  const STATS_MAX_FUTURE_DAYS = 60;
+  const STATS_FORWARD_DELIVERY_DAYS = 14;
+
+  function maxStatsToIso() {
+    return shiftIsoDateLocal(isoDateLocal(new Date()), STATS_MAX_FUTURE_DAYS);
+  }
+
   function isoDateLocal(d) {
     const x = d instanceof Date ? d : new Date();
     const y = x.getFullYear();
@@ -256,15 +271,10 @@
   function formatStatsPeriodLabel(period) {
     const from = period?.from ? ruDateFromIso(period.from) : null;
     const to = period?.to ? ruDateFromIso(period.to) : null;
-    const base =
-      from && to
-        ? `Период: ${from} — ${to} (по дате доставки заказа)`
-        : from
-          ? `Период: с ${from}`
-          : to
-            ? `Период: по ${to}`
-            : 'Период: всё время (все заказы в базе)';
-    return `${base}. Учитываются только реальные заказы оператора (без демо).`;
+    if (from && to) return `Период: ${from} — ${to}`;
+    if (from) return `Период: с ${from}`;
+    if (to) return `Период: по ${to}`;
+    return 'Период: всё время';
   }
 
   function showStatsMsg(text, ok) {
@@ -280,28 +290,36 @@
     return { from: from || null, to: to || null };
   }
 
-  /** Ограничение календаря: не позже сегодня (локальная дата). */
+  /** Ограничение календаря: «по» — до +60 дней (дата доставки может быть впереди). */
   function syncStatsDateInputLimits() {
-    const today = isoDateLocal(new Date());
+    const maxTo = maxStatsToIso();
     [statsFromEl, statsToEl].forEach((el) => {
       if (!(el instanceof HTMLInputElement)) return;
-      el.max = today;
+      el.max = maxTo;
       const v = el.value.trim();
-      if (v && v > today) el.value = today;
+      if (v && v > maxTo) el.value = maxTo;
     });
+    if (statsFromEl instanceof HTMLInputElement && statsToEl instanceof HTMLInputElement) {
+      const from = statsFromEl.value.trim();
+      const to = statsToEl.value.trim();
+      if (from && to && from > to) statsFromEl.value = to;
+    }
   }
 
   /** Проверка периода перед запросом отчёта. */
   function validateStatsPeriodForReport() {
     syncStatsDateInputLimits();
-    const today = isoDateLocal(new Date());
+    const maxTo = maxStatsToIso();
     const { from, to } = readStatsPeriodFromForm();
-    if (from && from > today) {
-      showStatsMsg('Дата «с» не может быть позже сегодняшнего дня.', false);
+    if (from && from > maxTo) {
+      showStatsMsg(`Дата «с» не может быть позже ${ruDateFromIso(maxTo)}.`, false);
       return false;
     }
-    if (to && to > today) {
-      showStatsMsg('Дата «по» не может быть в будущем.', false);
+    if (to && to > maxTo) {
+      showStatsMsg(
+        `Дата «по» не может быть позже ${ruDateFromIso(maxTo)} (доставка планируется не более чем на ${STATS_MAX_FUTURE_DAYS} дней вперёд).`,
+        false
+      );
       return false;
     }
     if (from && to && from > to) {
@@ -313,6 +331,8 @@
 
   function applyStatsPreset(kind) {
     const today = isoDateLocal(new Date());
+    const forwardTo = shiftIsoDateLocal(today, STATS_FORWARD_DELIVERY_DAYS);
+    const maxTo = maxStatsToIso();
     if (!(statsFromEl instanceof HTMLInputElement) || !(statsToEl instanceof HTMLInputElement)) return;
     if (kind === 'all') {
       statsFromEl.value = '';
@@ -323,15 +343,27 @@
     if (kind === 'month') {
       const d = new Date();
       const first = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      const monthEndIso = isoDateLocal(monthEnd);
       statsFromEl.value = first;
-      statsToEl.value = today;
+      statsToEl.value = forwardTo > monthEndIso ? forwardTo : monthEndIso;
+      if (statsToEl.value > maxTo) statsToEl.value = maxTo;
       syncStatsDateInputLimits();
       return;
     }
     const days = kind === '7' ? 7 : 30;
     statsFromEl.value = shiftIsoDateLocal(today, -(days - 1));
-    statsToEl.value = today;
+    statsToEl.value = forwardTo > maxTo ? maxTo : forwardTo;
     syncStatsDateInputLimits();
+  }
+
+  function buildDeliverySpanHint(report) {
+    const span = report?.deliverySpan;
+    if (!span || !(Number(span.count) > 0)) return '';
+    const min = span.minDate ? ruDateFromIso(span.minDate) : '';
+    const max = span.maxDate ? ruDateFromIso(span.maxDate) : '';
+    const range = min && max && min !== max ? `${min} — ${max}` : min || max;
+    return `В выбранном периоде нет заказов. В системе ${span.count} по дате доставки${range ? ` (${range})` : ''} — расширьте дату «по».`;
   }
 
   function statsBarRow(label, count, sum, maxCount) {
@@ -425,6 +457,7 @@
   }
 
   let users = [];
+  let currentAdminUserId = null;
   let products = [];
   let categories = [];
   /** Черновик блока вопросов для страницы «Доставка»; сохранение через API настроек. */
@@ -680,11 +713,19 @@
 
   /** Те же правила, что passwordSchema на сервере. */
   function validateStaffPasswordClient(password) {
+    const api = window.EkvalineAuthPassword;
+    if (api?.validatePassword) {
+      const r = api.validatePassword(password);
+      return r.ok ? null : r.error;
+    }
     const p = String(password || '');
     if (p.length < 8) return 'Пароль: минимум 8 символов.';
     if (p.length > 128) return 'Пароль: не более 128 символов.';
-    if (!/[A-ZА-ЯЁ]/.test(p)) return 'Пароль: нужна заглавная буква.';
-    if (!/[a-zа-яё]/.test(p)) return 'Пароль: нужна строчная буква.';
+    if (!/^[A-Za-z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]+$/.test(p)) {
+      return 'Пароль: только латинские буквы (A–Z, a–z), цифры и спецсимволы (!@#$…).';
+    }
+    if (!/[A-Z]/.test(p)) return 'Пароль: нужна заглавная латинская буква (A–Z).';
+    if (!/[a-z]/.test(p)) return 'Пароль: нужна строчная латинская буква (a–z).';
     if (!/\d/.test(p)) return 'Пароль: нужна цифра.';
     if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(p)) return 'Пароль: нужен спецсимвол (!@#$…).';
     return null;
@@ -693,6 +734,9 @@
   function localizeApiError(raw) {
     const s = String(raw || '').trim();
     if (!s) return 'Не удалось выполнить операцию.';
+    if (s === 'Не найдено.' || s === 'Not Found') {
+      return 'Сервис недоступен. Перезапустите сервер и обновите страницу (Ctrl+F5).';
+    }
     if (/[а-яё]/i.test(s)) return s;
     if (/safe number/i.test(s)) return 'Число слишком большое. Для цены максимум 1 000 000 ₽.';
     if (/must be a number/i.test(s)) return 'Укажите корректное число.';
@@ -805,6 +849,68 @@
   }
 
   let adminConfirmResolve = null;
+  let staffPasswordTargetId = null;
+
+  function closeAdminStaffPasswordModal() {
+    if (!(adminStaffPasswordModal instanceof HTMLElement)) return;
+    adminStaffPasswordModal.hidden = true;
+    adminStaffPasswordModal.setAttribute('aria-hidden', 'true');
+    staffPasswordTargetId = null;
+    if (adminStaffPasswordForm instanceof HTMLFormElement) adminStaffPasswordForm.reset();
+    if (adminStaffPasswordMsg instanceof HTMLElement) adminStaffPasswordMsg.textContent = '';
+    if (adminStaffPasswordStrength instanceof HTMLElement) adminStaffPasswordStrength.textContent = '';
+    window.EkvalinePasswordVisibility?.init(adminStaffPasswordModal);
+  }
+
+  function openAdminStaffPasswordModal(user) {
+    if (!(adminStaffPasswordModal instanceof HTMLElement) || !user) return;
+    staffPasswordTargetId = Number(user.id);
+    const name = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email;
+    if (adminStaffPasswordWho instanceof HTMLElement) {
+      adminStaffPasswordWho.textContent = `${name} · ${user.email}`;
+    }
+    if (adminStaffPasswordMsg instanceof HTMLElement) adminStaffPasswordMsg.textContent = '';
+    adminStaffPasswordModal.hidden = false;
+    adminStaffPasswordModal.setAttribute('aria-hidden', 'false');
+    window.EkvalinePasswordVisibility?.init(adminStaffPasswordModal);
+    window.setTimeout(() => adminStaffNewPassword?.focus?.(), 0);
+  }
+
+  async function saveStaffPasswordFromModal() {
+    if (!staffPasswordTargetId) return;
+    const pwd = String(adminStaffNewPassword?.value || '');
+    const pwd2 = String(adminStaffNewPasswordConfirm?.value || '');
+    const authPw = window.EkvalineAuthPassword;
+    if (authPw?.validatePassword) {
+      const check = authPw.validatePassword(pwd);
+      if (!check.ok) {
+        if (adminStaffPasswordMsg instanceof HTMLElement) adminStaffPasswordMsg.textContent = check.error;
+        return;
+      }
+    } else if (pwd.length < 8) {
+      if (adminStaffPasswordMsg instanceof HTMLElement) {
+        adminStaffPasswordMsg.textContent = 'Пароль: минимум 8 символов.';
+      }
+      return;
+    }
+    if (pwd !== pwd2) {
+      if (adminStaffPasswordMsg instanceof HTMLElement) adminStaffPasswordMsg.textContent = 'Пароли не совпадают.';
+      return;
+    }
+    const r = await api.json(`/api/admin/users/${encodeURIComponent(staffPasswordTargetId)}/staff-password`, {
+      method: 'POST',
+      body: { password: pwd },
+    });
+    if (!r.ok) {
+      if (adminStaffPasswordMsg instanceof HTMLElement) {
+        adminStaffPasswordMsg.textContent = localizeApiError(r.data?.error) || 'Не удалось сохранить пароль.';
+      }
+      return;
+    }
+    api.resetCsrf();
+    closeAdminStaffPasswordModal();
+    showMsg(userMsg, r.data?.message || 'Пароль сотрудника обновлён.', true);
+  }
 
   function closeAdminConfirmModal(result) {
     if (!(adminConfirmModal instanceof HTMLElement)) return;
@@ -832,7 +938,8 @@
     if (adminConfirmMessage instanceof HTMLElement) adminConfirmMessage.textContent = message;
     if (adminConfirmOk instanceof HTMLButtonElement) {
       adminConfirmOk.textContent = okLabel;
-      adminConfirmOk.classList.toggle('admin-confirm-danger', danger);
+      adminConfirmOk.classList.toggle('admin-confirm-btn-del', danger);
+      adminConfirmOk.classList.toggle('admin-confirm-btn-primary', !danger);
     }
     if (adminConfirmCancel instanceof HTMLButtonElement) adminConfirmCancel.textContent = cancelLabel;
 
@@ -899,7 +1006,10 @@
       return false;
     }
     const me = await api.json('/api/auth/me');
-    if (me.ok && me.data?.user?.role === 'admin') return true;
+    if (me.ok && me.data?.user?.role === 'admin') {
+      currentAdminUserId = me.data.user.id != null ? Number(me.data.user.id) : null;
+      return true;
+    }
 
     if (me.status === 0 || me.status >= 500) {
       redirectUnauthorizedToHome(false);
@@ -925,21 +1035,49 @@
     return '?';
   }
 
+  function deriveDriverRouteLabelPreview() {
+    if (!(createUserForm instanceof HTMLFormElement)) return '';
+    const first = String(createUserForm.elements.namedItem('first_name')?.value || '').trim();
+    const last = String(createUserForm.elements.namedItem('last_name')?.value || '').trim();
+    return [first, last].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function syncAdminDriverLabelField() {
+    const isDriver = String(createUserRoleSelect?.value || '') === 'driver';
+    if (driverLabelWrap instanceof HTMLElement) driverLabelWrap.hidden = !isDriver;
+    if (!isDriver || !(driverRouteLabelInput instanceof HTMLInputElement)) return;
+    if (!String(driverRouteLabelInput.value || '').trim()) {
+      driverRouteLabelInput.placeholder = deriveDriverRouteLabelPreview() || 'Имя Фамилия';
+    }
+  }
+
   function renderUserCardHtml(u) {
     const name = `${u.first_name || ''} ${u.last_name || ''}`.trim() || '—';
-    const statusCls = u.blocked ? 'admin-badge-muted' : 'admin-badge-ok';
     const statusText = u.blocked ? 'Заблокирован' : 'Активен';
-    return `<article class="admin-person-card">
+    const driverLabel =
+      String(u.role || '') === 'driver'
+        ? String(u.driver_route_label || name).trim() || name
+        : '';
+    const isSelf = currentAdminUserId != null && Number(u.id) === Number(currentAdminUserId);
+    const roleKey = String(u.role || '').trim();
+    const statusTagCls = u.blocked ? 'admin-person-tag-muted' : 'admin-person-tag-ok';
+    return `<article class="admin-person-card" data-staff-role="${escHtml(roleKey)}">
       <div class="admin-person-top">
         <div class="admin-person-avatar" aria-hidden="true">${escHtml(userInitials(u))}</div>
         <div class="admin-person-lines">
-          <div class="admin-person-name">${escHtml(name)}</div>
-          <div class="admin-person-email">${escHtml(u.email)}</div>
-          <div class="admin-person-phone">${escHtml(u.phone || '—')}</div>
-        </div>
-        <div class="admin-person-badges">
-          <span class="admin-badge admin-badge-soft">${escHtml(roleLabel(u.role))}</span>
-          <span class="admin-badge ${statusCls}">${statusText}</span>
+          <div class="admin-person-name-row">
+            <div class="admin-person-name">${escHtml(name)}</div>
+            <div class="admin-person-tags">
+              <span class="admin-person-tag admin-person-tag-role">${escHtml(roleLabel(u.role))}</span>
+              <span class="admin-person-tag ${statusTagCls}">${statusText}</span>
+            </div>
+          </div>
+          <div class="admin-person-contact">${escHtml(u.email)} · ${escHtml(u.phone || '—')}</div>
+          ${
+            driverLabel
+              ? `<div class="admin-person-meta">В списке оператора: <strong>${escHtml(driverLabel)}</strong></div>`
+              : ''
+          }
         </div>
       </div>
       <div class="admin-person-toolbar">
@@ -951,7 +1089,15 @@
             ).join('')}
           </select>
         </label>
-        <button type="button" data-block-id="${escHtml(u.id)}" class="ghost-btn admin-person-btn">${u.blocked ? 'Разблокировать' : 'Блокировать'}</button>
+        <div class="admin-person-actions">
+          <button type="button" data-staff-pw-change="${escHtml(u.id)}" class="admin-person-btn">Сменить пароль</button>
+          <button type="button" data-block-id="${escHtml(u.id)}" class="admin-person-btn">${u.blocked ? 'Разблокировать' : 'Блокировать'}</button>
+          ${
+            isSelf
+              ? ''
+              : `<button type="button" data-staff-delete="${escHtml(u.id)}" class="admin-person-btn admin-person-btn-del">Удалить</button>`
+          }
+        </div>
       </div>
     </article>`;
   }
@@ -1052,9 +1198,12 @@
     lastStatsReport = r.data;
     renderStats(lastStatsReport);
     if (statsReportRootEl instanceof HTMLElement) statsReportRootEl.hidden = false;
-    if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
     if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
-    if (!silent) showStatsMsg('Отчёт сформирован. Можно скачать Excel или PDF.', true);
+    if (!silent) {
+      const zeroHint =
+        Number(lastStatsReport?.summary?.ordersTotal) === 0 ? buildDeliverySpanHint(lastStatsReport) : '';
+      showStatsMsg(zeroHint || 'Отчёт сформирован. Можно скачать PDF.', true);
+    }
     return lastStatsReport;
   }
 
@@ -1102,119 +1251,9 @@
     return `ekvaline-admin-stats_${from || 'all'}_${to || 'all'}`;
   }
 
-  function getXlsxLib() {
-    const g = typeof globalThis !== 'undefined' ? globalThis : window;
-    return g.XLSX;
-  }
-
-  let xlsxLoadPromise = null;
-
-  function ensureXlsxLoaded() {
-    const lib = getXlsxLib();
-    if (lib && typeof lib.utils?.book_new === 'function') return Promise.resolve(lib);
-    if (xlsxLoadPromise) return xlsxLoadPromise;
-    xlsxLoadPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-admin-xlsx]');
-      if (existing) {
-        existing.addEventListener('load', () => {
-          const x = getXlsxLib();
-          if (x && typeof x.utils?.book_new === 'function') resolve(x);
-          else reject(new Error('xlsx'));
-        });
-        existing.addEventListener('error', () => reject(new Error('xlsx')));
-        return;
-      }
-      const s = document.createElement('script');
-      s.src = 'vendor/xlsx.full.min.js';
-      s.async = true;
-      s.dataset.adminXlsx = '1';
-      s.onload = () => {
-        const x = getXlsxLib();
-        if (x && typeof x.utils?.book_new === 'function') resolve(x);
-        else reject(new Error('xlsx'));
-      };
-      s.onerror = () => reject(new Error('xlsx'));
-      document.head.appendChild(s);
-    });
-    return xlsxLoadPromise;
-  }
-
-  async function downloadAdminStatsExcel() {
-    if (!lastStatsReport) {
-      showStatsMsg('Сначала нажмите «Сформировать отчёт».', false);
-      return;
-    }
-    if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = true;
-    let XLSX;
-    try {
-      XLSX = await ensureXlsxLoaded();
-    } catch {
-      showStatsMsg('Не удалось загрузить модуль Excel. Обновите страницу.', false);
-      if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
-      return;
-    }
-    const r = lastStatsReport;
-    const s = r.summary || {};
-    const wb = XLSX.utils.book_new();
-    const summaryRows = [
-      ['Показатель', 'Значение'],
-      ['Период', formatStatsPeriodLabel(r.period)],
-      ['Заказов в периоде', s.ordersTotal ?? 0],
-      ['Сумма заказов, ₽', s.ordersSum ?? 0],
-      ['Доставлено, шт.', s.deliveredCount ?? 0],
-      ['Сумма доставленных, ₽', s.deliveredSum ?? 0],
-      ['Отменено', s.cancelledCount ?? 0],
-      ['Товаров в базе', r.productsTotal ?? 0],
-      ['На витрине', r.productsVisible ?? 0],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Сводка');
-
-    const sheetFromRows = (rows, labelKey) => {
-      const head = ['Показатель', 'Заказов', 'Сумма, ₽'];
-      const body = (rows || []).map((x) => [
-        labelKey ? labelKey(x) : x.label || x.status,
-        Number(x.count) || 0,
-        Number(x.sum) || 0,
-      ]);
-      return XLSX.utils.aoa_to_sheet([head, ...body]);
-    };
-
-    XLSX.utils.book_append_sheet(
-      wb,
-      sheetFromRows(r.ordersByStatus, (x) => ORDER_STATUS_LABELS[x.status] || x.status),
-      'По статусам'
-    );
-    XLSX.utils.book_append_sheet(wb, sheetFromRows(r.ordersByZone), 'По зонам');
-    XLSX.utils.book_append_sheet(
-      wb,
-      sheetFromRows(r.ordersByPayment, (x) => paymentLabel(x.label)),
-      'По оплате'
-    );
-    XLSX.utils.book_append_sheet(wb, sheetFromRows(r.ordersByDriver), 'По экспедиторам');
-
-    const ur = r.usersByRole || {};
-    const userRows = [['Роль', 'Учётных записей'], ...Object.keys(ur).sort().map((k) => [roleLabel(k), ur[k]])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(userRows), 'Пользователи');
-
-    try {
-      XLSX.writeFile(wb, `${statsExportFilenameBase()}.xlsx`);
-      showStatsMsg('Файл Excel сохранён.', true);
-    } catch {
-      showStatsMsg('Не удалось сохранить Excel.', false);
-    } finally {
-      if (statsExcelBtn instanceof HTMLButtonElement) statsExcelBtn.disabled = false;
-    }
-  }
-
   async function downloadAdminStatsPdf() {
     if (!lastStatsReport) {
       showStatsMsg('Сначала нажмите «Сформировать отчёт».', false);
-      return;
-    }
-    const g = typeof globalThis !== 'undefined' ? globalThis : window;
-    const h2p = g.html2pdf;
-    if (typeof h2p !== 'function') {
-      showStatsMsg('Генератор PDF не загрузился — обновите страницу.', false);
       return;
     }
     if (!(statsPrintEl instanceof HTMLElement) || !statsPrintEl.innerHTML.trim()) {
@@ -1223,22 +1262,84 @@
     }
     if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = true;
     showStatsMsg('Готовим PDF…', false);
-    const sheet = statsPrintEl.querySelector('.admin-stats-print-inner') || statsPrintEl;
+
+    const pdfBoot = window.EkvalinePdfExport;
+    const ready = pdfBoot?.ensureHtml2pdfReady ? await pdfBoot.ensureHtml2pdfReady() : false;
+    const h2p = pdfBoot?.getHtml2pdfFn?.() || (typeof window.html2pdf === 'function' ? window.html2pdf : null);
+    if (!ready || typeof h2p !== 'function') {
+      showStatsMsg('Не удалось загрузить генератор PDF. Обновите страницу (Ctrl+F5).', false);
+      if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
+      return;
+    }
+
+    /** html2canvas не захватывает #adminStatsReportPrint (left: -14000px) — копия на экран. */
+    let exportSheet = document.getElementById('adminStatsPdfExportSheet');
+    if (!(exportSheet instanceof HTMLElement)) {
+      exportSheet = document.createElement('div');
+      exportSheet.id = 'adminStatsPdfExportSheet';
+      exportSheet.className = 'admin-stats-pdf-export-sheet';
+      exportSheet.setAttribute('aria-hidden', 'true');
+      exportSheet.hidden = true;
+      document.body.appendChild(exportSheet);
+    }
+    exportSheet.innerHTML = statsPrintEl.innerHTML;
+    exportSheet.hidden = false;
+    exportSheet.style.display = 'block';
+    document.body.classList.add('admin-exporting-stats-pdf');
+
+    if (pdfBoot?.waitNextPaintFrames) await pdfBoot.waitNextPaintFrames(3);
+    else {
+      await new Promise((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+      });
+    }
+
+    void exportSheet.offsetHeight;
+    const contentW = Math.max(exportSheet.scrollWidth || 0, exportSheet.offsetWidth || 0, 720);
+    const contentH = Math.max(exportSheet.scrollHeight || 0, exportSheet.offsetHeight || 0, 120);
+    const hasRows = exportSheet.querySelector('table tr, .admin-stats-print-inner h1');
+    const hasText = pdfBoot?.sheetHasVisibleText ? pdfBoot.sheetHasVisibleText(exportSheet) : contentH >= 80;
+    if (!hasRows || !hasText || contentH < 80) {
+      showStatsMsg('Нет данных для PDF — сначала сформируйте отчёт.', false);
+      exportSheet.innerHTML = '';
+      exportSheet.hidden = true;
+      document.body.classList.remove('admin-exporting-stats-pdf');
+      if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
+      return;
+    }
+
     try {
       await h2p()
         .set({
-          margin: [10, 10, 10, 10],
+          margin: [6, 8, 8, 8],
           filename: `${statsExportFilenameBase()}.pdf`,
           image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
+          html2canvas: {
+            scale: Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.5),
+            useCORS: true,
+            logging: false,
+            scrollX: 0,
+            scrollY: 0,
+            x: 0,
+            y: 0,
+            width: contentW,
+            height: contentH,
+            windowWidth: contentW,
+            windowHeight: contentH,
+          },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'] },
         })
-        .from(sheet)
+        .from(exportSheet)
         .save();
       showStatsMsg('PDF сохранён.', true);
-    } catch {
+    } catch (err) {
+      console.error('[admin] stats pdf:', err);
       showStatsMsg('Не удалось сформировать PDF.', false);
     } finally {
+      exportSheet.innerHTML = '';
+      exportSheet.hidden = true;
+      document.body.classList.remove('admin-exporting-stats-pdf');
       if (statsPdfBtn instanceof HTMLButtonElement) statsPdfBtn.disabled = false;
     }
   }
@@ -1253,27 +1354,13 @@
       el?.addEventListener('input', syncStatsDateInputLimits);
     });
     applyStatsPreset('30');
-    document.querySelector('[data-admin-stats-preset="30"]')?.classList.add('is-active');
     statsBuildBtn?.addEventListener('click', () => {
       void buildAdminStatsReport();
-    });
-    statsExcelBtn?.addEventListener('click', () => {
-      void downloadAdminStatsExcel();
     });
     statsPdfBtn?.addEventListener('click', () => {
       void downloadAdminStatsPdf();
     });
-    document.querySelectorAll('[data-admin-stats-preset]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const kind = btn.getAttribute('data-admin-stats-preset') || '30';
-        applyStatsPreset(kind);
-        document.querySelectorAll('[data-admin-stats-preset]').forEach((b) => {
-          b.classList.toggle('is-active', b === btn);
-        });
-        void buildAdminStatsReport();
-      });
-    });
-    void ensureXlsxLoaded().catch(() => {});
+    void window.EkvalinePdfExport?.ensureHtml2pdfReady?.();
     void buildAdminStatsReport();
     startStatsLiveRefresh();
   }
@@ -1443,11 +1530,6 @@
     };
   }
 
-  /** @returns {{ id:string,title:string,question:string,active:boolean,options:{id:string,text:string}[]}[]} */
-  function buildSitePollsPayload() {
-    return pollsDraft.map((item) => coerceSitePollItem(item)).filter(Boolean);
-  }
-
   /** @returns {{ code:string,tag:string,question:string,answer:string }[]} */
   function buildDeliveryFaqPayload() {
     return faqDraft.map((item) =>
@@ -1460,75 +1542,28 @@
     ).filter(Boolean);
   }
 
-  function ensureHiddenSiteSettingsDefaults() {
-    if (!(settingsForm instanceof HTMLFormElement)) return;
-    const wl = settingsForm.elements.namedItem('workLine');
-    if (wl instanceof HTMLInputElement && wl.value.trim().length < 3) wl.value = DEFAULT_HIDDEN_WORKLINE;
-    const slotsEl = settingsForm.elements.namedItem('deliverySlotsText');
-    if (slotsEl instanceof HTMLTextAreaElement && !slotsEl.value.trim()) slotsEl.value = DEFAULT_HIDDEN_SLOTS_TEXT;
-  }
+  let coverageTitleSaveTimer = null;
+  let coverageTitleSaveBusy = false;
 
-  /** Полный payload как у формы «Сохранить настройки» (совпадает с Joi на сервере). */
-  function buildManagerSettingsPayload() {
-    if (!settingsHydrated || !(settingsForm instanceof HTMLFormElement)) return null;
-    ensureHiddenSiteSettingsDefaults();
-    const slots = String(settingsForm.elements.namedItem('deliverySlotsText')?.value || '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const deliveryFaq = buildDeliveryFaqPayload();
-    if (!deliveryFaq.length) return null;
-    const sitePolls = buildSitePollsPayload();
-    const aboutCertificates = buildAboutCertificatesPayload();
-    const deliveryCoverage = buildDeliveryCoverageForPayload();
-    if (!deliveryCoverage) return null;
-    return {
-      workLine: String(settingsForm.elements.namedItem('workLine')?.value || '').trim(),
-      communityIntro: String(settingsForm.elements.namedItem('communityIntro')?.value || '').trim(),
-      deliverySlots: slots,
-      deliveryFaq,
-      sitePolls,
-      aboutCertificates,
-      deliveryCoverage,
-    };
-  }
-
-  /**
-   * @param {HTMLElement | null | undefined} errorEl сообщение об ошибке — в модалке или под формой настроек.
-   */
-  async function persistManagerSettings(errorEl) {
-    const el = errorEl instanceof HTMLElement ? errorEl : settingsMsg;
-    if (!settingsHydrated) {
-      showMsg(el, 'Настройки ещё не загружены с сервера. Обновите страницу админки и попробуйте снова.');
-      return false;
-    }
-    const payload = buildManagerSettingsPayload();
-    if (!payload) {
-      showMsg(
-        el,
-        'Не удалось сохранить: режим работы — от 3 символов; слоты — хотя бы одна строка от 3 символов; в блоке вопросов нужен хотя бы один корректный пункт; блок «Зоны покрытия»: заголовок секции от 3 символов и хотя бы одна карточка с непустым текстом.'
-      );
-      return false;
-    }
+  async function saveCoverageTitleNow() {
+    window.clearTimeout(coverageTitleSaveTimer);
+    coverageTitleSaveTimer = null;
+    if (!settingsHydrated || coverageTitleSaveBusy) return;
+    if (coverageCardEditModalIsOpen() || coverageCardAddModalIsOpen()) return;
+    coverageTitleSaveBusy = true;
     try {
-      const r = await api.json('/api/manager/settings', { method: 'PUT', body: payload });
-      if (!r.ok) {
-        showMsg(el, r.data?.error || 'Сервер отклонил сохранение.');
-        return false;
-      }
-      api.resetCsrf();
-      await loadSettings();
-      return true;
-    } catch {
-      showMsg(
-        el,
-        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
-      );
-      return false;
+      await persistDeliveryCoveragePanel(settingsMsg);
+    } finally {
+      coverageTitleSaveBusy = false;
     }
   }
 
-  /** Сохранить только блок «Зоны покрытия» (карточки у карты на «Доставка»). */
+  function scheduleCoverageTitleAutoSave() {
+    window.clearTimeout(coverageTitleSaveTimer);
+    coverageTitleSaveTimer = window.setTimeout(() => void saveCoverageTitleNow(), 800);
+  }
+
+  /** Сохранить блок «Зоны покрытия» (карточки у карты на «Доставка»). */
   async function persistDeliveryCoveragePanel(errorEl) {
     const el = errorEl instanceof HTMLElement ? errorEl : settingsMsg;
     const deliveryCoverage = buildDeliveryCoverageForPayload();
@@ -1552,28 +1587,10 @@
     } catch {
       showMsg(
         el,
-        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
+        'Не удалось отправить запрос. Откройте админку через запущенный сервер сайта, не через file://.'
       );
       return false;
     }
-  }
-
-  async function saveCoverageBlockFromToolbar() {
-    if (coverageCardEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования карточки.');
-      return;
-    }
-    if (coverageCardAddModalIsOpen()) {
-      showMsg(settingsMsg, 'Сначала закройте окно «Новая карточка».');
-      return;
-    }
-    const saved = await persistDeliveryCoveragePanel(settingsMsg);
-    if (!saved) return;
-    showMsg(
-      settingsMsg,
-      'Блок «Зоны покрытия» сохранён. Откройте delivery.html и обновите страницу (Ctrl+F5).',
-      true
-    );
   }
 
   /** Сохранить только FAQ для страницы «Доставка». */
@@ -1597,24 +1614,10 @@
     } catch {
       showMsg(
         el,
-        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
+        'Не удалось отправить запрос. Откройте админку через запущенный сервер сайта, не через file://.'
       );
       return false;
     }
-  }
-
-  async function saveFaqBlockFromToolbar() {
-    if (faqEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования вопроса.');
-      return;
-    }
-    if (adminFaqAddModal instanceof HTMLElement && !adminFaqAddModal.hidden) {
-      showMsg(settingsMsg, 'Сначала закройте окно «Новый вопрос».');
-      return;
-    }
-    const saved = await persistDeliveryFaqPanel(settingsMsg);
-    if (!saved) return;
-    showMsg(settingsMsg, 'Вопросы сохранены. Откройте delivery.html и обновите страницу (Ctrl+F5).', true);
   }
 
   /** Сохранить только сертификаты для страницы «О компании». */
@@ -1637,24 +1640,10 @@
     } catch {
       showMsg(
         el,
-        'Не удалось отправить запрос. Откройте админку через запущенный сервер (например http://localhost:3001/admin.html), не через file://.'
+        'Не удалось отправить запрос. Откройте админку через запущенный сервер сайта, не через file://.'
       );
       return false;
     }
-  }
-
-  async function saveAboutCertsBlockFromToolbar() {
-    if (aboutCertEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Сначала сохраните или закройте окно редактирования сертификата.');
-      return;
-    }
-    if (aboutCertAddModalIsOpen()) {
-      showMsg(settingsMsg, 'Сначала закройте окно «Новый сертификат».');
-      return;
-    }
-    const saved = await persistAboutCertificatesPanel(settingsMsg);
-    if (!saved) return;
-    showMsg(settingsMsg, 'Сертификаты сохранены. Откройте about.html и обновите страницу (Ctrl+F5).', true);
   }
 
   function closeFaqEditModal(skipListRefresh = false) {
@@ -2558,17 +2547,30 @@
       password,
       role,
     };
+    if (role === 'driver') {
+      const manualLabel = String(createUserForm.elements.namedItem('driver_route_label')?.value || '').trim();
+      const autoLabel = deriveDriverRouteLabelPreview();
+      payload.driver_route_label = manualLabel || autoLabel;
+    }
     const r = await api.json('/api/admin/users', { method: 'POST', body: payload });
     if (!r.ok) return showMsg(userMsg, localizeApiError(r.data?.error) || 'Не удалось создать пользователя');
     api.resetCsrf();
     createUserForm.reset();
     refreshCharCounters(createUserForm);
+    syncAdminDriverLabelField();
+    const routeLabel =
+      role === 'driver'
+        ? String(r.data?.user?.driver_route_label || payload.driver_route_label || deriveDriverRouteLabelPreview()).trim()
+        : '';
     showMsg(
       userMsg,
-      `Учётная запись создана. Вход: email ${email}, пароль — как задали при создании.`,
+      role === 'driver'
+        ? `Водитель создан. Вход: ${email} и заданный пароль (страница driver.html). В списке оператора: «${routeLabel || 'Имя Фамилия'}».`
+        : `Учётная запись создана. Вход: email ${email}, пароль — как задали при создании.`,
       true
     );
     await Promise.all([loadUsers(), refreshStatsIfActive()]);
+    if (role === 'driver') window.EkvalineOrdersSync?.notifyOrdersDataChanged?.();
   }
 
   async function submitCreateProduct(event) {
@@ -2604,69 +2606,82 @@
     await Promise.all([loadProducts(), refreshStatsIfActive()]);
   }
 
-  async function submitSettings(event) {
-    event.preventDefault();
-    if (!(settingsForm instanceof HTMLFormElement)) return;
-    if (faqEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Закройте окно редактирования («Сохранить» или «Отмена»).');
+  async function patchStaffUser(userId, body, errorHint) {
+    const r = await api.json(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'PATCH', body });
+    if (!r.ok) {
+      showMsg(userMsg, localizeApiError(r.data?.error) || errorHint || 'Не удалось сохранить изменения.');
+      return false;
+    }
+    api.resetCsrf();
+    await Promise.all([loadUsers(), refreshStatsIfActive()]);
+    return true;
+  }
+
+  async function deleteStaffUser(userId) {
+    const user = users.find((u) => String(u.id) === String(userId));
+    if (!user) return;
+    const name = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || 'сотрудника';
+    const ok = await openAdminConfirmModal({
+      title: 'Удалить сотрудника?',
+      message: `Учётная запись «${name}» будет удалена без возможности восстановления.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      danger: true,
+    });
+    if (!ok) return;
+    const r = await api.json(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      showMsg(userMsg, localizeApiError(r.data?.error) || 'Не удалось удалить учётную запись.');
       return;
     }
-    if (adminFaqAddModal instanceof HTMLElement && !adminFaqAddModal.hidden) {
-      showMsg(settingsMsg, 'Сначала закройте окно «Новый вопрос» или добавьте пункт в список.');
-      return;
-    }
-    if (aboutCertEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Закройте окно редактирования сертификата («Сохранить» или «Отмена»).');
-      return;
-    }
-    if (aboutCertAddModalIsOpen()) {
-      showMsg(settingsMsg, 'Закройте окно «Новый сертификат» или добавьте карточку.');
-      return;
-    }
-    if (coverageCardEditModalIsOpen()) {
-      showMsg(settingsMsg, 'Закройте окно редактирования карточки «Зоны покрытия» («Сохранить» или «Отмена»).');
-      return;
-    }
-    if (coverageCardAddModalIsOpen()) {
-      showMsg(settingsMsg, 'Закройте окно «Новая карточка» или сохраните карточку.');
-      return;
-    }
-    const saved = await persistManagerSettings(settingsMsg);
-    if (!saved) return;
-    showMsg(
-      settingsMsg,
-      'Все настройки сохранены. Проверьте страницы по ссылкам выше (Ctrl+F5 на каждой).',
-      true
-    );
+    api.resetCsrf();
+    await Promise.all([loadUsers(), refreshStatsIfActive()]);
+    showMsg(userMsg, r.data?.message || 'Учётная запись удалена.', true);
   }
 
   async function onStaffListsClick(ev) {
     const target = ev.target;
     if (!(target instanceof HTMLElement)) return;
 
-    const blockId = target.getAttribute('data-block-id');
+    const changePwBtn = target.closest('[data-staff-pw-change]');
+    const changePwId = changePwBtn instanceof HTMLElement ? changePwBtn.getAttribute('data-staff-pw-change') : null;
+    if (changePwId) {
+      const user = users.find((u) => String(u.id) === changePwId);
+      if (!user) return;
+      openAdminStaffPasswordModal(user);
+      return;
+    }
+
+    const blockBtn = target.closest('[data-block-id]');
+    const blockId = blockBtn instanceof HTMLElement ? blockBtn.getAttribute('data-block-id') : null;
     if (blockId) {
       const user = users.find((u) => String(u.id) === blockId);
       if (!user) return;
-      const r = await api.json(`/api/admin/users/${blockId}`, {
-        method: 'PATCH',
-        body: { blocked: user.blocked ? 0 : 1 },
-      });
-      if (r.ok) {
-        api.resetCsrf();
-        await Promise.all([loadUsers(), refreshStatsIfActive()]);
+      const wasBlocked = Boolean(user.blocked);
+      const ok = await patchStaffUser(blockId, { blocked: wasBlocked ? 0 : 1 }, 'Не удалось изменить блокировку.');
+      if (ok) {
+        showMsg(userMsg, wasBlocked ? 'Пользователь разблокирован.' : 'Пользователь заблокирован.', true);
       }
+      return;
+    }
+
+    const deleteBtn = target.closest('[data-staff-delete]');
+    const deleteId = deleteBtn instanceof HTMLElement ? deleteBtn.getAttribute('data-staff-delete') : null;
+    if (deleteId) {
+      await deleteStaffUser(deleteId);
       return;
     }
 
     const selEl = target instanceof HTMLSelectElement ? target : null;
     if (selEl && selEl.hasAttribute('data-role-id')) {
       const userId = selEl.getAttribute('data-role-id');
-      const r = await api.json(`/api/admin/users/${userId}`, { method: 'PATCH', body: { role: selEl.value } });
-      if (r.ok) {
-        api.resetCsrf();
-        await Promise.all([loadUsers(), refreshStatsIfActive()]);
-      }
+      const user = users.find((u) => String(u.id) === userId);
+      const prevRole = String(user?.role || selEl.value);
+      const nextRole = selEl.value;
+      if (prevRole === nextRole) return;
+      const ok = await patchStaffUser(userId, { role: nextRole }, 'Не удалось сменить роль.');
+      if (!ok) selEl.value = prevRole;
+      else showMsg(userMsg, `Роль изменена на «${roleLabel(nextRole)}».`, true);
       return;
     }
   }
@@ -2699,8 +2714,27 @@
     const t = ev.target;
     if (t instanceof HTMLSelectElement && t.hasAttribute('data-role-id')) onStaffListsClick(ev);
   });
+  if (adminStaffPasswordForm instanceof HTMLFormElement) {
+    adminStaffPasswordForm.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      void saveStaffPasswordFromModal();
+    });
+  }
+  if (adminStaffNewPassword instanceof HTMLInputElement) {
+    adminStaffNewPassword.addEventListener('input', () => {
+      const authPw = window.EkvalineAuthPassword;
+      if (adminStaffPasswordStrength instanceof HTMLElement && authPw?.getPasswordStrength) {
+        adminStaffPasswordStrength.textContent = authPw.getPasswordStrength(adminStaffNewPassword.value).line;
+      }
+    });
+  }
+
   adminAppRoot?.addEventListener('click', (ev) => {
     const t = ev.target;
+    if (t instanceof HTMLElement && t.closest('[data-close-staff-password]')) {
+      closeAdminStaffPasswordModal();
+      return;
+    }
     if (t instanceof HTMLElement && t.closest('#adminPaneStaff')) onStaffListsClick(ev);
     if (t instanceof HTMLElement && t.closest('#adminProductsList')) onProductsClick(ev);
     if (t instanceof HTMLElement && t.getAttribute('data-close-product-modal') === 'true') closeEditProduct();
@@ -2755,10 +2789,18 @@
     setActivePane(savedPane);
 
     createUserForm?.addEventListener('submit', submitCreateUser);
+    createUserRoleSelect?.addEventListener('change', syncAdminDriverLabelField);
+    createUserForm?.addEventListener('input', (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      if (String(createUserRoleSelect?.value || '') !== 'driver') return;
+      if (!['first_name', 'last_name'].includes(String(t.getAttribute('name') || ''))) return;
+      syncAdminDriverLabelField();
+    });
     createProductForm?.addEventListener('submit', submitCreateProduct);
     bindProductNumericInputs(createProductForm);
     bindProductNumericInputs(editForm);
-    settingsForm?.addEventListener('submit', submitSettings);
+    settingsForm?.addEventListener('submit', (ev) => ev.preventDefault());
 
     deliveryFaqNav?.addEventListener('click', (ev) => {
       const t = ev.target;
@@ -2795,14 +2837,8 @@
     });
 
     adminCoverageCardAddBtn?.addEventListener('click', () => openCoverageCardAddModal());
-    adminFaqBlockSaveBtn?.addEventListener('click', () => void saveFaqBlockFromToolbar());
-    adminAboutCertsBlockSaveBtn?.addEventListener('click', () => void saveAboutCertsBlockFromToolbar());
-    adminCoverageBlockSaveBtn?.addEventListener('click', () => void saveCoverageBlockFromToolbar());
-    adminDeliveryCoverageTitle?.addEventListener('keydown', (ev) => {
-      if (ev.key !== 'Enter') return;
-      ev.preventDefault();
-      void saveCoverageBlockFromToolbar();
-    });
+    adminDeliveryCoverageTitle?.addEventListener('input', () => scheduleCoverageTitleAutoSave());
+    adminDeliveryCoverageTitle?.addEventListener('blur', () => void saveCoverageTitleNow());
 
     adminFaqEditConfirm?.addEventListener('click', () => void submitFaqEditModal());
     adminFaqEditDelete?.addEventListener('click', () => void deleteFaqFromEditModal());
@@ -2877,6 +2913,7 @@
     await Promise.all([loadUsers(), loadProducts(), loadSettings()]);
     initStatsPanel();
     refreshCharCounters(adminAppRoot);
+    syncAdminDriverLabelField();
     adminAppRoot?.addEventListener('input', (ev) => {
       const t = ev.target;
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) syncOneCharCounter(t);

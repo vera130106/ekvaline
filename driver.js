@@ -15,13 +15,23 @@
   const logoutBtn = document.getElementById('drvLogoutBtn');
   const toastEl = document.getElementById('drvToast');
   const toastText = document.getElementById('drvToastText');
+  const confirmModal = document.getElementById('drvConfirmModal');
+  const confirmTitle = document.getElementById('drvConfirmTitle');
+  const confirmMessage = document.getElementById('drvConfirmMessage');
+  const confirmOkBtn = document.getElementById('drvConfirmOkBtn');
+  const confirmCancelBtn = document.getElementById('drvConfirmCancelBtn');
 
   const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
 
   let toastTimer = null;
   let ordersPollTimer = null;
+  let ordersSyncUnsub = null;
   let lastOrdersSignature = '';
   let ordersRefreshing = false;
+  let confirmResolve = null;
+  let currentDriverOrders = [];
+  let lastMarkedDeliveredId = '';
+  let driverRouteDay = '';
 
   function normalizeCredential(raw) {
     return String(raw || '').trim();
@@ -41,6 +51,11 @@
 
   function clearLocalUser() {
     localStorage.removeItem(CURRENT_USER_KEY);
+    try {
+      localStorage.removeItem('ekvaline_users');
+    } catch {
+      /* ignore */
+    }
   }
 
   function showToast(text) {
@@ -51,6 +66,45 @@
     toastTimer = window.setTimeout(() => {
       toastEl.hidden = true;
     }, 2800);
+  }
+
+  function closeDrvConfirm(result) {
+    if (confirmModal instanceof HTMLElement) {
+      confirmModal.hidden = true;
+      confirmModal.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('drv-confirm-open');
+    }
+    if (confirmResolve) {
+      const done = confirmResolve;
+      confirmResolve = null;
+      done(Boolean(result));
+    }
+  }
+
+  function showDrvConfirm(options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const title = String(opts.title || 'Подтверждение');
+    const message = String(opts.message || '');
+    const okLabel = String(opts.okLabel || 'Да, доставлен');
+    const cancelLabel = String(opts.cancelLabel || 'Отмена');
+
+    if (!(confirmModal instanceof HTMLElement)) {
+      return Promise.resolve(window.confirm(message || title));
+    }
+
+    return new Promise((resolve) => {
+      confirmResolve = resolve;
+      if (confirmTitle instanceof HTMLElement) confirmTitle.textContent = title;
+      if (confirmMessage instanceof HTMLElement) confirmMessage.textContent = message;
+      if (confirmOkBtn instanceof HTMLButtonElement) confirmOkBtn.textContent = okLabel;
+      if (confirmCancelBtn instanceof HTMLButtonElement) confirmCancelBtn.textContent = cancelLabel;
+      confirmModal.hidden = false;
+      confirmModal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('drv-confirm-open');
+      window.requestAnimationFrame(() => {
+        if (confirmOkBtn instanceof HTMLButtonElement) confirmOkBtn.focus();
+      });
+    });
   }
 
   function escapeHtml(value) {
@@ -79,6 +133,28 @@
   function todayIsoLocal() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Только маршрут на сегодня; отменённые и вчерашние не показываем. */
+  function filterOrdersForDriverRoute(orders, routeDay) {
+    const day = String(routeDay || driverRouteDay || todayIsoLocal()).trim().slice(0, 10);
+    return (Array.isArray(orders) ? orders : []).filter((o) => {
+      const st = String(o.status || '').trim().toLowerCase();
+      if (st === 'cancelled') return false;
+      const od = String(o.delivery_date || '').trim().slice(0, 10);
+      if (od && od !== day) return false;
+      return true;
+    });
+  }
+
+  function syncDriverRouteDay(routeDay) {
+    const next = String(routeDay || todayIsoLocal()).trim().slice(0, 10);
+    if (driverRouteDay && driverRouteDay !== next) {
+      lastOrdersSignature = '';
+      currentDriverOrders = [];
+    }
+    driverRouteDay = next;
+    return next;
   }
 
   function parseProductLine(itemsJson) {
@@ -131,6 +207,12 @@
     const ta = toneRank[orderCardTone(a.status)] ?? 1;
     const tb = toneRank[orderCardTone(b.status)] ?? 1;
     if (ta !== tb) return ta - tb;
+    if (ta === 2 && tb === 2) {
+      const ua = Number(a.updated_at ? new Date(a.updated_at).getTime() : 0);
+      const ub = Number(b.updated_at ? new Date(b.updated_at).getTime() : 0);
+      if (ua !== ub) return ua - ub;
+      return Number(a.id) - Number(b.id);
+    }
     const td = String(a.delivery_date || '').localeCompare(String(b.delivery_date || ''));
     if (td !== 0) return td;
     const ca = Number(a.created_at ? new Date(a.created_at).getTime() : 0);
@@ -150,7 +232,7 @@
     if (!(syncEl instanceof HTMLElement)) return;
     const now = new Date();
     const t = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    syncEl.textContent = `Обновлено в ${t}. Список подтягивается автоматически.`;
+    syncEl.textContent = `Обновлено в ${t}.`;
   }
 
   function renderStats(orders) {
@@ -168,6 +250,8 @@
     const st = String(o.status || '');
     const tone = orderCardTone(st);
     const stLabel = STATUS_LABEL[st] || st || '—';
+    const idStr = String(o.id);
+    const freshDone = tone === 'done' && idStr === lastMarkedDeliveredId;
     const phoneRaw = String(o.phone || '').trim();
     const tel = phoneDigits(phoneRaw);
     const phoneHtml = tel
@@ -182,20 +266,28 @@
       tone === 'way' ? 'drv-order-badge--way' : tone === 'done' ? 'drv-order-badge--done' : 'drv-order-badge--wait';
     const badgeText = tone === 'way' ? 'В пути' : tone === 'done' ? 'Доставлен' : 'Ожидает';
     const doneBtn =
-      st === 'delivered'
+      tone === 'done'
         ? ''
-        : `<button type="button" class="drv-btn drv-btn-done" data-drv-done="${escapeHtml(String(o.id))}">
+        : `<button type="button" class="drv-btn drv-btn-done" data-drv-done="${escapeHtml(idStr)}">
             Доставлен
           </button>`;
     const note = String(o.courier_note || '').trim();
     const noteHtml = note
       ? `<p class="drv-order-note"><span class="drv-order-note-lbl">Комментарий:</span> ${escapeHtml(note)}</p>`
       : '';
+    const footClass = tone === 'done' ? 'drv-order-card__foot drv-order-card__foot--done' : 'drv-order-card__foot';
+    const footInner =
+      tone === 'done'
+        ? `<span class="drv-order-sum">${formatMoney(o.total_sum)} ₽</span>
+           <span class="drv-order-done-mark">✓ ${escapeHtml(stLabel)}</span>`
+        : `<span class="drv-order-sum">${formatMoney(o.total_sum)} ₽</span>
+           <span class="drv-order-status-text">${escapeHtml(stLabel)}</span>
+           ${doneBtn}`;
 
     return `
-      <article class="drv-order-card drv-order-card--${tone}" role="listitem" data-order-id="${escapeHtml(String(o.id))}">
+      <article class="drv-order-card drv-order-card--${tone}${freshDone ? ' drv-order-card--fresh-done' : ''}" role="listitem" data-order-id="${escapeHtml(idStr)}" data-order-tone="${tone}">
         <header class="drv-order-card__head">
-          <span class="drv-order-id">№ ${escapeHtml(String(o.id))}</span>
+          <span class="drv-order-id">№ ${escapeHtml(idStr)}</span>
           <span class="drv-order-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
         </header>
         <p class="drv-order-client">${escapeHtml(o.client || 'Клиент')}</p>
@@ -207,10 +299,8 @@
           <div class="drv-order-facts--wide"><dt>Товар</dt><dd>${escapeHtml(parseProductLine(o.items_json))}</dd></div>
         </dl>
         ${noteHtml}
-        <footer class="drv-order-card__foot">
-          <span class="drv-order-sum">${formatMoney(o.total_sum)} ₽</span>
-          <span class="drv-order-status-text">${escapeHtml(stLabel)}</span>
-          ${doneBtn}
+        <footer class="${footClass}">
+          ${footInner}
         </footer>
       </article>`;
   }
@@ -258,18 +348,54 @@
     }
     if (done.length) {
       parts.push(
-        buildSectionHtml('Доставлены сегодня', 'Отмечены вами или оператором как выполненные.', done, 'drv-section--done')
+        buildSectionHtml(
+          'Доставлены',
+          'Внизу списка — уже выполненные заказы (зелёная подсветка).',
+          done,
+          'drv-section--done'
+        )
       );
     }
     listEl.innerHTML = parts.join('');
     renderStats(sorted);
     setSyncLabel();
+    if (lastMarkedDeliveredId) {
+      const card = listEl.querySelector(`[data-order-id="${CSS.escape(lastMarkedDeliveredId)}"]`);
+      if (card instanceof HTMLElement) {
+        window.requestAnimationFrame(() => {
+          card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }
+      window.setTimeout(() => {
+        lastMarkedDeliveredId = '';
+      }, 900);
+    }
+  }
+
+  function applyDeliveredLocally(restId, serverOrder) {
+    const idStr = String(restId);
+    const idx = currentDriverOrders.findIndex((o) => String(o.id) === idStr);
+    if (idx >= 0) {
+      currentDriverOrders[idx] = {
+        ...currentDriverOrders[idx],
+        ...(serverOrder && typeof serverOrder === 'object' ? serverOrder : {}),
+        status: 'delivered',
+        updated_at: serverOrder?.updated_at || new Date().toISOString(),
+      };
+    }
+    lastMarkedDeliveredId = idStr;
+    lastOrdersSignature = ordersListSignature(currentDriverOrders);
+    renderOrdersList(currentDriverOrders);
   }
 
   function stopOrdersAutoRefresh() {
     if (ordersPollTimer) {
       window.clearInterval(ordersPollTimer);
       ordersPollTimer = null;
+    }
+    if (typeof ordersSyncUnsub === 'function') {
+      ordersSyncUnsub();
+      ordersSyncUnsub = null;
     }
   }
 
@@ -279,6 +405,14 @@
       if (document.hidden) return;
       void refreshOrdersUi({ silent: true });
     }, ORDERS_AUTO_REFRESH_MS);
+    if (typeof window.EkvalineOrdersSync?.subscribeOrdersDataChanged === 'function') {
+      ordersSyncUnsub = window.EkvalineOrdersSync.subscribeOrdersDataChanged(() => {
+        if (mainCard instanceof HTMLElement && !mainCard.hidden) {
+          lastOrdersSignature = '';
+          void refreshOrdersUi({ silent: true });
+        }
+      });
+    }
   }
 
   function uiShowLogin() {
@@ -341,13 +475,17 @@
       }
 
       const w = String(r.data?.warn || '').trim();
+      const routeDay = syncDriverRouteDay(r.data?.route_day || todayIsoLocal());
       if (hint instanceof HTMLElement) {
         hint.textContent = w
           ? w
-          : `Сегодня ${formatRuDate(todayIsoLocal())}. Жёлтым — в пути, зелёным — доставлен.`;
+          : `Сегодня ${formatRuDate(routeDay)}. Жёлтым — в пути, зелёным — доставлен. Вчерашние и отменённые не показываются.`;
       }
 
-      const list = Array.isArray(r.data?.orders) ? r.data.orders : [];
+      const list = filterOrdersForDriverRoute(
+        Array.isArray(r.data?.orders) ? r.data.orders : [],
+        routeDay
+      );
       const sig = ordersListSignature(list);
       if (sig === lastOrdersSignature && silent) return;
       lastOrdersSignature = sig;
@@ -355,29 +493,17 @@
       if (!list.length) {
         listEl.innerHTML = `<p class="drv-empty">На сегодня заказов нет. Нажмите «Обновить» или подождите — список обновится сам.</p>`;
         if (statsEl instanceof HTMLElement) statsEl.innerHTML = '';
+        currentDriverOrders = [];
         setSyncLabel();
         return;
       }
 
+      currentDriverOrders = list;
       renderOrdersList(list);
     } finally {
       ordersRefreshing = false;
       if (refreshBtn instanceof HTMLButtonElement) refreshBtn.disabled = false;
     }
-  }
-
-  function markCardDeliveredLocally(restId) {
-    const card = listEl?.querySelector?.(`[data-order-id="${CSS.escape(String(restId))}"]`);
-    if (!(card instanceof HTMLElement)) return;
-    card.classList.remove('drv-order-card--way', 'drv-order-card--wait');
-    card.classList.add('drv-order-card--done');
-    const badge = card.querySelector('.drv-order-badge');
-    if (badge instanceof HTMLElement) {
-      badge.className = 'drv-order-badge drv-order-badge--done';
-      badge.textContent = 'Доставлен';
-    }
-    const btn = card.querySelector('[data-drv-done]');
-    if (btn instanceof HTMLButtonElement) btn.remove();
   }
 
   async function confirmDelivered(restId) {
@@ -389,10 +515,18 @@
     if (r.ok) {
       window.EkvalineAPI.resetCsrf?.();
       window.EkvalineOrdersSync?.notifyOrdersDataChanged?.();
-      markCardDeliveredLocally(restId);
+      applyDeliveredLocally(restId, r.data?.order);
       showToast('Заказ отмечен как доставлен');
-      await refreshOrdersUi({ silent: false });
-    } else showToast(String(r.data?.error || 'Не удалось обновить'));
+      await refreshOrdersUi({ silent: true });
+    } else {
+      const err = String(r.data?.error || 'Не удалось обновить');
+      if (r.status === 404 || /отмен|не найден|не на сегодня/i.test(err)) {
+        currentDriverOrders = currentDriverOrders.filter((o) => String(o.id) !== String(restId));
+        lastOrdersSignature = ordersListSignature(currentDriverOrders);
+        renderOrdersList(currentDriverOrders);
+      }
+      showToast(err);
+    }
   }
 
   listEl?.addEventListener('click', (e) => {
@@ -400,24 +534,57 @@
     if (!(btn instanceof HTMLButtonElement)) return;
     const id = btn.getAttribute('data-drv-done');
     if (!id) return;
-    if (!window.confirm(`Отметить заказ №${id} как доставленный?`)) return;
-    btn.disabled = true;
-    void confirmDelivered(id).finally(() => {
-      btn.disabled = false;
-    });
+    void (async () => {
+      const ok = await showDrvConfirm({
+        title: 'Отметить доставку?',
+        message: `Заказ №${id} будет отмечен как доставленный. Оператор увидит это в списке.`,
+        okLabel: 'Да, доставлен',
+        cancelLabel: 'Отмена',
+      });
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        await confirmDelivered(id);
+      } finally {
+        btn.disabled = false;
+      }
+    })();
+  });
+
+  confirmOkBtn?.addEventListener('click', () => closeDrvConfirm(true));
+  confirmCancelBtn?.addEventListener('click', () => closeDrvConfirm(false));
+  confirmModal?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('[data-drv-confirm-dismiss="backdrop"]')) closeDrvConfirm(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (confirmModal instanceof HTMLElement && !confirmModal.hidden) {
+      event.preventDefault();
+      closeDrvConfirm(false);
+    }
   });
 
   logoutBtn?.addEventListener('click', async () => {
+    stopOrdersAutoRefresh();
+    if (logoutBtn instanceof HTMLButtonElement) logoutBtn.disabled = true;
     try {
-      if (api) await api.json('/api/auth/logout', { method: 'POST', body: {} });
+      if (api) {
+        await api.json('/api/auth/logout', { method: 'POST', body: {} });
+        window.EkvalineAPI?.resetCsrf?.();
+      }
     } catch {
       /* ignore */
     }
-    window.EkvalineAPI.resetCsrf?.();
+    try {
+      sessionStorage.setItem('ekvaline_driver_logout', '1');
+    } catch {
+      /* ignore */
+    }
     clearLocalUser();
     lastOrdersSignature = '';
-    if (loginError instanceof HTMLElement) loginError.textContent = '';
-    uiShowLogin();
+    window.location.replace(new URL('index.html', window.location.href).href);
   });
 
   refreshBtn?.addEventListener('click', () => {
@@ -464,6 +631,17 @@
       loginError.textContent = 'Подключите api-client.js и откройте сайт через сервер.';
       return;
     }
+
+    try {
+      if (sessionStorage.getItem('ekvaline_driver_logout')) {
+        sessionStorage.removeItem('ekvaline_driver_logout');
+        uiShowLogin();
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
     const lu = readLocalUser();
     if (!lu || String(lu.role || '').toLowerCase() !== 'driver') {
       const serverUser = await hydrateSessionFromServer();

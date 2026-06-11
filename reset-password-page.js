@@ -13,13 +13,6 @@
   let acceptedCode = '';
   let sendSeq = 0;
 
-  function escapeHtml(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-
   function normalizeCode(value) {
     return String(value || '').replace(/\D/g, '').slice(0, 6);
   }
@@ -29,16 +22,6 @@
     input.addEventListener('input', () => {
       input.value = normalizeCode(input.value);
     });
-  }
-
-  function showDevCode(box, code) {
-    if (!(box instanceof HTMLElement) || !code) return;
-    box.hidden = false;
-    box.innerHTML = `
-      <p class="cabinet-dev-code-title">Режим без SMTP</p>
-      <p class="cabinet-dev-code-value">${escapeHtml(code)}</p>
-      <p class="cabinet-dev-code-hint">Письмо не отправлено. Задайте SMTP в .env на сервере.</p>
-    `;
   }
 
   function getEmail() {
@@ -78,6 +61,7 @@
       return;
     }
     syncPasswordSubmitState();
+    window.EkvalinePasswordVisibility?.init(passwordForm || document);
   }
 
   function syncPasswordSubmitState() {
@@ -121,13 +105,13 @@
     }
   }
 
-  function showAfterCodeSent(devCode) {
+  function showAfterCodeSent() {
     resetFlow();
     if (verifyForm instanceof HTMLElement) {
       verifyForm.hidden = false;
       const codeInput = verifyForm.elements.namedItem('code');
       if (codeInput instanceof HTMLInputElement) {
-        codeInput.value = devCode ? String(devCode) : '';
+        codeInput.value = '';
         codeInput.focus();
       }
     }
@@ -164,26 +148,6 @@
     emailInput.value = emailFromUrl.trim().toLowerCase();
   }
 
-  try {
-    const hint = sessionStorage.getItem('ekvaline_password_reset_dev');
-    if (hint) {
-      const parsed = JSON.parse(hint);
-      sessionStorage.removeItem('ekvaline_password_reset_dev');
-      if (parsed?.email && emailInput instanceof HTMLInputElement) {
-        emailInput.value = String(parsed.email);
-      }
-      if (parsed?.devCode) {
-        showDevCode(resetDevCode, parsed.devCode);
-        showAfterCodeSent(parsed.devCode);
-        if (resetSuccess) {
-          resetSuccess.textContent = parsed.message || 'Код для разработки (SMTP не настроен).';
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-
   if (sendCodeBtn instanceof HTMLButtonElement) {
     sendCodeBtn.addEventListener('click', async () => {
       if (!api) {
@@ -212,10 +176,7 @@
             return;
           }
           api.resetCsrf?.();
-          if (response.data?.devMode && response.data?.devCode) {
-            showDevCode(resetDevCode, response.data.devCode);
-          }
-          showAfterCodeSent(response.data?.devCode);
+          showAfterCodeSent();
         } catch {
           if (resetError) resetError.textContent = 'Ошибка сети. Попробуйте позже.';
         } finally {
