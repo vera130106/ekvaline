@@ -311,6 +311,7 @@ async function migrate(pool) {
   await ensureIdentityDefault(pool, 'order_audit_events');
   await ensureUserDriverRouteLabel(pool);
   await ensureUserDriverOnDuty(pool);
+  await ensureCanonicalDeliveryZones(pool);
   await ensureOrdersZoneForeignKey(pool);
   await ensureDeliveryAddressesZoneForeignKey(pool);
   await ensureLegacyClientsOrdersFk(pool);
@@ -450,6 +451,25 @@ async function ensureDeliveryZonesNameUnique(pool) {
     }
     console.warn('[db] delivery_zones UNIQUE(name):', e && e.message);
     return false;
+  }
+}
+
+/** Зоны из UI оператора — должны быть в delivery_zones до FK orders.zone → delivery_zones(name). */
+async function ensureCanonicalDeliveryZones(pool) {
+  if (!(await pgTableExists(pool, 'delivery_zones'))) return;
+  const zones = [
+    { name: 'Центр', tariff: 0 },
+    { name: 'Степной', tariff: 150 },
+    { name: 'Доп. зона', tariff: 250 },
+    { name: 'Подхват', tariff: 0 },
+  ];
+  for (const z of zones) {
+    await pool.query(
+      `INSERT INTO delivery_zones (name, tariff, bounds_json)
+       SELECT $1, $2, '{}'
+       WHERE NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = $1)`,
+      [z.name, z.tariff]
+    );
   }
 }
 
@@ -1511,7 +1531,8 @@ async function seedIfEmpty(pool) {
     FROM (
       VALUES ('Центр'::text, 0::numeric, '{}'::text),
              ('Степной', 150, '{}'),
-             ('Доп. зона', 250, '{}')
+             ('Доп. зона', 250, '{}'),
+             ('Подхват', 0, '{}')
     ) AS v(name, tariff, b)
     WHERE NOT EXISTS (SELECT 1 FROM delivery_zones dz WHERE dz.name = v.name)
   `);

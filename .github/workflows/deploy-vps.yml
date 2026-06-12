@@ -1,0 +1,44 @@
+# Автовыкладка на VPS после push в main/master.
+# Секреты в GitHub: Settings → Secrets and variables → Actions
+#   VPS_HOST      — IP или домен (например 45.147.179.211)
+#   VPS_USER      — SSH-пользователь (часто root)
+#   VPS_SSH_KEY   — приватный SSH-ключ (полностью, с BEGIN/END)
+#   VPS_PORT      — необязательно, по умолчанию 22
+#   VPS_APP_DIR   — необязательно, по умолчанию /opt/ekvaline
+
+name: Deploy VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 20m
+          script: |
+            set -e
+            APP_DIR="${{ secrets.VPS_APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then APP_DIR="/opt/ekvaline"; fi
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "Ошибка: нет git-репозитория в $APP_DIR" >&2
+              exit 1
+            fi
+            cd "$APP_DIR"
+            sh deploy/update-on-server.sh

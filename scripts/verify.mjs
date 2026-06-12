@@ -305,6 +305,9 @@ function checkSecurityModules() {
   if (!secMw.includes('Content-Security-Policy')) {
     fail('security-middleware.js: нет Content-Security-Policy');
   }
+  if (!secMw.includes('fonts.googleapis.com') || !secMw.includes('fonts.gstatic.com')) {
+    fail('security-middleware.js: CSP должен разрешать Google Fonts (Manrope на cabinet/catalog)');
+  }
   if (!read('server.js').includes('noCacheProtectedHtml')) {
     fail('server.js: подключите noCacheProtectedHtml');
   }
@@ -373,6 +376,11 @@ function checkMapsWiring() {
     fail('Нет scripts/verify-mobile-modals.mjs');
   } else {
     ok('Mobile: verify-mobile-modals.mjs');
+  }
+  if (!existsSync(join(ROOT, 'scripts/verify-checkout-dates.mjs'))) {
+    fail('Нет scripts/verify-checkout-dates.mjs');
+  } else {
+    ok('Оформление: verify-checkout-dates.mjs');
   }
 }
 checkCatalogImages();
@@ -488,9 +496,9 @@ function checkAuthEmailPassword() {
   ok('Почта и пароли: API, mailer, кабинет, auth-password.js');
 }
 
-const ASSET_VERSION = '20260611host';
-const SCRIPT_VERSION = '20260611host';
-const MAPS_RUNTIME_VERSION = '20260611host';
+const ASSET_VERSION = '20260618dates';
+const SCRIPT_VERSION = '20260618dates';
+const MAPS_RUNTIME_VERSION = '20260618dates';
 
 function checkAssetVersionsAndMobile() {
   const clientPages = [

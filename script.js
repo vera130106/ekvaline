@@ -401,10 +401,12 @@
   }
 
   function openAuthModal(tab) {
+    window.EkvalineSiteNav?.close?.();
     switchAuthTab(tab);
     authModal.classList.add('open');
     authModal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
     refreshAuthPasswordVisibility(authModal);
   }
 
@@ -413,6 +415,9 @@
     authModal.classList.remove('open');
     authModal.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    if (!window.EkvalineSiteNav?.isOpen?.()) {
+      document.documentElement.style.overflow = '';
+    }
   }
 
   function openCabinet() {
@@ -1766,9 +1771,10 @@
       <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
         <button type="button" class="cart-modal-close" data-map-close="true">×</button>
         <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
-        <p class="checkout-subtitle">Заполните поля слева или отметьте дом на карте. Доставка только по Оренбургу.</p>
+        <p class="checkout-subtitle">Заполните поля или отметьте дом на карте. Доставка только по Оренбургу.</p>
         <div class="checkout-map-layout">
           <aside class="checkout-map-panel">
+            <div class="checkout-map-panel-fields">
             <label class="checkout-field checkout-map-field">Город
               <input type="text" id="mapCityInput" maxlength="60" value="Оренбург" placeholder="Оренбург" readonly aria-readonly="true" autocomplete="off" />
             </label>
@@ -1797,14 +1803,15 @@
               Если указана квартира, обязательно заполните этаж и подъезд.
             </p>
             <datalist id="mapCitySuggestions"></datalist>
+            </div>
+            <div class="checkout-map-panel-footer">
             <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
-            <div class="checkout-map-panel-actions">
+            <div class="checkout-map-panel-actions checkout-map-panel-actions-main">
               <button type="button" class="checkout-map-action-btn" id="findMapAddressBtn">Найти</button>
               <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
-            </div>
-            <div class="checkout-map-panel-actions">
               <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn" disabled>Выбрать</button>
               <button type="button" class="checkout-map-action-btn" data-map-close="true">Отмена</button>
+            </div>
             </div>
           </aside>
           <div id="checkoutMapRoot" class="checkout-map-root"></div>
@@ -2143,7 +2150,34 @@
           }))
           .filter((r) => r.date && r.slot)
       : [];
-    return { closedDays, closedSlots };
+    return pruneCheckoutAvailability({ closedDays, closedSlots });
+  }
+
+  /** Оставляем только закрытия в окне бронирования (как на сервере /api/public/delivery-availability). */
+  function pruneCheckoutAvailability(raw) {
+    const allowed = new Set(enumerateCheckoutBookingDays());
+    const daySet = new Set();
+    const nextClosedDays = [];
+    (Array.isArray(raw?.closedDays) ? raw.closedDays : []).forEach((d) => {
+      const iso = String(d || '').trim();
+      if (!allowed.has(iso) || daySet.has(iso)) return;
+      daySet.add(iso);
+      nextClosedDays.push(iso);
+    });
+    nextClosedDays.sort();
+    const slotSet = new Set();
+    const nextClosedSlots = [];
+    (Array.isArray(raw?.closedSlots) ? raw.closedSlots : []).forEach((row) => {
+      const date = String(row?.date || '').trim();
+      const slot = normalizeCheckoutSlotKey(row?.slot);
+      if (!date || !slot || !allowed.has(date) || daySet.has(date)) return;
+      const sig = `${date}|${slot}`;
+      if (slotSet.has(sig)) return;
+      slotSet.add(sig);
+      nextClosedSlots.push({ date, slot });
+    });
+    nextClosedSlots.sort((a, b) => a.date.localeCompare(b.date) || a.slot.localeCompare(b.slot));
+    return { closedDays: nextClosedDays, closedSlots: nextClosedSlots };
   }
 
   function normalizeCheckoutSlotKey(raw) {
@@ -3676,7 +3710,7 @@
     const dateChip = target.closest('[data-checkout-date]');
     if (dateChip instanceof HTMLButtonElement && !dateChip.disabled) {
       const iso = String(dateChip.getAttribute('data-checkout-date') || '').trim();
-      if (iso && checkoutDeliveryDate instanceof HTMLInputElement) {
+      if (iso && isCheckoutDateSelectable(iso) && checkoutDeliveryDate instanceof HTMLInputElement) {
         checkoutDeliveryDate.value = iso;
         refreshCheckoutDeliveryUi();
       }

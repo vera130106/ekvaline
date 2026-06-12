@@ -10,11 +10,23 @@
     root.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
   }
 
-  function wireClone(clone, original) {
+  function isDrawerAuthAction(el) {
+    return (
+      el instanceof HTMLElement &&
+      Boolean(
+        el.closest('[data-auth-login], [data-auth-register], .cabinet-trigger, [data-auth-close]')
+      )
+    );
+  }
+
+  function wireClone(clone, original, closeMenu) {
     if (!(clone instanceof HTMLElement) || !(original instanceof HTMLElement)) return;
     clone.addEventListener('click', (e) => {
       if (original.tagName === 'A' && original.href) return;
       e.preventDefault();
+      if (typeof closeMenu === 'function' && (isDrawerAuthAction(clone) || isDrawerAuthAction(original))) {
+        closeMenu();
+      }
       original.click();
     });
   }
@@ -89,7 +101,7 @@
           if (btn.closest('.hotline')) return;
           const c = btn.cloneNode(true);
           stripIds(c);
-          wireClone(c, btn);
+          wireClone(c, btn, closeSiteNav);
           target.appendChild(c);
         });
       }
@@ -97,7 +109,7 @@
       if (logoutBtn instanceof HTMLElement) {
         const c = logoutBtn.cloneNode(true);
         stripIds(c);
-        wireClone(c, logoutBtn);
+        wireClone(c, logoutBtn, closeSiteNav);
         target.appendChild(c);
       }
     }
@@ -126,13 +138,24 @@
       document.documentElement.style.overflow = open ? 'hidden' : '';
     }
 
+    function closeSiteNav() {
+      setOpen(false);
+    }
+
+    window.EkvalineSiteNav = {
+      close: closeSiteNav,
+      isOpen: () => document.body.classList.contains('site-nav-open'),
+    };
+
     toggle.addEventListener('click', () => {
       setOpen(!document.body.classList.contains('site-nav-open'));
     });
     closeBtn.addEventListener('click', () => setOpen(false));
     scrim.addEventListener('click', () => setOpen(false));
     panelInner.addEventListener('click', (e) => {
-      if (e.target instanceof Element && e.target.closest('a')) setOpen(false);
+      if (!(e.target instanceof Element)) return;
+      if (e.target.closest('a')) closeSiteNav();
+      else if (isDrawerAuthAction(e.target)) closeSiteNav();
     });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') setOpen(false);

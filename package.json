@@ -7,6 +7,7 @@
     "start:checked": "npm run verify && node server.js",
     "verify": "node scripts/verify.mjs",
     "verify:all": "node scripts/verify-all.mjs",
+    "verify:host": "node scripts/verify-remote-host.mjs",
     "deploy:check": "node scripts/check-deploy-ready.mjs",
     "prepare:host": "node scripts/prepare-host-deploy.mjs",
     "verify:maps": "node scripts/verify-maps.mjs",

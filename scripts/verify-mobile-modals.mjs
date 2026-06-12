@@ -30,12 +30,25 @@ must('responsive-mobile.css', 'order-success-card', 'модалка успеха
 must('responsive-mobile.css', 'env(safe-area-inset-bottom', 'safe-area для iPhone');
 must('responsive-mobile.css', 'font-size: 16px', 'inputs 16px (без zoom iOS)');
 must('responsive-mobile.css', 'delivery-map-board', 'карта на странице доставки');
+must('responsive-mobile.css', 'auth-form .auth-submit', 'кнопка входа на mobile');
+must('responsive-mobile.css', 'notif-dropdown-open .notif-dropdown', 'панель уведомлений mobile');
+must('responsive-mobile.css', 'notif-mobile-portal', 'портал уведомлений mobile');
+must('responsive-mobile.css', 'checkout-modal-card', 'оформление заказа mobile');
+must('app-core.js', 'ekvalineNotifPortal', 'док уведомлений в body');
+must('mobile-nav.js', 'EkvalineSiteNav', 'закрытие меню перед входом');
+must('script.js', 'EkvalineSiteNav?.close', 'вход закрывает мобильное меню');
+must('responsive-mobile.css', 'checkout-map-panel-fields', 'прокрутка полей адреса');
+must('responsive-mobile.css', 'checkout-map-panel-actions-main', 'кнопки адреса на карте');
 
 must('operator-mobile.css', 'opx-map-card', 'карта адреса оператора');
 must('operator-mobile.css', 'opx-zone-map-canvas', 'карта зон оператора');
 must('operator-mobile.css', 'opx-zone-map-overlay', 'полноэкранная карта заказов');
 must('operator-mobile.css', '--opx-mobile-dock-h', 'нижний dock оператора');
 
+must('responsive-mobile.css', 'community-page .blogv2-comment-form-meta', 'форма комментариев блога');
+must('responsive-mobile.css', 'community-page .blogv2-water-controls', 'трекер воды на блоге');
+must('styles.css', 'blogv2-comment-form-meta', 'мета-строка формы комментария');
+must('styles.css', 'blogv2-post-reactions', 'реакции поста блога');
 must('styles.css', 'checkout-map-root', 'контейнер карты оформления');
 must('styles.css', 'delivery-yandex-map', 'карта доставки');
 

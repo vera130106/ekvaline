@@ -359,7 +359,7 @@
     categoryName: '',
   }));
   let products = operatorCatalogRows.map((entry) => entry.displayName);
-  const districts = ['Подхват', 'Степной', 'Центр', 'доп.зона'];
+  const districts = ['Подхват', 'Степной', 'Центр', 'Доп. зона'];
   const streetFallback = [
     'Салмышская', 'Родимцева', 'Пролетарская', 'Просторная', 'Терешковой', 'Чкалова', 'Советская',
     'Туркестанская', 'Брестская', 'Комсомольская', 'Победы', 'Донгузская', 'Монтажников', 'Новая',
@@ -436,14 +436,14 @@
     Подхват: '#c62828',
     Степной: '#ef6c00',
     Центр: '#1565c0',
-    'доп.зона': '#7b1fa2',
+    'Доп. зона': '#7b1fa2',
     delivered: '#2e7d32',
   };
   const ZONE_CENTERS = {
     Подхват: [51.805, 55.108],
     Степной: [51.838, 55.165],
     Центр: [51.772, 55.102],
-    'доп.зона': [51.728, 55.158],
+    'Доп. зона': [51.728, 55.158],
   };
 
   /** Статусы «в пути» (жёлтая строка при назначенном водителе). */
@@ -2635,7 +2635,7 @@
     const z = String(value || '').toLowerCase().trim().replace(/^["']+|["']+$/g, '');
     if (!z) return 'Подхват';
     /** Согласовано с #opxModalZone и фильтром «★ Зона доставки» (`districts`). */
-    if (z.includes('доп') || z.includes('окраин')) return 'доп.зона';
+    if (z.includes('доп') || z.includes('окраин')) return 'Доп. зона';
     if (z.includes('степ')) return 'Степной';
     if (z.includes('центр')) return 'Центр';
     if (z.includes('подхват')) return 'Подхват';
@@ -2820,9 +2820,9 @@
 
   function renderZoneFallback() {
     if (!(ZONE_MAP_CANVAS instanceof HTMLElement)) return;
-    const zoneOrder = ['Подхват', 'Степной', 'Центр', 'доп.зона'];
+    const zoneOrder = ['Подхват', 'Степной', 'Центр', 'Доп. зона'];
     const source = ordersForZoneMap();
-    const grouped = { Подхват: [], Степной: [], Центр: [], 'доп.зона': [] };
+    const grouped = { Подхват: [], Степной: [], Центр: [], 'Доп. зона': [] };
     source.forEach((o) => {
       const zone = normalizeZoneName(o.zone);
       if (!grouped[zone]) grouped[zone] = [];
@@ -7331,6 +7331,20 @@
               );
               return;
             }
+            if (st === 429) {
+              showToast(errTxt || 'Слишком много запросов. Подождите минуту и повторите.', 3600, 'error');
+              return;
+            }
+            if (st >= 500) {
+              showToast(
+                errTxt || 'Ошибка сервера при сохранении. Проверьте логи на хосте: docker compose logs app',
+                3600,
+                'error'
+              );
+              return;
+            }
+            showToast(errTxt || `Не удалось сохранить заказ (код ${st || '—'}). Обновите страницу и повторите.`, 3600, 'error');
+            return;
           }
         } catch {
           showToast('Ошибка сети при сохранении заказа.', 3600, 'error');

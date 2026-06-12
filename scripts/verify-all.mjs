@@ -10,17 +10,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const base = process.argv[2] || 'http://localhost:3010';
 const isLocalHost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/i.test(String(base).trim());
+const isRemoteBase = !isLocalHost;
 
 const steps = [
-  [
-    'deploy:check',
-    'node',
-    isLocalHost
-      ? [join(ROOT, 'scripts', 'check-deploy-ready.mjs'), '--local']
-      : [join(ROOT, 'scripts', 'check-deploy-ready.mjs')],
-  ],
+  ...(isRemoteBase
+    ? []
+    : [
+        [
+          'deploy:check',
+          'node',
+          isLocalHost
+            ? [join(ROOT, 'scripts', 'check-deploy-ready.mjs'), '--local']
+            : [join(ROOT, 'scripts', 'check-deploy-ready.mjs')],
+        ],
+      ]),
   ['npm run verify', 'node', [join(ROOT, 'scripts', 'verify.mjs')]],
   ['verify-mobile-modals', 'node', [join(ROOT, 'scripts', 'verify-mobile-modals.mjs')]],
+  ['verify-checkout-dates', 'node', [join(ROOT, 'scripts', 'verify-checkout-dates.mjs'), base]],
   ['verify-full-site-flow', 'node', [join(ROOT, 'scripts', 'verify-full-site-flow.mjs'), base]],
   ['verify-maps', 'node', [join(ROOT, 'scripts', 'verify-maps.mjs'), base]],
   ['verify-auth-security', 'node', [join(ROOT, 'scripts', 'verify-auth-security.mjs'), base]],

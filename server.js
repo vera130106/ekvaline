@@ -91,7 +91,10 @@ async function loadDeliveryAvailabilityRecord() {
 }
 
 async function loadDeliveryAvailability() {
-  return (await loadDeliveryAvailabilityRecord()).availability;
+  const record = await loadDeliveryAvailabilityRecord();
+  return deliveryAvailability.pruneAvailabilityToBookingWindow(
+    record.availability || deliveryAvailability.emptyAvailability()
+  );
 }
 
 async function saveDeliveryAvailability(payload, actorUser) {
@@ -634,6 +637,30 @@ async function resolveDriverRouteLabel(raw) {
 }
 
 /** Назначение экспедитора: каноническая метка из учётки водителя + перевод «новый» → «в обработке». */
+const ORDER_ZONE_NAME_ALIASES = new Map([
+  ['доп.зона', 'Доп. зона'],
+  ['доп зона', 'Доп. зона'],
+]);
+
+/** Согласование зоны заказа со справочником delivery_zones (FK orders.zone). */
+async function resolveOrderZoneForDb(rawZone) {
+  let zone = String(rawZone ?? '').trim();
+  if (!zone) return { ok: true, zone: '' };
+  const alias = ORDER_ZONE_NAME_ALIASES.get(zone.toLowerCase());
+  if (alias) zone = alias;
+  const row = await db.prepare('SELECT name FROM delivery_zones WHERE name = ? LIMIT 1').get(zone);
+  if (row?.name) return { ok: true, zone: String(row.name) };
+  try {
+    await db.prepare('INSERT INTO delivery_zones (name, tariff, bounds_json) VALUES (?, 0, ?)').run(zone, '{}');
+    return { ok: true, zone };
+  } catch {
+    return {
+      ok: false,
+      error: `Зона «${zone}» отсутствует в справочнике. Обновите страницу (F5) или выберите зону из списка.`,
+    };
+  }
+}
+
 async function normalizeOperatorOrderDriverInput(rawDriver, currentStatus) {
   const raw = String(rawDriver ?? '').trim().replace(/\s+/g, ' ');
   if (!raw) return { driver: '', statusBump: null };
@@ -1103,6 +1130,25 @@ app.get('/api/client-boot', (req, res) => {
   res.json({
     bootId: CLIENT_BOOT_ID,
     sessionIdleMinutes: SESSION_IDLE_MINUTES,
+    mailConfigured: mailer.isMailConfigured(),
+  });
+});
+
+/** Без секретов: проверка .env на VPS после выкладки (verify-remote-host.mjs). */
+app.get('/api/public/deploy-status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const baseUrl = String(process.env.APP_BASE_URL || '').trim();
+  const secureCookies = String(process.env.USE_SECURE_COOKIES || '').toLowerCase() === 'true';
+  const nodeEnv = String(process.env.NODE_ENV || '').trim();
+  const secretLen = String(process.env.SESSION_SECRET || '').trim().length;
+  res.json({
+    ok: true,
+    appBaseUrl: baseUrl || null,
+    nodeEnv: nodeEnv || null,
+    secureCookies,
+    sessionSecretOk: secretLen >= 32,
+    mailConfigured: mailer.isMailConfigured(),
+    mapsKeyConfigured: Boolean(String(process.env.YANDEX_MAPS_API_KEY || '').trim()),
   });
 });
 
@@ -2582,6 +2628,12 @@ app.patch('/api/orders/:id', requireAuth, csrfMiddleware, asyncHandler(async (re
       ) {
         v.value.status = driverNorm.statusBump;
       }
+    }
+
+    if (v.value.zone != null) {
+      const zoneNorm = await resolveOrderZoneForDb(v.value.zone);
+      if (!zoneNorm.ok) return res.status(400).json({ error: zoneNorm.error });
+      v.value.zone = zoneNorm.zone || null;
     }
 
     const fields = [];

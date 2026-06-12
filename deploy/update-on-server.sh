@@ -50,4 +50,22 @@ else
   echo "[deploy] ВНИМАНИЕ: maps-config без ключа — добавьте YANDEX_MAPS_API_KEY в .env и перезапустите" >&2
 fi
 
+echo "[deploy] smoke: почта (SMTP)…"
+BOOT_JSON=$(curl -sf "http://127.0.0.1:${PORT:-3001}/api/client-boot" || true)
+if echo "$BOOT_JSON" | grep -q '"mailConfigured":true'; then
+  echo "[deploy] SMTP настроен (mailConfigured=true)"
+  if docker compose exec -T app node scripts/test-smtp.mjs --verify-only 2>/dev/null; then
+    echo "[deploy] SMTP verify OK"
+  else
+    echo "[deploy] ВНИМАНИЕ: SMTP задан, но подключение не удалось — проверьте SMTP_PASS и порт 465" >&2
+  fi
+elif echo "$BOOT_JSON" | grep -q '"mailConfigured":false'; then
+  echo "[deploy] ОШИБКА: SMTP не настроен — коды на email не уйдут. Заполните SMTP_* в .env" >&2
+else
+  echo "[deploy] подсказка: обновите код (git pull) для проверки mailConfigured в /api/client-boot" >&2
+  if ! grep -q '^SMTP_PASS=.\+' .env 2>/dev/null; then
+    echo "[deploy] в .env нет SMTP_PASS — см. docs/НАСТРОЙКА-ПОЧТЫ.md" >&2
+  fi
+fi
+
 echo "[deploy] готово. Полная проверка: npm run verify:all http://127.0.0.1:${PORT:-3001}"

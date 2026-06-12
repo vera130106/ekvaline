@@ -323,6 +323,15 @@
     return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
   }
 
+  function cabinetDateTriggerLabel(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+    if (!m) return 'Выбрать дату';
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const mo = months[Number(m[2]) - 1] || m[2];
+    const wd = cabinetWeekdayShort(iso);
+    return `${Number(m[3])} ${mo} ${m[1]}, ${wd}`;
+  }
+
   function cabinetWeekdayShort(iso) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
     if (!m) return '';
@@ -356,23 +365,91 @@
     }
   }
 
-  function renderCabinetDatePickerHtml(activeIso) {
-    return enumerateCabinetBookingDays()
-      .map((iso) => {
-        const selectable = cabinetDateSelectable(iso);
-        const active = iso === activeIso;
-        const reason = cabinetDateUnavailableReason(iso);
-        const cls = ['checkout-date-chip', active && selectable ? 'is-active' : '', !selectable ? 'is-unavailable' : '']
-          .filter(Boolean)
-          .join(' ');
-        const dis = selectable ? '' : ' disabled';
-        const title = reason ? ` title="${escapeHtml(reason)}"` : '';
-        return `<button type="button" class="${cls}" data-cabinet-order-date="${escapeHtml(iso)}"${dis}${title} aria-selected="${active && selectable ? 'true' : 'false'}">
-          <span class="checkout-date-chip-date">${escapeHtml(cabinetDateChipLabel(iso))}</span>
-          <span class="checkout-date-chip-wd">${escapeHtml(cabinetWeekdayShort(iso))}</span>
-        </button>`;
-      })
-      .join('');
+  function renderCabinetCalendarDayButton(iso, activeIso) {
+    const selectable = cabinetDateSelectable(iso);
+    const active = iso === activeIso;
+    const reason = cabinetDateUnavailableReason(iso);
+    const dayNum = Number(iso.slice(8, 10));
+    const cls = ['cabinet-cal-day', active && selectable ? 'is-active' : '', !selectable ? 'is-unavailable' : '']
+      .filter(Boolean)
+      .join(' ');
+    const dis = selectable ? '' : ' disabled';
+    const title = reason ? ` title="${escapeHtml(reason)}"` : '';
+    return `<button type="button" class="${cls}" data-cabinet-order-date="${escapeHtml(iso)}"${dis}${title} aria-selected="${active && selectable ? 'true' : 'false'}" aria-label="${escapeHtml(cabinetDateTriggerLabel(iso))}">${dayNum}</button>`;
+  }
+
+  function renderCabinetCalendarHtml(activeIso) {
+    const days = enumerateCabinetBookingDays();
+    if (!days.length) {
+      return '<p class="cabinet-order-date-empty">Нет доступных дат</p>';
+    }
+
+    const weekdays = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+    const monthNames = [
+      'Январь',
+      'Февраль',
+      'Март',
+      'Апрель',
+      'Май',
+      'Июнь',
+      'Июль',
+      'Август',
+      'Сентябрь',
+      'Октябрь',
+      'Ноябрь',
+      'Декабрь',
+    ];
+
+    const byMonth = new Map();
+    for (const iso of days) {
+      const key = iso.slice(0, 7);
+      if (!byMonth.has(key)) byMonth.set(key, []);
+      byMonth.get(key).push(iso);
+    }
+
+    let html = '<div class="cabinet-delivery-calendar">';
+    for (const [monthKey, monthDays] of byMonth) {
+      const [y, m] = monthKey.split('-').map(Number);
+      const firstDay = Number(monthDays[0].slice(8, 10));
+      const pad = (new Date(y, m - 1, firstDay).getDay() + 6) % 7;
+      html += `<section class="cabinet-cal-month" aria-label="${escapeHtml(monthNames[m - 1] || monthKey)} ${y}">
+        <p class="cabinet-cal-month-title">${escapeHtml(monthNames[m - 1] || monthKey)} ${y}</p>
+        <div class="cabinet-cal-weekdays">${weekdays.map((w) => `<span>${w}</span>`).join('')}</div>
+        <div class="cabinet-cal-grid" role="rowgroup">`;
+      for (let i = 0; i < pad; i += 1) {
+        html += '<span class="cabinet-cal-pad" aria-hidden="true"></span>';
+      }
+      for (const iso of monthDays) {
+        html += renderCabinetCalendarDayButton(iso, activeIso);
+      }
+      html += '</div></section>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function setCabinetDatePopoverOpen(field, open) {
+    if (!(field instanceof HTMLElement)) return;
+    const popover = field.querySelector('.cabinet-order-date-popover');
+    const trigger = field.querySelector('[data-cabinet-date-trigger]');
+    if (!(popover instanceof HTMLElement)) return;
+    if (open) {
+      popover.classList.add('is-open');
+      popover.hidden = false;
+    } else {
+      popover.classList.remove('is-open');
+      popover.hidden = true;
+    }
+    if (trigger instanceof HTMLButtonElement) {
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+
+  function closeAllCabinetDatePopovers(exceptField) {
+    document.querySelectorAll('.cabinet-order-date-field').forEach((field) => {
+      if (exceptField && field === exceptField) return;
+      setCabinetDatePopoverOpen(field, false);
+    });
   }
 
   function renderCabinetSlotOptions(dateIso, selectedKey) {
@@ -392,8 +469,10 @@
     if (!(form instanceof HTMLFormElement)) return;
     const hiddenDate = form.elements.namedItem('delivery_date');
     const selectSlot = form.elements.namedItem('delivery_slot');
-    const picker = form.querySelector('.cabinet-order-date-picker');
-    if (!(hiddenDate instanceof HTMLInputElement) || !(selectSlot instanceof HTMLSelectElement) || !picker) return;
+    const dateField = form.querySelector('.cabinet-order-date-field');
+    const calendarMount = form.querySelector('.cabinet-order-date-calendar');
+    const triggerLabel = form.querySelector('.cabinet-order-date-trigger-label');
+    if (!(hiddenDate instanceof HTMLInputElement) || !(selectSlot instanceof HTMLSelectElement) || !dateField) return;
 
     const orderId = Number(form.getAttribute('data-order-id'));
     const order = currentOrders.find((o) => Number(o.id) === orderId);
@@ -404,7 +483,12 @@
       hiddenDate.value = date;
     }
 
-    picker.innerHTML = renderCabinetDatePickerHtml(date);
+    if (calendarMount instanceof HTMLElement) {
+      calendarMount.innerHTML = renderCabinetCalendarHtml(date);
+    }
+    if (triggerLabel instanceof HTMLElement) {
+      triggerLabel.textContent = cabinetDateTriggerLabel(date);
+    }
 
     const wantSlot = normalizeCabinetSlotKey(selectSlot.value || order?.delivery_slot);
     const slot = wantSlot && !isCabinetSlotClosed(date, wantSlot) ? wantSlot : initialCabinetEditSlot(order || {}, date);
@@ -843,7 +927,15 @@
                 </label>
                 <label>Дата доставки
                   <input type="hidden" name="delivery_date" value="${escapeHtml(editDate)}" />
-                  <div class="cabinet-order-date-picker checkout-delivery-date-picker" role="listbox" aria-label="Дата доставки"></div>
+                  <div class="cabinet-order-date-field">
+                    <button type="button" class="cabinet-order-date-trigger" data-cabinet-date-trigger aria-expanded="false" aria-haspopup="dialog">
+                      <span class="cabinet-order-date-trigger-label">${escapeHtml(cabinetDateTriggerLabel(editDate))}</span>
+                      <span class="cabinet-order-date-trigger-caret" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="cabinet-order-date-popover" hidden>
+                      <div class="cabinet-order-date-calendar" role="dialog" aria-label="Выбор даты доставки"></div>
+                    </div>
+                  </div>
                   <span class="cabinet-order-date-hint">${escapeHtml(CABINET_DELIVERY_HINT)}</span>
                 </label>
                 <label>Интервал
@@ -854,9 +946,11 @@
                 <label>Причина изменения или переноса (обязательно при сохранении)
                   <textarea name="change_reason" maxlength="2000" rows="3" placeholder="Укажите, почему меняются адрес или доставка"></textarea>
                 </label>
-                <button type="submit" class="cabinet-order-save-btn">Сохранить изменения</button>
-              </form>
-              <button type="button" class="ghost-btn cabinet-order-cancel" data-order-id="${order.id}">Отменить заказ…</button>`
+                <div class="cabinet-order-edit-actions">
+                  <button type="submit" class="cabinet-order-save-btn">Сохранить изменения</button>
+                  <button type="button" class="ghost-btn cabinet-order-cancel" data-order-id="${order.id}">Отменить заказ…</button>
+                </div>
+              </form>`
             : ''
         }
       </article>
@@ -1470,15 +1564,40 @@
 
   document.addEventListener('click', (event) => {
     const target = event.target;
+
+    const trigger = target instanceof Element ? target.closest('[data-cabinet-date-trigger]') : null;
+    if (trigger instanceof HTMLButtonElement) {
+      const field = trigger.closest('.cabinet-order-date-field');
+      const popover = field?.querySelector('.cabinet-order-date-popover');
+      if (field instanceof HTMLElement && popover instanceof HTMLElement) {
+        const willOpen = !popover.classList.contains('is-open');
+        closeAllCabinetDatePopovers(field);
+        setCabinetDatePopoverOpen(field, willOpen);
+      }
+      return;
+    }
+
     const chip = target instanceof Element ? target.closest('[data-cabinet-order-date]') : null;
-    if (!(chip instanceof HTMLButtonElement) || chip.disabled) return;
-    const form = chip.closest('.cabinet-order-edit-form');
-    if (!(form instanceof HTMLFormElement)) return;
-    const iso = String(chip.getAttribute('data-cabinet-order-date') || '').trim();
-    if (!cabinetDateSelectable(iso)) return;
-    const hiddenDate = form.elements.namedItem('delivery_date');
-    if (hiddenDate instanceof HTMLInputElement) hiddenDate.value = iso;
-    syncCabinetOrderBookingForm(form);
+    if (chip instanceof HTMLButtonElement && !chip.disabled) {
+      const form = chip.closest('.cabinet-order-edit-form');
+      if (!(form instanceof HTMLFormElement)) return;
+      const iso = String(chip.getAttribute('data-cabinet-order-date') || '').trim();
+      if (!cabinetDateSelectable(iso)) return;
+      const hiddenDate = form.elements.namedItem('delivery_date');
+      if (hiddenDate instanceof HTMLInputElement) hiddenDate.value = iso;
+      const field = chip.closest('.cabinet-order-date-field');
+      if (field instanceof HTMLElement) setCabinetDatePopoverOpen(field, false);
+      syncCabinetOrderBookingForm(form);
+      return;
+    }
+
+    if (!(target instanceof Element && target.closest('.cabinet-order-date-field'))) {
+      closeAllCabinetDatePopovers();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeAllCabinetDatePopovers();
   });
 
   document.addEventListener('submit', async (event) => {

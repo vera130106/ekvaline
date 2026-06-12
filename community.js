@@ -1,5 +1,6 @@
 (function () {
   const FEED_KEY = 'ekvaline_blog_v2_posts';
+  const ENGAGEMENT_RESET_KEY = 'ekvaline_blog_engagement_reset_v1';
   const POST_READS_MAP_KEY = 'ekvaline_blog_post_reads_v1';
   /** Один браузер — одно добавление просмотра на пост («Читать» в первый раз). */
   const FULLREAD_ONCE_PREFIX = 'ekvaline_blog_fullread_once_v1__';
@@ -79,12 +80,12 @@
       image: 'assets/story-ocean-world.png',
       readTime: '2 мин',
       createdAt: '2026-04-26T10:20:00.000Z',
-      likes: 128,
+      likes: 0,
       comments: [
-        { id: 'c11', name: 'Марина', text: 'Очень полезная статья, спасибо!', likes: 4 },
-        { id: 'c12', name: 'Олег', text: 'С утра стакан воды реально помогает.', likes: 2 },
+        { id: 'c11', name: 'Марина', text: 'Очень полезная статья, спасибо!', likes: 0 },
+        { id: 'c12', name: 'Олег', text: 'С утра стакан воды реально помогает.', likes: 0 },
       ],
-      reactions: { useful: 29, new: 18, tryIt: 10 },
+      reactions: { useful: 0, new: 0, tryIt: 0 },
       saved: false,
     },
     {
@@ -96,9 +97,9 @@
       image: 'assets/story-5-habits-eco.png',
       readTime: '3 мин',
       createdAt: '2026-04-25T17:04:00.000Z',
-      likes: 94,
-      comments: [{ id: 'c21', name: 'Ирина', text: 'Сделала трекер и стало проще держать режим.', likes: 1 }],
-      reactions: { useful: 24, new: 9, tryIt: 15 },
+      likes: 0,
+      comments: [{ id: 'c21', name: 'Ирина', text: 'Сделала трекер и стало проще держать режим.', likes: 0 }],
+      reactions: { useful: 0, new: 0, tryIt: 0 },
       saved: false,
     },
     {
@@ -112,9 +113,9 @@
       imageBg: '#ffffff',
       readTime: '5 мин',
       createdAt: '2026-04-24T13:30:00.000Z',
-      likes: 76,
-      comments: [{ id: 'c31', name: 'Даниил', text: 'Нужный материал для тех, кто тренируется.', likes: 3 }],
-      reactions: { useful: 18, new: 6, tryIt: 12 },
+      likes: 0,
+      comments: [{ id: 'c31', name: 'Даниил', text: 'Нужный материал для тех, кто тренируется.', likes: 0 }],
+      reactions: { useful: 0, new: 0, tryIt: 0 },
       saved: false,
     },
     {
@@ -128,9 +129,9 @@
       imageBg: '#000000',
       readTime: '2 мин',
       createdAt: '2026-04-23T09:10:00.000Z',
-      likes: 62,
+      likes: 0,
       comments: [],
-      reactions: { useful: 12, new: 14, tryIt: 20 },
+      reactions: { useful: 0, new: 0, tryIt: 0 },
       saved: false,
     },
     {
@@ -144,9 +145,9 @@
       imageBg: '#ffffff',
       readTime: '4 мин',
       createdAt: '2026-04-22T12:10:00.000Z',
-      likes: 58,
-      comments: [{ id: 'c51', name: 'Алёна', text: 'Очень понравился формат с маленькими шагами.', likes: 1 }],
-      reactions: { useful: 17, new: 10, tryIt: 11 },
+      likes: 0,
+      comments: [{ id: 'c51', name: 'Алёна', text: 'Очень понравился формат с маленькими шагами.', likes: 0 }],
+      reactions: { useful: 0, new: 0, tryIt: 0 },
       saved: false,
     },
   ];
@@ -220,6 +221,24 @@
       }
     });
     if (changed) saveReadsMap(map);
+  }
+
+  function zeroPostEngagement(post) {
+    if (!post || typeof post !== 'object') return;
+    post.likes = 0;
+    post.reactions = { useful: 0, new: 0, tryIt: 0 };
+    if (Array.isArray(post.comments)) {
+      post.comments.forEach((comment) => {
+        if (comment && typeof comment === 'object') comment.likes = 0;
+      });
+    }
+  }
+
+  function migrateDemoEngagementToZero(posts) {
+    if (localStorage.getItem(ENGAGEMENT_RESET_KEY) === '1') return false;
+    (Array.isArray(posts) ? posts : []).forEach(zeroPostEngagement);
+    localStorage.setItem(ENGAGEMENT_RESET_KEY, '1');
+    return true;
   }
 
   function getPostReadsForDisplay(post) {
@@ -729,7 +748,7 @@
               <p class="blogv2-post-excerpt">${escapeHtml(post.excerpt)}</p>
               <p class="blogv2-post-details" hidden>${escapeHtml(post.details || post.excerpt)}</p>
 
-              <div class="blogv2-actions">
+              <div class="blogv2-actions blogv2-post-reactions">
                 <button class="blogv2-action blogv2-like-btn" type="button" data-like="${post.id}">
                   <span class="blogv2-action-label">Нравится</span>
                   <span class="blogv2-action-count">${post.likes}</span>
@@ -745,7 +764,6 @@
               </div>
 
               <div class="blogv2-post-footer">
-                <span></span>
                 <button type="button" class="blogv2-read-btn" data-read-post="${post.id}">Читать</button>
               </div>
 
@@ -810,7 +828,7 @@
   }
 
   function initScrollReveal() {
-    const revealTargets = Array.from(document.querySelectorAll('.blogv2-story, .blogv2-post, .blogv2-card'));
+    const revealTargets = Array.from(document.querySelectorAll('.blogv2-post'));
     if (!revealTargets.length) return;
 
     revealTargets.forEach((element) => {
@@ -1339,6 +1357,9 @@
     state.posts = Array.isArray(saved) && saved.length ? saved : DEFAULT_POSTS;
     state.posts = enforcePostsLimit(state.posts);
     migrateReadsFromPostObjects(state.posts);
+    if (migrateDemoEngagementToZero(state.posts)) {
+      savePosts();
+    }
     if (!saved || !saved.length) {
       savePosts();
     } else {
@@ -1446,9 +1467,9 @@
           imageBg: '#041a3d',
           readTime: '4 мин',
           createdAt: new Date().toISOString(),
-          likes: 58,
-          comments: [{ id: `c51_${Date.now()}`, name: 'Алёна', text: 'Очень понравился формат с маленькими шагами.', likes: 1 }],
-          reactions: { useful: 17, new: 10, tryIt: 11 },
+          likes: 0,
+          comments: [{ id: `c51_${Date.now()}`, name: 'Алёна', text: 'Очень понравился формат с маленькими шагами.', likes: 0 }],
+          reactions: { useful: 0, new: 0, tryIt: 0 },
           views: 0,
           saved: false,
         });

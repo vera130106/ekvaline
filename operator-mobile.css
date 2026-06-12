@@ -932,10 +932,26 @@
   }
 
   body.operator-page .opx-map-panel-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   body.operator-page .opx-map-panel-actions .opx-modal-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    font-size: 12px;
+    padding: 0 8px;
+  }
+
+  body.operator-page .opx-modal-client-actions .opx-modal-btn,
+  body.operator-page #opxOpenClientMapBtn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  body.operator-page .opx-zone-map-toolbar-head .opx-modal-btn,
+  body.operator-page #opxCloseZoneMap {
     width: 100%;
     min-height: 44px;
   }

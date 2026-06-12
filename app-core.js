@@ -367,16 +367,86 @@
     const ac = new AbortController();
     mountEl._ekvalineNotifAbort = ac;
 
+    const notifMobileMq = window.matchMedia('(max-width: 1020px)');
+
+    function isNotifMobileSheet() {
+      return notifMobileMq.matches;
+    }
+
+    function getNotifMobilePortal() {
+      let portal = document.getElementById('ekvalineNotifPortal');
+      if (!portal) {
+        portal = document.createElement('div');
+        portal.id = 'ekvalineNotifPortal';
+        portal.className = 'notif-mobile-portal';
+        portal.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(portal);
+      }
+      return portal;
+    }
+
+    function dockNotifDropdown() {
+      if (!isNotifMobileSheet()) return;
+      if (!dropdown._notifDock) {
+        dropdown._notifDock = {
+          parent: dropdown.parentElement,
+          next: dropdown.nextElementSibling,
+        };
+      }
+      const portal = getNotifMobilePortal();
+      portal.setAttribute('aria-hidden', 'false');
+      if (dropdown.parentElement !== portal) {
+        portal.appendChild(dropdown);
+      }
+    }
+
+    function restoreNotifDropdown() {
+      const dock = dropdown._notifDock;
+      const portal = document.getElementById('ekvalineNotifPortal');
+      if (portal) portal.setAttribute('aria-hidden', 'true');
+      if (!dock?.parent) return;
+      if (dropdown.parentElement !== portal && dropdown.parentElement !== document.body) return;
+      const { parent, next } = dock;
+      if (next && next.parentElement === parent) {
+        parent.insertBefore(dropdown, next);
+      } else {
+        parent.appendChild(dropdown);
+      }
+    }
+
+    function syncNotifDropdownPlacement() {
+      if (dropdown.hasAttribute('hidden')) {
+        restoreNotifDropdown();
+        return;
+      }
+      if (isNotifMobileSheet()) dockNotifDropdown();
+      else restoreNotifDropdown();
+    }
+
     function toggle(open) {
-      const isOpen = open != null ? open : dropdown.hasAttribute('hidden');
-      if (isOpen) {
+      const willOpen = open != null ? open : dropdown.hasAttribute('hidden');
+      if (willOpen) {
+        dockNotifDropdown();
         dropdown.removeAttribute('hidden');
         bell.setAttribute('aria-expanded', 'true');
       } else {
         dropdown.setAttribute('hidden', '');
         bell.setAttribute('aria-expanded', 'false');
+        restoreNotifDropdown();
       }
+      document.body.classList.toggle('notif-dropdown-open', !dropdown.hasAttribute('hidden'));
     }
+
+    notifMobileMq.addEventListener('change', () => syncNotifDropdownPlacement(), { signal: ac.signal });
+
+    const notifPortal = getNotifMobilePortal();
+    notifPortal.addEventListener(
+      'click',
+      (e) => {
+        if (e.target === notifPortal) toggle(false);
+      },
+      { signal: ac.signal },
+    );
 
     bell.addEventListener(
       'click',

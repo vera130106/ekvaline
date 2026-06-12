@@ -34,5 +34,22 @@ let n = 0;
 })();
 "
 
+echo "[docker] Проверка SMTP…"
+node -e "
+const m = require('./mailer');
+if (!m.isMailConfigured()) {
+  console.error('[docker] ПОЧТА НЕ НАСТРОЕНА: в .env задайте SMTP_HOST, SMTP_USER, SMTP_PASS (пароль приложения Mail.ru)');
+  console.error('[docker] Без SMTP коды на email не отправляются (регистрация, смена пароля).');
+  process.exit(0);
+}
+m.verifySmtpConnection()
+  .then((r) => {
+    if (r.ok) console.log('[docker] SMTP: подключение OK');
+    else console.error('[docker] SMTP: ошибка —', r.error || 'неизвестно');
+  })
+  .catch((e) => console.error('[docker] SMTP:', e && e.message))
+  .finally(() => process.exit(0));
+" || true
+
 echo "[docker] Запуск сервера…"
 exec "$@"

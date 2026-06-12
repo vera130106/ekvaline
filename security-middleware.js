@@ -23,6 +23,8 @@ const YANDEX_MAPS_CSP_CONNECT = [
   'https://search-maps.yandex.ru',
   'https://api.routing.yandex.net',
   'https://overpass-api.de',
+  'https://fonts.googleapis.com',
+  'https://fonts.gstatic.com',
 ].join(' ');
 
 const YANDEX_MAPS_CSP_STYLE = [
@@ -32,7 +34,10 @@ const YANDEX_MAPS_CSP_STYLE = [
   'https://api-maps.yandex.ru',
   'https://*.api-maps.yandex.ru',
   'https://yastatic.net',
+  'https://fonts.googleapis.com',
 ].join(' ');
+
+const YANDEX_MAPS_CSP_FONT = ["'self'", 'data:', 'https://yastatic.net', 'https://fonts.gstatic.com'].join(' ');
 
 const YANDEX_MAPS_CSP_IMG = [
   "'self'",
@@ -67,7 +72,7 @@ function buildContentSecurityPolicy() {
     `script-src ${YANDEX_MAPS_CSP_SCRIPT}`,
     `style-src ${YANDEX_MAPS_CSP_STYLE}`,
     `img-src ${YANDEX_MAPS_CSP_IMG}`,
-    "font-src 'self' data: https://yastatic.net",
+    `font-src ${YANDEX_MAPS_CSP_FONT}`,
     `connect-src ${YANDEX_MAPS_CSP_CONNECT}`,
     "media-src 'self'",
     `worker-src ${YANDEX_MAPS_CSP_WORKER}`,
