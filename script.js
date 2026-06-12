@@ -1871,11 +1871,12 @@
             <input type="text" id="checkoutAddressInput" name="address" maxlength="${CHECKOUT_ADDRESS_MAX}" required placeholder="Сначала выберите адрес на карте" readonly />
             <button type="button" class="checkout-map-btn" id="openMapPickerBtn">Выбрать на карте</button>
           </label>
-          <label class="checkout-field">Дата доставки
-            <input type="hidden" id="checkoutDeliveryDate" name="deliveryDate" required />
-            <div id="checkoutDeliveryDatePicker" class="checkout-delivery-date-picker" role="listbox" aria-label="Дата доставки"></div>
+          <div class="checkout-field checkout-field-dates">
+            <span class="checkout-field-label" id="checkoutDeliveryDateLabel">Дата доставки</span>
+            <input type="hidden" id="checkoutDeliveryDate" name="deliveryDate" required aria-labelledby="checkoutDeliveryDateLabel" />
+            <div id="checkoutDeliveryDatePicker" class="checkout-delivery-date-picker" role="group" aria-labelledby="checkoutDeliveryDateLabel"></div>
             <span class="checkout-field-hint" id="checkoutDeliveryDateHint">Заказы принимаются на следующий день. Доставка с завтрашнего дня (сегодня выбрать нельзя).</span>
-          </label>
+          </div>
           <label class="checkout-field">Интервал доставки
             <select id="checkoutDeliverySlot" name="deliverySlot" required></select>
           </label>
@@ -2273,9 +2274,38 @@
     return '';
   }
 
+  function selectCheckoutDeliveryDate(iso) {
+    const d = String(iso || '').trim();
+    if (!d || !isCheckoutDateSelectable(d) || !(checkoutDeliveryDate instanceof HTMLInputElement)) return false;
+    if (checkoutDeliveryDate.value === d) {
+      renderCheckoutDatePicker(d);
+      return true;
+    }
+    checkoutDeliveryDate.value = d;
+    refreshCheckoutDeliveryUi();
+    return true;
+  }
+
+  function bindCheckoutDatePickerEvents() {
+    const picker = document.getElementById('checkoutDeliveryDatePicker');
+    if (!(picker instanceof HTMLElement) || picker.dataset.checkoutDateBound === '1') return;
+    picker.dataset.checkoutDateBound = '1';
+
+    function onPick(event) {
+      const chip = event.target instanceof Element ? event.target.closest('[data-checkout-date]') : null;
+      if (!chip || chip.tagName !== 'BUTTON' || chip.disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectCheckoutDeliveryDate(chip.getAttribute('data-checkout-date'));
+    }
+
+    picker.addEventListener('click', onPick);
+  }
+
   function renderCheckoutDatePicker(activeIso) {
     const picker = document.getElementById('checkoutDeliveryDatePicker');
     if (!(picker instanceof HTMLElement)) return;
+    bindCheckoutDatePickerEvents();
     const days = enumerateCheckoutBookingDays();
     picker.innerHTML = days
       .map((iso) => {
@@ -3708,13 +3738,8 @@
       return;
     }
     const dateChip = target.closest('[data-checkout-date]');
-    if (dateChip instanceof HTMLButtonElement && !dateChip.disabled) {
-      const iso = String(dateChip.getAttribute('data-checkout-date') || '').trim();
-      if (iso && isCheckoutDateSelectable(iso) && checkoutDeliveryDate instanceof HTMLInputElement) {
-        checkoutDeliveryDate.value = iso;
-        refreshCheckoutDeliveryUi();
-      }
-      return;
+    if (dateChip instanceof Element && dateChip.tagName === 'BUTTON' && !dateChip.disabled) {
+      if (selectCheckoutDeliveryDate(dateChip.getAttribute('data-checkout-date'))) return;
     }
     const streetSuggestBtn = target.closest('[data-street-suggest]');
     if (streetSuggestBtn) {

@@ -8,7 +8,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ASSET_VERSION = '20260618checkoutcenter';
+const ASSET_VERSION = '20260618opxbtn';
 
 function run(label, args) {
   process.stdout.write(`→ ${label}… `);

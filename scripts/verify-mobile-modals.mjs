@@ -37,6 +37,7 @@ must('responsive-mobile.css', 'checkout-modal-card', 'оформление за�
 must('app-core.js', 'ekvalineNotifPortal', 'док уведомлений в body');
 must('mobile-nav.js', 'EkvalineSiteNav', 'закрытие меню перед входом');
 must('script.js', 'EkvalineSiteNav?.close', 'вход закрывает мобильное меню');
+must('script.js', 'bindCheckoutDatePickerEvents', 'выбор даты оформления на mobile');
 must('responsive-mobile.css', 'checkout-map-panel-fields', 'прокрутка полей адреса');
 must('responsive-mobile.css', 'checkout-map-panel-actions-main', 'кнопки адреса на карте');
 

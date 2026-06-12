@@ -136,9 +136,18 @@
 
   body.operator-page .opx-new-orders-btn {
     min-height: 44px;
-    padding: 8px 14px;
+    padding: 8px 14px 8px 16px;
     font-size: 13px;
     border-radius: 999px;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  body.operator-page .opx-new-orders-btn strong,
+  body.operator-page #opxNewCount {
+    min-width: 1.55rem;
+    min-height: 1.45rem;
+    font-size: 12px;
   }
 
   body.operator-page .opx-icon-btn {

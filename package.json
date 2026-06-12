@@ -21,6 +21,7 @@
     "pg:seed-demo-orders": "node scripts/seed-demo-operator-orders.js",
     "pg:seed-demo-orders:force": "node scripts/seed-demo-operator-orders.js --force",
     "pg:clean-production": "node scripts/cleanup-production-data.js --yes",
+    "pg:clean-test-addresses": "node scripts/cleanup-test-addresses.mjs --yes",
     "test:smtp": "node scripts/test-smtp.mjs",
     "load:public": "k6 run scripts/load/k6-public.js",
     "build:html-archive": "node scripts/build-html-archive.mjs",

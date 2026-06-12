@@ -317,6 +317,7 @@ async function migrate(pool) {
   await ensureLegacyClientsOrdersFk(pool);
   await ensureDeclarativeForeignKeysPublic(pool);
   await migrateOrderAuditEventsRetainOnDelete(pool);
+  await migrateRemoveDemoAndTestAddresses(pool);
   await ensurePublicRussianTableComments(pool);
   await ensureAboutCertificatesDeclarationPdf(pool);
 }
@@ -1609,21 +1610,61 @@ async function seedIfEmpty(pool) {
   );
 }
 
-async function ensureDefaultDeliveryAddresses(pool) {
-  const row = await pool.query('SELECT COUNT(*)::int AS c FROM delivery_addresses');
-  if (row.rows[0].c > 0) return;
-  const defaults = [
-    ['Центр — ул. Чкалова', 'Оренбург, ул. Чкалова, д. 15', 10],
-    ['Степной — Салмышская', 'Оренбург, ул. Салмышская, д. 42', 20],
-    ['Окраина — Ростоши', 'Оренбург, мкр. Ростоши-1, д. 8', 30],
-    ['Доп. зона — Подгород', 'Оренбург, пос. Подгородный, ул. Южная, д. 3', 40],
-  ];
-  for (const d of defaults) {
-    await pool.query(
-      'INSERT INTO delivery_addresses (label, address_line, sort_order, active, notes) VALUES ($1,$2,$3,1,\'\')',
-      d
-    );
+/** Демо-пресеты при первом запуске (больше не добавляем — только реальные адреса через админку). */
+const DEMO_DELIVERY_ADDRESS_PRESETS = Object.freeze([
+  ['Центр — ул. Чкалова', 'Оренбург, ул. Чкалова, д. 15'],
+  ['Степной — Салмышская', 'Оренбург, ул. Салмышская, д. 42'],
+  ['Окраина — Ростоши', 'Оренбург, мкр. Ростоши-1, д. 8'],
+  ['Доп. зона — Подгород', 'Оренбург, пос. Подгородный, ул. Южная, д. 3'],
+]);
+
+async function ensureDefaultDeliveryAddresses(_pool) {
+  /* Пресеты адресов задаёт администратор; демо-адреса не подставляем. */
+}
+
+/** Однократно убираем демо-пресеты и строки с «тест» в адресе. */
+async function migrateRemoveDemoAndTestAddresses(pool) {
+  const marker = 'demo_test_addresses_purged_v1';
+  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
+  if (hit.rows[0]?.value === '1') return;
+  if (!(await pgTableExists(pool, 'delivery_addresses'))) return;
+
+  for (const [label, line] of DEMO_DELIVERY_ADDRESS_PRESETS) {
+    await pool
+      .query('DELETE FROM delivery_addresses WHERE label = $1 AND address_line = $2', [label, line])
+      .catch(() => {});
   }
+
+  await pool
+    .query(
+      `DELETE FROM delivery_addresses
+       WHERE label ILIKE '%тест%'
+          OR address_line ILIKE '%тестов%'
+          OR address_line ILIKE '%ул. тестовая%'
+          OR address_line ILIKE '%test.%'
+          OR COALESCE(notes, '') ILIKE '%demo%'`
+    )
+    .catch(() => {});
+
+  if (await pgTableExists(pool, 'client_saved_addresses')) {
+    await pool
+      .query(
+        `DELETE FROM client_saved_addresses
+         WHERE label ILIKE '%тест%'
+            OR address_line ILIKE '%тестов%'
+            OR address_line ILIKE '%ул. тестовая%'
+            OR address_line ILIKE '%test.%'`
+      )
+      .catch(() => {});
+  }
+
+  await pool
+    .query(
+      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [marker]
+    )
+    .catch(() => {});
 }
 
 /** Названия как на catalog.html — чтобы заказ с сайта находил product_id. */

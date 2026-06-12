@@ -219,3 +219,23 @@ CREATE INDEX IF NOT EXISTS idx_orders_created ON orders (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users (lower(email));
 CREATE INDEX IF NOT EXISTS idx_bonus_ops_user_expires ON bonus_operations (user_id, expires_at)
   WHERE type = 'accrual' AND remaining > 0;
+
+-- Пресеты адресов доставки (админка / checkout-options)
+SELECT id, label, address_line, active, sort_order FROM delivery_addresses ORDER BY sort_order, id;
+
+-- Удалить демо-пресеты и тестовые адреса (или: npm run pg:clean-test-addresses -- --yes)
+DELETE FROM delivery_addresses
+WHERE (label, address_line) IN (
+  ('Центр — ул. Чкалова', 'Оренбург, ул. Чкалова, д. 15'),
+  ('Степной — Салмышская', 'Оренбург, ул. Салмышская, д. 42'),
+  ('Окраина — Ростоши', 'Оренбург, мкр. Ростоши-1, д. 8'),
+  ('Доп. зона — Подгород', 'Оренбург, пос. Подгородный, ул. Южная, д. 3')
+)
+OR label ILIKE '%тест%'
+OR address_line ILIKE '%тестов%'
+OR address_line ILIKE '%ул. тестовая%';
+
+DELETE FROM client_saved_addresses
+WHERE label ILIKE '%тест%'
+   OR address_line ILIKE '%тестов%'
+   OR address_line ILIKE '%ул. тестовая%';

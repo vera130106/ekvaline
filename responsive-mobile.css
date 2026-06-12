@@ -1067,14 +1067,24 @@ body.cabinet-page-full section {
     flex-wrap: wrap;
     justify-content: center;
     gap: 0.45rem;
-    max-height: min(200px, 38dvh);
+    max-height: min(320px, 46dvh);
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     padding: 0.15rem 0.1rem;
     margin-inline: auto;
     width: 100%;
     box-sizing: border-box;
+    position: relative;
+    z-index: 3;
+    touch-action: pan-y;
+  }
+
+  body.client-site .checkout-field-dates,
+  body.cabinet-page-full .checkout-field-dates {
+    position: relative;
+    z-index: 2;
   }
 
   body.client-site .checkout-date-chip,
@@ -1084,12 +1094,16 @@ body.cabinet-page-full section {
     flex: 0 1 calc(25% - 0.45rem);
     max-width: calc(33.33% - 0.35rem);
     touch-action: manipulation;
-  }
-
-  body.client-site .checkout-date-chip:not(:disabled):not(.is-unavailable),
-  body.cabinet-page-full .checkout-date-chip:not(:disabled):not(.is-unavailable) {
     pointer-events: auto;
     cursor: pointer;
+  }
+
+  body.client-site .checkout-date-chip:disabled,
+  body.cabinet-page-full .checkout-date-chip:disabled,
+  body.client-site .checkout-date-chip.is-unavailable,
+  body.cabinet-page-full .checkout-date-chip.is-unavailable {
+    pointer-events: none;
+    cursor: not-allowed;
   }
 
   body.client-site .checkout-modal-card .checkout-form input,
