@@ -162,10 +162,13 @@ body.cabinet-page-full section {
     inset: 0;
     z-index: 1240;
     pointer-events: auto;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    align-items: stretch;
+    display: grid;
+    place-items: center;
+    padding: max(0.75rem, env(safe-area-inset-top, 0px))
+      max(0.75rem, env(safe-area-inset-right, 0px))
+      max(0.75rem, env(safe-area-inset-bottom, 0px))
+      max(0.75rem, env(safe-area-inset-left, 0px));
+    box-sizing: border-box;
   }
 
   .notif-mobile-portal:not(:empty)::before {
@@ -186,18 +189,19 @@ body.cabinet-page-full section {
     left: auto !important;
     right: auto !important;
     bottom: auto !important;
-    width: 100% !important;
+    width: min(100%, 420px) !important;
     min-width: 0 !important;
-    max-width: none !important;
-    margin: 0 !important;
+    max-width: calc(100vw - var(--mobile-gutter) - var(--mobile-gutter-r)) !important;
+    margin: 0 auto !important;
     transform: none !important;
-    max-height: min(82dvh, 520px);
+    max-height: min(85dvh, 520px);
     z-index: 1;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     pointer-events: auto;
-    border-radius: 18px 18px 0 0;
+    border-radius: 18px;
+    overflow: hidden;
     padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
   }
 
@@ -205,20 +209,24 @@ body.cabinet-page-full section {
   body.cabinet-page-full .notif-mobile-portal .notif-dropdown {
     position: relative !important;
     flex: 0 0 auto;
-    align-self: stretch;
+    align-self: center;
+    justify-self: center;
   }
 
   .notif-dropdown-head {
     flex-wrap: wrap;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
-    padding: 0.75rem 0.85rem;
+    padding: 0.85rem 1rem;
+    text-align: center;
   }
 
   .notif-dropdown-head span:first-child {
     flex: 1 1 100%;
     min-width: 0;
     font-size: 1rem;
+    text-align: center;
   }
 
   .notif-read-all {
@@ -232,7 +240,7 @@ body.cabinet-page-full section {
   .notif-dropdown-body {
     flex: 1 1 auto;
     min-height: 0;
-    max-height: min(58dvh, calc(100dvh - 11rem));
+    max-height: min(58dvh, calc(85dvh - 7.5rem));
     padding: 0.5rem 0.65rem 0.65rem;
     overflow-x: hidden;
     overflow-y: auto;
@@ -569,11 +577,15 @@ body.cabinet-page-full section {
     gap: 0.5rem 1rem;
   }
 
-  .auth-modal-card {
-    width: calc(100% - var(--mobile-gutter) - var(--mobile-gutter-r));
-    max-height: calc(100dvh - 1.5rem);
+  body.client-site .auth-modal-card,
+  body.cabinet-page-full .auth-modal-card {
+    width: min(100%, 440px);
+    max-width: calc(100vw - var(--mobile-gutter) - var(--mobile-gutter-r));
+    max-height: min(90dvh, 100dvh);
     overflow-y: auto;
-    margin: 0.75rem;
+    margin: 0 auto;
+    border-radius: 18px;
+    box-sizing: border-box;
   }
 
   .cabinet-panel {
@@ -966,7 +978,6 @@ body.cabinet-page-full section {
     min-height: 44px;
   }
 
-  body.client-site .auth-modal-card,
   body.client-site .cb-modal-card {
     width: calc(100vw - var(--mobile-gutter) - var(--mobile-gutter-r));
     max-width: none;
@@ -975,10 +986,8 @@ body.cabinet-page-full section {
     -webkit-overflow-scrolling: touch;
   }
 
-  body.client-site .cart-modal-card,
-  body.client-site .checkout-modal-card,
-  body.cabinet-page-full .cart-modal-card,
-  body.cabinet-page-full .checkout-modal-card {
+  body.client-site .cart-modal-card:not(.checkout-modal-card),
+  body.cabinet-page-full .cart-modal-card:not(.checkout-modal-card) {
     position: absolute;
     top: auto;
     bottom: 0;
@@ -996,6 +1005,46 @@ body.cabinet-page-full section {
     padding: 1rem max(0.85rem, env(safe-area-inset-right))
       max(1rem, env(safe-area-inset-bottom))
       max(0.85rem, env(safe-area-inset-left));
+  }
+
+  body.client-site #checkoutModal.open,
+  body.cabinet-page-full #checkoutModal.open {
+    display: grid;
+    place-items: center;
+    padding: max(0.75rem, env(safe-area-inset-top, 0px))
+      max(0.75rem, env(safe-area-inset-right, 0px))
+      max(0.75rem, env(safe-area-inset-bottom, 0px))
+      max(0.75rem, env(safe-area-inset-left, 0px));
+    box-sizing: border-box;
+  }
+
+  body.client-site .checkout-modal-card,
+  body.cabinet-page-full .checkout-modal-card {
+    position: relative;
+    top: auto;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    transform: none;
+    width: min(100%, 520px);
+    max-width: calc(100vw - var(--mobile-gutter) - var(--mobile-gutter-r));
+    max-height: min(90dvh, 100dvh);
+    margin: 0;
+    align-self: center;
+    justify-self: center;
+    box-sizing: border-box;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 18px;
+    padding: 1.1rem max(1rem, env(safe-area-inset-right))
+      max(1.1rem, env(safe-area-inset-bottom, 0px))
+      max(1rem, env(safe-area-inset-left));
+  }
+
+  body.client-site .checkout-modal-card h3,
+  body.cabinet-page-full .checkout-modal-card h3 {
+    text-align: center;
+    padding-right: 2rem;
   }
 
   body.client-site .checkout-modal-card .checkout-form,
@@ -1231,25 +1280,64 @@ body.cabinet-page-full section {
     z-index: 1260;
   }
 
-  body.client-site .auth-modal.open {
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding: 0;
+  body.client-site .auth-modal.open,
+  body.cabinet-page-full .auth-modal.open {
+    display: grid;
+    place-items: center;
+    padding: max(0.75rem, env(safe-area-inset-top, 0px))
+      max(0.75rem, env(safe-area-inset-right, 0px))
+      max(0.75rem, env(safe-area-inset-bottom, 0px))
+      max(0.75rem, env(safe-area-inset-left, 0px));
+    box-sizing: border-box;
   }
 
-  body.client-site .auth-modal-card {
-    width: 100%;
-    max-width: none;
-    max-height: min(94dvh, 100dvh);
+  body.client-site .auth-modal-card,
+  body.cabinet-page-full .auth-modal-card {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 440px);
+    max-width: calc(100vw - var(--mobile-gutter) - var(--mobile-gutter-r));
+    max-height: min(90dvh, 100dvh);
     margin: 0;
-    align-self: flex-end;
-    border-radius: 18px 18px 0 0;
+    justify-self: center;
+    align-self: center;
+    border-radius: 18px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 1rem max(0.85rem, env(safe-area-inset-right))
-      max(1rem, env(safe-area-inset-bottom))
-      max(0.85rem, env(safe-area-inset-left));
+    padding: 1.1rem max(1rem, env(safe-area-inset-right))
+      max(1.1rem, env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+    box-sizing: border-box;
+  }
+
+  body.client-site .auth-modal-card h3,
+  body.cabinet-page-full .auth-modal-card h3 {
+    text-align: center;
+    padding-right: 2rem;
+  }
+
+  body.client-site .auth-modal-card .auth-tabs,
+  body.cabinet-page-full .auth-modal-card .auth-tabs,
+  body.client-site .auth-modal-card .auth-form,
+  body.cabinet-page-full .auth-modal-card .auth-form,
+  body.client-site .auth-modal-card .auth-forgot-panel,
+  body.cabinet-page-full .auth-modal-card .auth-forgot-panel {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  body.client-site .auth-form label,
+  body.cabinet-page-full .auth-form label {
+    width: 100%;
+  }
+
+  body.client-site .auth-form input,
+  body.cabinet-page-full .auth-form input,
+  body.client-site .auth-form .auth-password-wrap,
+  body.cabinet-page-full .auth-form .auth-password-wrap {
+    width: 100%;
+    max-width: 100%;
     box-sizing: border-box;
   }
 
@@ -2133,18 +2221,19 @@ body.manager-page {
     max-width: 100%;
   }
 
-  body.client-site .checkout-drawer,
-  body.client-site .auth-modal-card {
+  body.client-site .checkout-drawer {
     max-width: 100%;
   }
 }
 
 @media (max-width: 480px) {
-  body.client-site .auth-modal-card {
-    width: 100%;
-    max-height: min(96dvh, 100dvh);
-    margin: 0;
-    border-radius: 18px 18px 0 0;
+  body.client-site .auth-modal-card,
+  body.cabinet-page-full .auth-modal-card {
+    width: min(100%, 100%);
+    max-width: calc(100vw - max(0.5rem, env(safe-area-inset-left)) - max(0.5rem, env(safe-area-inset-right)));
+    max-height: min(92dvh, 100dvh);
+    margin: 0 auto;
+    border-radius: 16px;
   }
 
   body.client-site .checkout-drawer-inner {

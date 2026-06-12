@@ -496,9 +496,9 @@ function checkAuthEmailPassword() {
   ok('Почта и пароли: API, mailer, кабинет, auth-password.js');
 }
 
-const ASSET_VERSION = '20260618dates';
-const SCRIPT_VERSION = '20260618dates';
-const MAPS_RUNTIME_VERSION = '20260618dates';
+const ASSET_VERSION = '20260618checkoutcenter';
+const SCRIPT_VERSION = '20260618checkoutcenter';
+const MAPS_RUNTIME_VERSION = '20260618checkoutcenter';
 
 function checkAssetVersionsAndMobile() {
   const clientPages = [

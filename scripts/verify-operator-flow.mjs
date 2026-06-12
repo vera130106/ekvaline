@@ -113,6 +113,25 @@ async function main() {
   if (!r.ok) throw new Error(`PATCH order failed: ${r.status} ${JSON.stringify(data)}`);
   console.log('OK PATCH /api/orders/:id (courier_note)');
 
+  ({ r, data } = await json('/api/csrf', { headers: hdr() }));
+  absorb(r);
+  csrf = data?.csrfToken;
+  ({ r, data } = await json(`/api/orders/${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: { ...hdr(), 'X-CSRF-Token': csrf },
+    body: JSON.stringify({
+      zone: 'Подхват',
+      delivery_date: sample.delivery_date,
+      delivery_slot: sample.delivery_slot,
+      payment_method: sample.payment_method || 'cash',
+    }),
+  }));
+  if (!r.ok) throw new Error(`PATCH zone Подхват failed: ${r.status} ${JSON.stringify(data)}`);
+  if (String(data?.order?.zone || '') !== 'Подхват') {
+    throw new Error(`PATCH zone Подхват: expected zone Подхват, got ${data?.order?.zone}`);
+  }
+  console.log('OK PATCH /api/orders/:id (zone Подхват)');
+
   const today = new Date();
   today.setDate(today.getDate() + 1);
   const deliveryDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -134,7 +153,7 @@ async function main() {
       product_title: 'Вода 19 л',
       qty: 2,
       unit_price: 360,
-      zone: 'Центр',
+      zone: 'Подхват',
       courier_note: 'verify-operator-create',
     }),
   }));

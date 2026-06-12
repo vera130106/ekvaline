@@ -642,23 +642,48 @@ const ORDER_ZONE_NAME_ALIASES = new Map([
   ['доп зона', 'Доп. зона'],
 ]);
 
+/** Зоны из UI оператора — должны быть в delivery_zones (FK orders.zone → delivery_zones.name). */
+const CANONICAL_ORDER_ZONES = Object.freeze([
+  ['Центр', 0],
+  ['Степной', 150],
+  ['Доп. зона', 250],
+  ['Подхват', 0],
+]);
+
+async function ensureCanonicalOrderZonesInDb() {
+  for (const [name, tariff] of CANONICAL_ORDER_ZONES) {
+    const row = await db.prepare('SELECT name FROM delivery_zones WHERE name = ? LIMIT 1').get(name);
+    if (row?.name) continue;
+    try {
+      await db
+        .prepare('INSERT INTO delivery_zones (name, tariff, bounds_json) VALUES (?, ?, ?)')
+        .run(name, tariff, '{}');
+    } catch {
+      /* гонка или уже есть */
+    }
+  }
+}
+
 /** Согласование зоны заказа со справочником delivery_zones (FK orders.zone). */
 async function resolveOrderZoneForDb(rawZone) {
+  await ensureCanonicalOrderZonesInDb();
   let zone = String(rawZone ?? '').trim();
   if (!zone) return { ok: true, zone: '' };
   const alias = ORDER_ZONE_NAME_ALIASES.get(zone.toLowerCase());
   if (alias) zone = alias;
-  const row = await db.prepare('SELECT name FROM delivery_zones WHERE name = ? LIMIT 1').get(zone);
+  let row = await db.prepare('SELECT name FROM delivery_zones WHERE name = ? LIMIT 1').get(zone);
   if (row?.name) return { ok: true, zone: String(row.name) };
   try {
     await db.prepare('INSERT INTO delivery_zones (name, tariff, bounds_json) VALUES (?, 0, ?)').run(zone, '{}');
-    return { ok: true, zone };
   } catch {
+    row = await db.prepare('SELECT name FROM delivery_zones WHERE name = ? LIMIT 1').get(zone);
+    if (row?.name) return { ok: true, zone: String(row.name) };
     return {
       ok: false,
       error: `Зона «${zone}» отсутствует в справочнике. Обновите страницу (F5) или выберите зону из списка.`,
     };
   }
+  return { ok: true, zone };
 }
 
 async function normalizeOperatorOrderDriverInput(rawDriver, currentStatus) {
@@ -2177,7 +2202,12 @@ app.post(
     }
 
     const pickupVal = Number(v.value.pickup) === 1 ? 1 : 0;
-    const zoneVal = String(v.value.zone || '').trim() || null;
+    let zoneVal = String(v.value.zone || '').trim() || null;
+    if (zoneVal) {
+      const zoneNorm = await resolveOrderZoneForDb(zoneVal);
+      if (!zoneNorm.ok) return res.status(400).json({ error: zoneNorm.error });
+      zoneVal = zoneNorm.zone || null;
+    }
     let driverVal = String(v.value.driver || '').trim() || null;
     let insertStatus = 'new';
     if (driverVal) {
