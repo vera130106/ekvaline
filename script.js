@@ -3349,7 +3349,7 @@
         }
       );
     }
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize()));
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize?.()));
   }
 
   function parseFormattedAddressLine(line) {
@@ -3398,6 +3398,7 @@
     updatePickedAddressLabel();
     mapPickerModal?.classList.add('open');
     mapPickerModal?.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('map-picker-open');
     document.body.style.overflow = 'hidden';
     try {
       await initMapPicker();
@@ -3419,9 +3420,11 @@
   function closeMapPicker() {
     mapPickerModal?.classList.remove('open');
     mapPickerModal?.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('map-picker-open');
     if (!cartModal?.classList.contains('open') && !checkoutModal?.classList.contains('open')) {
       document.body.style.overflow = '';
     }
+    window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize?.());
   }
 
   function animateAddToCart(card) {

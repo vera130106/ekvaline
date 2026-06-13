@@ -85,7 +85,6 @@
   const historyOrdersList = document.getElementById('cabinetOrdersHistory');
   const bonusValue = document.getElementById('cabinetBonusValue');
   const bonusStatus = document.getElementById('cabinetBonusStatus');
-  const bonusStatusHint = document.getElementById('cabinetBonusStatusHint');
   const bonusStats = document.getElementById('cabinetBonusStats');
   const bonusExpiryNote = document.getElementById('cabinetBonusExpiryNote');
   const bonusHistory = document.getElementById('cabinetBonusHistory');
@@ -592,19 +591,11 @@
         bonusStatus.textContent = '';
         bonusStatus.className = 'cabinet-bonus-status';
       }
-      if (bonusStatusHint) {
-        bonusStatusHint.textContent = '';
-        bonusStatusHint.hidden = true;
-      }
     } else {
       if (statusWrap instanceof HTMLElement) statusWrap.hidden = false;
       if (bonusStatus) {
         bonusStatus.textContent = summary.member_status_label || '—';
         bonusStatus.className = `cabinet-bonus-status is-${memberCode}`;
-      }
-      if (bonusStatusHint) {
-        bonusStatusHint.hidden = false;
-        bonusStatusHint.textContent = summary.member_status_hint || '';
       }
     }
     if (bonusStats) {

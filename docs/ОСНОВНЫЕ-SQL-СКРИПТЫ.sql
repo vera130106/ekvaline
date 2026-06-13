@@ -223,7 +223,27 @@ CREATE INDEX IF NOT EXISTS idx_bonus_ops_user_expires ON bonus_operations (user_
 -- Пресеты адресов доставки (админка / checkout-options)
 SELECT id, label, address_line, active, sort_order FROM delivery_addresses ORDER BY sort_order, id;
 
--- Удалить демо-пресеты и тестовые адреса (или: npm run pg:clean-test-addresses -- --yes)
+-- Удалить демо/тест (или: npm run pg:clean-test-data -- --yes)
+-- Заказы: verify-op, verify-operator, §demo_*, адрес «Тестовая»
+-- Клиенты: Тест Клиент/Оператор, verify.*, demo.*@ekvaline.local
+
+DELETE FROM orders
+WHERE address ILIKE '%ул. тестовая%'
+   OR address ILIKE '%тестов%'
+   OR COALESCE(courier_note, '') ILIKE '%verify-op%'
+   OR COALESCE(courier_note, '') ILIKE '%verify-operator%'
+   OR COALESCE(courier_note, '') ILIKE '%§demo_%'
+   OR COALESCE(courier_note, '') ILIKE '%§ekva_seed%';
+
+DELETE FROM users
+WHERE lower(COALESCE(role, '')) NOT IN ('admin', 'operator', 'manager')
+  AND (
+    lower(email) LIKE 'verify.%'
+    OR lower(email) LIKE 'demo.%@ekvaline.local'
+    OR (lower(trim(first_name)) = 'тест' AND lower(trim(last_name)) IN ('клиент', 'оператор'))
+  );
+
+-- Адреса (или: npm run pg:clean-test-addresses -- --yes)
 DELETE FROM delivery_addresses
 WHERE (label, address_line) IN (
   ('Центр — ул. Чкалова', 'Оренбург, ул. Чкалова, д. 15'),

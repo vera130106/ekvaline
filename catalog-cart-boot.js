@@ -66,7 +66,10 @@
   function ensureToastElements() {
     let toast = document.getElementById('appToast');
     let text = document.getElementById('appToastText');
-    if (toast instanceof HTMLElement && text instanceof HTMLElement) return { toast, text };
+    if (toast instanceof HTMLElement && text instanceof HTMLElement) {
+      if (toast.parentElement !== document.body) document.body.appendChild(toast);
+      return { toast, text };
+    }
     const wrap = document.createElement('div');
     wrap.id = 'appToast';
     wrap.className = 'ek-notify';
@@ -74,10 +77,14 @@
     wrap.setAttribute('role', 'status');
     wrap.setAttribute('aria-live', 'polite');
     wrap.innerHTML =
-      '<div class="ek-notify-card"><span class="ek-notify-icon" aria-hidden="true"></span><p id="appToastText" class="ek-notify-text"></p></div>';
+      '<div class="ek-notify-card"><span class="ek-notify-icon" aria-hidden="true"></span><p id="appToastText" class="ek-notify-text"></p><button type="button" id="appToastClose" class="ek-notify-close" aria-label="Закрыть">×</button></div>';
     document.body.appendChild(wrap);
     toast = wrap;
     text = wrap.querySelector('#appToastText');
+    wrap.querySelector('#appToastClose')?.addEventListener('click', () => {
+      wrap.classList.remove('is-visible');
+      wrap.hidden = true;
+    });
     return { toast, text };
   }
 
@@ -91,8 +98,10 @@
     }
     text.textContent = msg;
     toast.dataset.variant = variant === 'error' ? 'error' : variant === 'info' ? 'info' : 'success';
+    if (toast.parentElement !== document.body) document.body.appendChild(toast);
     toast.hidden = false;
-    toast.classList.add('is-visible');
+    toast.classList.remove('is-visible');
+    window.requestAnimationFrame(() => toast.classList.add('is-visible'));
     window.setTimeout(() => {
       toast.classList.remove('is-visible');
       toast.hidden = true;

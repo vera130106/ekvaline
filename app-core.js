@@ -350,7 +350,8 @@
         </button>
         <div class="notif-dropdown" id="notifDropdown" hidden role="menu">
           <div class="notif-dropdown-head">
-            <span>Уведомления</span>
+            <button type="button" class="notif-close" id="notifClose" aria-label="Закрыть">×</button>
+            <span class="notif-dropdown-title">Уведомления</span>
             <button type="button" class="notif-read-all" id="notifReadAll">Прочитать все</button>
           </div>
           <div class="notif-dropdown-body" id="notifList"></div>
@@ -363,6 +364,7 @@
     const dropdown = mountEl.querySelector('#notifDropdown');
     const listEl = mountEl.querySelector('#notifList');
     const readAll = mountEl.querySelector('#notifReadAll');
+    const closeBtn = mountEl.querySelector('#notifClose');
 
     const ac = new AbortController();
     mountEl._ekvalineNotifAbort = ac;
@@ -468,6 +470,15 @@
       { signal: ac.signal },
     );
 
+    closeBtn.addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        toggle(false);
+      },
+      { signal: ac.signal },
+    );
+
     document.addEventListener(
       'click',
       () => {
@@ -485,6 +496,18 @@
 
   migrateNotifDeliveryIntervals();
 
+  function pinClientToastToBody() {
+    const toast = document.getElementById('appToast');
+    if (toast instanceof HTMLElement && toast.parentElement !== document.body) {
+      document.body.appendChild(toast);
+    }
+  }
+
+  pinClientToastToBody();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', pinClientToastToBody);
+  }
+
   window.EkvalineApp = {
     ...Api,
     escapeHtml,
@@ -493,5 +516,6 @@
     teardownNotificationsUI,
     formatTime,
     stampRegistrationWelcomeNotifications,
+    pinClientToastToBody,
   };
 })();

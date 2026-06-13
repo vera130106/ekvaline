@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
+const { purgeTestOperationalData } = require('./lib/test-data-purge');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
@@ -1622,49 +1623,9 @@ async function ensureDefaultDeliveryAddresses(_pool) {
   /* Пресеты адресов задаёт администратор; демо-адреса не подставляем. */
 }
 
-/** Однократно убираем демо-пресеты и строки с «тест» в адресе. */
+/** Убираем демо/тестовые заказы, клиентов и адреса (в т.ч. после автопроверок). */
 async function migrateRemoveDemoAndTestAddresses(pool) {
-  const marker = 'demo_test_addresses_purged_v1';
-  const hit = await pool.query('SELECT value FROM site_settings WHERE key = $1', [marker]).catch(() => ({ rows: [] }));
-  if (hit.rows[0]?.value === '1') return;
-  if (!(await pgTableExists(pool, 'delivery_addresses'))) return;
-
-  for (const [label, line] of DEMO_DELIVERY_ADDRESS_PRESETS) {
-    await pool
-      .query('DELETE FROM delivery_addresses WHERE label = $1 AND address_line = $2', [label, line])
-      .catch(() => {});
-  }
-
-  await pool
-    .query(
-      `DELETE FROM delivery_addresses
-       WHERE label ILIKE '%тест%'
-          OR address_line ILIKE '%тестов%'
-          OR address_line ILIKE '%ул. тестовая%'
-          OR address_line ILIKE '%test.%'
-          OR COALESCE(notes, '') ILIKE '%demo%'`
-    )
-    .catch(() => {});
-
-  if (await pgTableExists(pool, 'client_saved_addresses')) {
-    await pool
-      .query(
-        `DELETE FROM client_saved_addresses
-         WHERE label ILIKE '%тест%'
-            OR address_line ILIKE '%тестов%'
-            OR address_line ILIKE '%ул. тестовая%'
-            OR address_line ILIKE '%test.%'`
-      )
-      .catch(() => {});
-  }
-
-  await pool
-    .query(
-      `INSERT INTO site_settings (key, value) VALUES ($1, '1')
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [marker]
-    )
-    .catch(() => {});
+  await purgeTestOperationalData(pool);
 }
 
 /** Названия как на catalog.html — чтобы заказ с сайта находил product_id. */
