@@ -2075,7 +2075,8 @@ app.put('/api/manager/blog-poll', requireAuth, requireRole('manager', 'admin'), 
 }));
 
 app.get('/api/public/blog-feed', asyncHandler(async (req, res) => {
-  const feed = await blogStore.getPublicFeed(db);
+  const uid = req.session?.userId || null;
+  const feed = await blogStore.getPublicFeed(db, uid);
   res.json(feed);
 }));
 

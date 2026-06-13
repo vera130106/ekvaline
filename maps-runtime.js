@@ -248,10 +248,60 @@
     return () => obs.disconnect();
   }
 
+  function scheduleMapInvalidate(invalidateSize) {
+    if (typeof invalidateSize !== 'function') return;
+    const run = () => {
+      try {
+        invalidateSize();
+      } catch (_) {
+        /**/
+      }
+    };
+    queueMicrotask(run);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(run);
+      requestAnimationFrame(() => requestAnimationFrame(run));
+    }
+    window.setTimeout(run, 120);
+    window.setTimeout(run, 450);
+  }
+
+  function waitForContainerSize(container, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+      if (!(container instanceof HTMLElement)) {
+        resolve(false);
+        return;
+      }
+      const ready = () => container.offsetWidth > 48 && container.offsetHeight > 48;
+      if (ready()) {
+        resolve(true);
+        return;
+      }
+      let obs = null;
+      if (typeof ResizeObserver === 'function') {
+        obs = new ResizeObserver(() => {
+          if (!ready()) return;
+          obs?.disconnect();
+          resolve(true);
+        });
+        obs.observe(container);
+      }
+      window.setTimeout(() => {
+        obs?.disconnect();
+        resolve(ready());
+      }, timeoutMs);
+    });
+  }
+
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
+    if (container instanceof HTMLElement && !container.id) {
+      container.id = `ek-map-${Math.random().toString(36).slice(2, 10)}`;
+    }
+    const mapTarget =
+      container instanceof HTMLElement && container.id ? container.id : container;
     const map = new window.ymaps.Map(
-      container,
+      mapTarget,
       {
         center: centerLatLng,
         zoom,
@@ -280,6 +330,8 @@
       applyYandexMapChromeHide(container);
     }
 
+    scheduleMapInvalidate(invalidateSize);
+
     return { map, invalidateSize, detachMapChrome: stopChromeObserver };
   }
 
@@ -288,12 +340,33 @@
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
     const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 12;
-    return loadYmaps()
+    return waitForContainerSize(container)
+      .then(() => loadYmaps())
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
-        const { map } = createYandexMap(container, center, z, { disableScrollZoom: false });
-        return { engine: 'yandex', map };
+        const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
+          disableScrollZoom: false,
+        });
+        scheduleMapInvalidate(invalidateSize);
+        return {
+          engine: 'yandex',
+          map,
+          invalidateSize,
+          destroy() {
+            try {
+              detachMapChrome?.();
+            } catch (_) {
+              /**/
+            }
+            try {
+              map.destroy();
+            } catch (_) {
+              /**/
+            }
+            container.innerHTML = '';
+          },
+        };
       })
       .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
@@ -308,13 +381,15 @@
     const onMapClick =
       handlers && typeof handlers.onMapClick === 'function' ? handlers.onMapClick : () => {};
 
-    return loadYmaps()
+    return waitForContainerSize(container)
+      .then(() => loadYmaps())
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
+        scheduleMapInvalidate(invalidateSize);
         let placemark = null;
 
         function setMarker(lat, lon) {
@@ -514,7 +589,8 @@
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : [51.78, 55.11];
     const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 11;
 
-    return loadYmaps()
+    return waitForContainerSize(container)
+      .then(() => loadYmaps())
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
 
@@ -522,6 +598,7 @@
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: true,
         });
+        scheduleMapInvalidate(invalidateSize);
 
         function closePopupFn() {
           try {

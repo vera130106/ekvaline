@@ -13,6 +13,7 @@
   /** Голоса в опросах из настроек сайта (только локально в браузере). */
   const SITE_POLL_USER_VOTES_KEY = 'ekvaline_site_poll_user_vote_v1';
   const SITE_POLL_AGG_KEY = 'ekvaline_site_poll_agg_v1';
+  const BLOG_REACTIONS_LIMIT = 3;
   const STORY_MS = 7000;
   const MAX_POSTS = 5;
   const DAILY_TARGET = 2.0;
@@ -178,6 +179,9 @@
     sitePolls: [],
     /** Агрегаты голосов с сервера GET /api/public/poll-aggregates. */
     pollAggregates: {},
+    /** Реакции текущего пользователя: [{ postId, kind }] — не больше BLOG_REACTIONS_LIMIT. */
+    myReactions: [],
+    reactionsLimit: BLOG_REACTIONS_LIMIT,
   };
 
   let openPostReaderId = null;
@@ -209,6 +213,14 @@
       saveReadsMap(data.reads);
       migrateReadsFromPostObjects(state.posts);
     }
+    if (Array.isArray(data.myReactions)) {
+      state.myReactions = data.myReactions
+        .filter((row) => row && row.postId && row.kind)
+        .map((row) => ({ postId: String(row.postId), kind: String(row.kind) }));
+    }
+    if (Number.isFinite(Number(data.reactionsLimit))) {
+      state.reactionsLimit = Math.max(1, Number(data.reactionsLimit));
+    }
     savePosts();
     return true;
   }
@@ -226,17 +238,19 @@
 
   async function persistEngagementToServer(postId, payload) {
     const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
-    if (!api) return null;
+    if (!api) return { error: 'Нет связи с сервером.' };
     try {
       const r = await api.json(`/api/blog/posts/${encodeURIComponent(String(postId))}/engagement`, {
         method: 'PATCH',
         body: payload,
       });
       api.resetCsrf?.();
-      if (!r.ok) return null;
+      if (!r.ok) {
+        return { error: r.data?.error || 'Не удалось сохранить реакцию.' };
+      }
       return r.data;
     } catch {
-      return null;
+      return { error: 'Нет связи с сервером.' };
     }
   }
 
@@ -247,6 +261,11 @@
     state.posts[i] = result.post;
     if (result.reads && typeof result.reads === 'object') {
       saveReadsMap(result.reads);
+    }
+    if (Array.isArray(result.myReactions)) {
+      state.myReactions = result.myReactions
+        .filter((row) => row && row.postId && row.kind)
+        .map((row) => ({ postId: String(row.postId), kind: String(row.kind) }));
     }
     savePosts();
   }
@@ -474,6 +493,54 @@
 
   function readCurrentUser() {
     return safeJsonParse(localStorage.getItem(CURRENT_USER_KEY), null);
+  }
+
+  function reactionToken(postId, kind) {
+    return `${String(postId || '')}:${String(kind || '')}`;
+  }
+
+  function userHasReaction(postId, kind) {
+    const key = reactionToken(postId, kind);
+    return state.myReactions.some((row) => reactionToken(row.postId, row.kind) === key);
+  }
+
+  function userReactionsCount() {
+    return state.myReactions.length;
+  }
+
+  function reactionsLimit() {
+    return Math.max(1, Number(state.reactionsLimit) || BLOG_REACTIONS_LIMIT);
+  }
+
+  function canAddReaction(postId, kind) {
+    if (userHasReaction(postId, kind)) return false;
+    return userReactionsCount() < reactionsLimit();
+  }
+
+  function rememberLocalReaction(postId, kind) {
+    if (!postId || !kind || userHasReaction(postId, kind)) return;
+    state.myReactions = [...state.myReactions, { postId: String(postId), kind: String(kind) }].slice(0, reactionsLimit());
+  }
+
+  function blogNotify(message) {
+    const msg = String(message || '').trim();
+    if (!msg) return;
+    let el = document.getElementById('blogEngagementNotice');
+    if (!(el instanceof HTMLElement)) {
+      el = document.createElement('div');
+      el.id = 'blogEngagementNotice';
+      el.className = 'blogv2-engagement-notice';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('is-visible');
+    if (blogNotify._hide) window.clearTimeout(blogNotify._hide);
+    blogNotify._hide = window.setTimeout(() => el.classList.remove('is-visible'), 4200);
+  }
+
+  function reactionLimitMessage() {
+    return `Можно поставить не больше ${reactionsLimit()} реакций в блоге.`;
   }
 
   function escapeHtml(value) {
@@ -791,22 +858,41 @@
     const like = reactionMeta('like');
     const useful = reactionMeta('useful');
     const interesting = reactionMeta('new');
+    const likeActive = userHasReaction(post.id, 'like');
+    const usefulActive = userHasReaction(post.id, 'useful');
+    const newActive = userHasReaction(post.id, 'new');
     return `
       <div class="blogv2-actions blogv2-post-reactions">
-        <button class="blogv2-action blogv2-like-btn" type="button" data-like="${escapeHtml(post.id)}" aria-label="${like.label}">
+        <button class="blogv2-action blogv2-like-btn${likeActive ? ' is-active' : ''}" type="button" data-like="${escapeHtml(post.id)}" aria-label="${like.label}" aria-pressed="${likeActive ? 'true' : 'false'}">
           <span class="blogv2-action-emoji" aria-hidden="true">${like.emoji}</span>
           <span class="blogv2-action-count">${post.likes || 0}</span>
         </button>
-        <button class="blogv2-action blogv2-reaction useful" type="button" data-react-kind="useful" data-react-post="${escapeHtml(post.id)}" aria-label="${useful.label}">
+        <button class="blogv2-action blogv2-reaction useful${usefulActive ? ' is-active' : ''}" type="button" data-react-kind="useful" data-react-post="${escapeHtml(post.id)}" aria-label="${useful.label}" aria-pressed="${usefulActive ? 'true' : 'false'}">
           <span class="blogv2-action-emoji" aria-hidden="true">${useful.emoji}</span>
           <span class="blogv2-action-count">${reactions.useful || 0}</span>
         </button>
-        <button class="blogv2-action blogv2-reaction new" type="button" data-react-kind="new" data-react-post="${escapeHtml(post.id)}" aria-label="${interesting.label}">
+        <button class="blogv2-action blogv2-reaction new${newActive ? ' is-active' : ''}" type="button" data-react-kind="new" data-react-post="${escapeHtml(post.id)}" aria-label="${interesting.label}" aria-pressed="${newActive ? 'true' : 'false'}">
           <span class="blogv2-action-emoji" aria-hidden="true">${interesting.emoji}</span>
           <span class="blogv2-action-count">${reactions.new || 0}</span>
         </button>
       </div>
     `;
+  }
+
+  function markReactionButtonsInElement(root, postId) {
+    if (!(root instanceof HTMLElement) || !postId) return;
+    const pairs = [
+      ['[data-like]', 'like'],
+      ['[data-react-kind="useful"]', 'useful'],
+      ['[data-react-kind="new"]', 'new'],
+    ];
+    pairs.forEach(([selector, kind]) => {
+      const btn = root.querySelector(selector);
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const active = userHasReaction(postId, kind);
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
   }
 
   function patchPostEngagementInElement(root, post) {
@@ -827,6 +913,8 @@
       const commentCount = root.querySelector(selector);
       if (commentCount) commentCount.textContent = String(Math.max(0, Number(comment.likes) || 0));
     });
+
+    markReactionButtonsInElement(root, post.id);
   }
 
   function patchPostCommentsInElement(root, post, isAuthorized) {
@@ -1322,11 +1410,31 @@
   function updatePost(postId, updater, engagementPayload) {
     const i = state.posts.findIndex((p) => p.id === postId);
     if (i < 0) return;
-    const next = updater({ ...state.posts[i] });
-    state.posts[i] = next;
-    savePosts();
 
     const op = String(engagementPayload?.op || '').trim();
+    let reactionKind = null;
+    if (op === 'like') reactionKind = 'like';
+    if (op === 'react') {
+      reactionKind = engagementPayload?.kind === 'try' ? 'tryIt' : String(engagementPayload?.kind || '');
+    }
+    if (reactionKind) {
+      if (userHasReaction(postId, reactionKind)) {
+        blogNotify('Вы уже поставили эту реакцию.');
+        return;
+      }
+      if (!canAddReaction(postId, reactionKind)) {
+        blogNotify(reactionLimitMessage());
+        return;
+      }
+    }
+
+    const prevPost = { ...state.posts[i] };
+    const prevReactions = [...state.myReactions];
+    const next = updater({ ...state.posts[i] });
+    state.posts[i] = next;
+    if (reactionKind) rememberLocalReaction(postId, reactionKind);
+    savePosts();
+
     const lightOps = new Set(['like', 'react', 'commentLike']);
     const commentsOps = new Set(['addComment']);
 
@@ -1347,6 +1455,14 @@
 
     if (engagementPayload) {
       void persistEngagementToServer(postId, engagementPayload).then((result) => {
+        if (result?.error) {
+          state.posts[i] = prevPost;
+          state.myReactions = prevReactions;
+          savePosts();
+          refreshPostEngagementUi(postId, prevPost);
+          blogNotify(result.error);
+          return;
+        }
         if (!result?.post) return;
         syncPostFromServerResult(postId, result);
         if (lightOps.has(op)) {
