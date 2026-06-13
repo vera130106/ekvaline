@@ -1278,72 +1278,71 @@ body.cabinet-page-full section {
   body.cabinet-page-full .cart-modal-card.map-picker-card h3 {
     font-size: 1.05rem;
     margin: 0;
-    padding-right: 2.5rem;
     line-height: 1.25;
     flex-shrink: 0;
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-subtitle,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-subtitle {
-    font-size: 0.84rem;
+  body.client-site .cart-modal-card.map-picker-card .map-picker-head .checkout-subtitle,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-head .checkout-subtitle {
+    font-size: 0.82rem;
     line-height: 1.4;
+  }
+
+  body.client-site .cart-modal-card.map-picker-card .map-picker-head,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-head {
     flex-shrink: 0;
   }
 
-  body.client-site .checkout-map-layout,
-  body.cabinet-page-full .checkout-map-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.65rem;
-    margin-top: 0;
-    flex: 1 1 auto;
-    min-height: 0;
+  body.client-site .cart-modal-card.map-picker-card .map-picker-close,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-close {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  body.client-site .cart-modal-card.map-picker-card .map-picker-map-zone,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-map-zone {
+    flex: 0 0 auto;
     width: 100%;
+  }
+
+  body.client-site .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root {
+    height: clamp(168px, 28dvh, 200px);
+    min-height: 168px;
+    max-height: 200px;
     overflow: hidden;
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-layout,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-layout {
-    display: flex;
-    flex-direction: column;
+  body.client-site .cart-modal-card.map-picker-card .map-picker-fields-zone,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-fields-zone {
     flex: 1 1 auto;
     min-height: 0;
-    overflow: hidden;
-    grid-template-areas: none;
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-  }
-
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-panel,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-panel {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    background: #fff;
+    border: 1px solid #d4e4f8;
+    border-radius: 14px;
+    padding: 0.55rem 0.65rem;
+  }
+
+  body.client-site .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel {
     border: 0;
     background: transparent;
     padding: 0;
+    overflow: visible;
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-panel-fields,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-panel-fields {
+  body.client-site .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel-fields,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel-fields {
     overflow: visible;
     max-height: none;
     min-width: 0;
     gap: 0.45rem;
-  }
-
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-root,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root {
-    flex: 0 0 auto;
-    order: unset;
-    height: clamp(168px, 30dvh, 210px);
-    min-height: 168px;
-    max-height: 210px;
-    margin-bottom: 0;
-    overflow: hidden;
   }
 
   body.client-site .cart-modal-card.map-picker-card .map-picker-actions-bar,
@@ -1356,18 +1355,24 @@ body.cabinet-page-full section {
     box-shadow: 0 -8px 22px rgba(16, 44, 76, 0.07);
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-root.ek-map-host,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root.ek-map-host,
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-root > ymaps,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root > ymaps,
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-root [class*='ymaps'][class*='-map'],
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root [class*='ymaps'][class*='-map'] {
+  body.client-site .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root.ek-map-host,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root.ek-map-host,
+  body.client-site .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root > ymaps,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root > ymaps,
+  body.client-site .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root [class*='ymaps'][class*='-map'],
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-map-zone .checkout-map-root [class*='ymaps'][class*='-map'] {
     position: absolute !important;
     inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
     min-height: 0 !important;
     max-height: none !important;
+  }
+
+  body.client-site .cart-modal-card.map-picker-card .map-picker-actions-row,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-actions-row {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+    gap: 0.5rem;
   }
 
   body.client-site #mapPickerModal.open .map-picker-card,
@@ -1392,8 +1397,10 @@ body.cabinet-page-full section {
   body.client-site .checkout-map-panel-actions,
   body.cabinet-page-full .checkout-map-panel-actions,
   body.client-site .checkout-map-panel-actions-main,
-  body.cabinet-page-full .checkout-map-panel-actions-main {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  body.cabinet-page-full .checkout-map-panel-actions-main,
+  body.client-site .cart-modal-card.map-picker-card .map-picker-actions-row,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-actions-row {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
     gap: 0.5rem;
     width: 100%;
     box-sizing: border-box;
@@ -1414,14 +1421,14 @@ body.cabinet-page-full section {
     box-sizing: border-box;
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-panel .checkout-field,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-panel .checkout-field {
+  body.client-site .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel .checkout-field,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel .checkout-field {
     min-width: 0;
     width: 100%;
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-panel .checkout-field input,
-  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-panel .checkout-field input {
+  body.client-site .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel .checkout-field input,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .map-picker-fields-zone .checkout-map-panel .checkout-field input {
     font-size: 16px;
     min-height: 44px;
   }

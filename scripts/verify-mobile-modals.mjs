@@ -40,7 +40,11 @@ must('script.js', 'EkvalineSiteNav?.close', 'вход закрывает моб�
 must('script.js', 'bindCheckoutDatePickerEvents', 'выбор даты оформления на mobile');
 must('responsive-mobile.css', 'checkout-map-panel-fields', 'прокрутка полей адреса');
 must('responsive-mobile.css', 'map-picker-actions-bar', 'кнопки карты адреса');
-must('styles.css', 'map-picker-card .checkout-map-root.ek-map-host', 'заполнение карты в модалке');
+must('responsive-mobile.css', 'map-picker-map-zone', 'карта сверху в модалке');
+must('responsive-mobile.css', 'map-picker-actions-row', 'кнопки выбрать и сброс');
+must('styles.css', 'map-picker-map-zone', 'зона карты в модалке');
+must('styles.css', 'map-picker-fields-zone', 'форма адреса под картой');
+must('styles.css', 'map-picker-head', 'шапка модалки с крестиком');
 
 must('operator-mobile.css', 'opx-map-card', 'карта адреса оператора');
 must('operator-mobile.css', 'opx-zone-map-canvas', 'карта зон оператора');

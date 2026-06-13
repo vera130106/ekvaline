@@ -4030,31 +4030,55 @@
   }
 
   applyMapAddressBtn?.addEventListener('click', () => {
-    enforceOrenburgCityInput();
-    const parts = readAddressParts();
-    if (!isOrenburgCityName(parts.city)) {
-      showAppToast('Доставка только по Оренбургу.', 'error');
-      return;
-    }
-    if (!parts.street || !parts.house) {
-      showAppToast('Укажите улицу из подсказок и номер дома.', 'error');
-      return;
-    }
-    if (!pickedAddress) return;
-    if (!/оренбург/i.test(pickedAddress)) {
-      showAppToast('Адрес должен быть в Оренбурге.', 'error');
-      return;
-    }
-    const line = pickedAddress.slice(0, mapPickerMaxLength);
-    if (typeof mapPickerOnApply === 'function') {
-      mapPickerOnApply(line);
-      mapPickerOnApply = null;
-      closeMapPicker();
-      return;
-    }
-    if (!(checkoutAddressInput instanceof HTMLInputElement)) return;
-    checkoutAddressInput.value = line;
-    closeMapPicker();
+    void (async () => {
+      enforceOrenburgCityInput();
+      const parts = readAddressParts();
+      if (!isOrenburgCityName(parts.city)) {
+        showAppToast('Доставка только по Оренбургу.', 'error');
+        return;
+      }
+      if (!parts.street || !parts.house) {
+        showAppToast('Укажите улицу из подсказок и номер дома.', 'error');
+        return;
+      }
+      const apartmentFilled = Boolean(parts.apartment);
+      const apartmentExtrasOk = apartmentFilled ? Boolean(parts.floor && parts.entrance) : true;
+      if (!apartmentExtrasOk) {
+        showAppToast('Если указана квартира, заполните этаж и подъезд.', 'error');
+        return;
+      }
+      if (applyMapAddressBtn instanceof HTMLButtonElement) applyMapAddressBtn.disabled = true;
+      try {
+        if (!(checkoutMapCtl && checkoutMapRoot instanceof HTMLElement)) {
+          await initMapPicker();
+        }
+        await geocodeMapFromInputs({ feedback: true });
+        updatePickedAddressLabel();
+        if (!pickedAddress) {
+          showAppToast('Не удалось определить адрес. Проверьте поля или отметьте дом на карте.', 'error');
+          return;
+        }
+        if (!/оренбург/i.test(pickedAddress)) {
+          showAppToast('Адрес должен быть в Оренбурге.', 'error');
+          return;
+        }
+        const line = pickedAddress.slice(0, mapPickerMaxLength);
+        if (typeof mapPickerOnApply === 'function') {
+          mapPickerOnApply(line);
+          mapPickerOnApply = null;
+          closeMapPicker();
+          return;
+        }
+        if (checkoutAddressInput instanceof HTMLInputElement) {
+          checkoutAddressInput.value = line;
+        }
+        closeMapPicker();
+      } catch {
+        showAppToast('Не удалось найти адрес. Проверьте поля или отметьте дом на карте.', 'error');
+      } finally {
+        if (applyMapAddressBtn instanceof HTMLButtonElement) applyMapAddressBtn.disabled = false;
+      }
+    })();
   });
 
   [mapCityInput, mapStreetInput, mapHouseInput, mapApartmentInput, mapFloorInput, mapEntranceInput].forEach((input) => {
@@ -4112,20 +4136,6 @@
 
   resetMapPickerBtn?.addEventListener('click', () => {
     resetMapPickerFields();
-  });
-
-  findMapAddressBtn?.addEventListener('click', () => {
-    void (async () => {
-      if (!(checkoutMapCtl && checkoutMapRoot instanceof HTMLElement)) {
-        try {
-          await initMapPicker();
-        } catch {
-          showAppToast('Карта недоступна — укажите точку на карте или заполните поля вручную.', 'info');
-          return;
-        }
-      }
-      await geocodeMapFromInputs({ feedback: true });
-    })();
   });
 
   appToastClose?.addEventListener('click', () => {
