@@ -3190,9 +3190,6 @@
       const needShowWarning = apartmentFilled && !apartmentExtrasOk;
       mapApartmentRequirementsHint.hidden = !needShowWarning;
     }
-    if (applyMapAddressBtn instanceof HTMLButtonElement) {
-      applyMapAddressBtn.disabled = !parts.city || !parts.street || !parts.house || !apartmentExtrasOk;
-    }
   }
 
   async function geocodeMapFromInputs(options = {}) {
