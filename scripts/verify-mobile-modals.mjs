@@ -45,6 +45,7 @@ must('responsive-mobile.css', 'map-picker-actions-row', 'кнопки выбра
 must('styles.css', 'map-picker-map-zone', 'зона карты в модалке');
 must('styles.css', 'map-picker-fields-zone', 'форма адреса под картой');
 must('styles.css', 'map-picker-head', 'шапка модалки с крестиком');
+must('styles.css', 'map-picker-map-zone .checkout-map-root.ek-map-host', 'контейнер карты не схлопывается');
 
 must('operator-mobile.css', 'opx-map-card', 'карта адреса оператора');
 must('operator-mobile.css', 'opx-zone-map-canvas', 'карта зон оператора');

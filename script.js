@@ -1816,7 +1816,7 @@
         <div class="map-picker-actions-bar">
           <p id="checkoutMapAddress" class="checkout-map-address">Заполните: город, улица, дом.</p>
           <div class="map-picker-actions-row">
-            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn">Выбрать</button>
+            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn">Найти и выбрать</button>
             <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
           </div>
         </div>
@@ -1824,23 +1824,8 @@
     </div>`;
   }
 
-  function ensureMapPickerModal() {
-    const existing = document.getElementById('mapPickerModal');
-    const stale = existing && !existing.querySelector('.map-picker-map-zone');
-    if (stale) {
-      existing.remove();
-    }
-    if (!document.getElementById('mapPickerModal')) {
-      document.body.insertAdjacentHTML('beforeend', buildMapPickerModalHtml());
-    }
-  }
-
-  ensureMapPickerModal();
-
-  if (isCatalogPage && document.getElementById('mapPickerModal')) {
-    /* catalog inserts its own modals below */
-  } else if (isCabinetPage) {
-    ensureMapPickerModal();
+  if (isCabinetPage && !document.getElementById('mapPickerModal')) {
+    document.body.insertAdjacentHTML('beforeend', buildMapPickerModalHtml());
   }
 
   let cartBtn = null;
