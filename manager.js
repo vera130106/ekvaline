@@ -319,6 +319,105 @@
     return wrapper;
   }
 
+  let confirmResolver = null;
+
+  function ensureConfirmModal() {
+    let modal = document.getElementById('managerConfirmModal');
+    if (modal) return modal;
+    const wrapper = document.createElement('div');
+    wrapper.id = 'managerConfirmModal';
+    wrapper.className = 'manager-confirm-modal';
+    wrapper.setAttribute('aria-hidden', 'true');
+    wrapper.innerHTML = `
+      <div class="manager-confirm-backdrop" data-confirm-dismiss="true"></div>
+      <div
+        class="manager-confirm-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="managerConfirmTitle"
+        aria-describedby="managerConfirmMessage"
+      >
+        <h3 id="managerConfirmTitle">Подтверждение</h3>
+        <p id="managerConfirmMessage" class="manager-confirm-message"></p>
+        <div class="manager-confirm-actions">
+          <button type="button" class="manager-btn is-secondary" id="managerConfirmCancel" data-confirm-dismiss="true">Отмена</button>
+          <button type="button" class="manager-btn is-green" id="managerConfirmOk">Продолжить</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrapper);
+
+    wrapper.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.dataset.confirmDismiss === 'true') {
+        closeManagerConfirmModal(false);
+      }
+    });
+
+    const cancelBtn = wrapper.querySelector('#managerConfirmCancel');
+    if (cancelBtn instanceof HTMLButtonElement) {
+      cancelBtn.addEventListener('click', () => closeManagerConfirmModal(false));
+    }
+
+    const okBtn = wrapper.querySelector('#managerConfirmOk');
+    if (okBtn instanceof HTMLButtonElement) {
+      okBtn.addEventListener('click', () => closeManagerConfirmModal(true));
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (!wrapper.classList.contains('open')) return;
+      if (event.key === 'Escape') closeManagerConfirmModal(false);
+    });
+
+    return wrapper;
+  }
+
+  function syncManagerBodyScrollLock() {
+    const openLaunch = document.querySelector('.manager-modal[id$="FormModal"].open');
+    const successOpen = document.getElementById('managerSuccessModal')?.classList.contains('open');
+    const confirmOpen = document.getElementById('managerConfirmModal')?.classList.contains('open');
+    document.body.style.overflow = openLaunch || successOpen || confirmOpen ? 'hidden' : '';
+  }
+
+  function closeManagerConfirmModal(result) {
+    const modal = document.getElementById('managerConfirmModal');
+    if (!(modal instanceof HTMLElement)) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    const resolver = confirmResolver;
+    confirmResolver = null;
+    syncManagerBodyScrollLock();
+    if (typeof resolver === 'function') resolver(Boolean(result));
+  }
+
+  function openManagerConfirmModal(opts) {
+    const modal = ensureConfirmModal();
+    const titleEl = modal.querySelector('#managerConfirmTitle');
+    const messageEl = modal.querySelector('#managerConfirmMessage');
+    const okBtn = modal.querySelector('#managerConfirmOk');
+    const cancelBtn = modal.querySelector('#managerConfirmCancel');
+    const danger = Boolean(opts?.danger);
+    if (titleEl) titleEl.textContent = String(opts?.title || 'Подтверждение').trim();
+    if (messageEl) messageEl.textContent = String(opts?.message || 'Продолжить?').trim();
+    if (cancelBtn instanceof HTMLButtonElement) {
+      cancelBtn.textContent = String(opts?.cancelLabel || 'Отмена').trim();
+    }
+    if (okBtn instanceof HTMLButtonElement) {
+      okBtn.textContent = String(opts?.confirmLabel || 'Продолжить').trim();
+      okBtn.classList.toggle('is-green', !danger);
+      okBtn.classList.toggle('is-danger', danger);
+    }
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+      window.requestAnimationFrame(() => {
+        if (cancelBtn instanceof HTMLButtonElement) cancelBtn.focus();
+      });
+    });
+  }
+
   function showSuccessModal(message, opts) {
     const keepFormOpen = Boolean(opts && opts.keepFormOpen);
     if (!keepFormOpen) closeLaunchFormModals();
@@ -366,8 +465,7 @@
     if (!modal) return;
     modal.classList.remove('open');
     modal.setAttribute('aria-hidden', 'true');
-    const openLaunch = document.querySelector('.manager-modal[id$="FormModal"].open');
-    document.body.style.overflow = openLaunch instanceof HTMLElement ? 'hidden' : '';
+    syncManagerBodyScrollLock();
   }
 
   function getEffectiveFact() {
@@ -828,6 +926,8 @@
               title: poll.title || 'Опрос дня',
               question: poll.question,
               active: !!poll.active,
+              createdAt: poll.createdAt || undefined,
+              updatedAt: poll.updatedAt || new Date().toISOString(),
               options: (poll.options || []).map((opt) => ({
                 id: opt.id,
                 text: opt.text,
@@ -848,6 +948,8 @@
       ? '<span class="manager-poll-result-badge is-active">активен</span>'
       : '<span class="manager-poll-result-badge is-archived">архив</span>';
     const sourceLabel = poll.source === 'blog' ? 'опрос блога' : 'клиентский опрос';
+    const when = poll.reference_at || poll.updatedAt || poll.createdAt;
+    const whenLabel = when ? formatDate(when) : '';
     const bars = (poll.options || [])
       .map(
         (opt) => `
@@ -868,7 +970,7 @@
         </div>
         <p class="manager-poll-result-question">${escapeHtml(poll.question || '')}</p>
         <div class="manager-poll-result-bars">${bars || '<p class="manager-note">Нет вариантов ответа.</p>'}</div>
-        <p class="manager-poll-result-meta">Всего голосов: <strong>${Number(poll.total_votes || 0)}</strong></p>
+        <p class="manager-poll-result-meta">Всего голосов: <strong>${Number(poll.total_votes || 0)}</strong>${whenLabel ? ` · ${escapeHtml(whenLabel)}` : ''}</p>
       </article>
     `;
   }
@@ -886,12 +988,13 @@
       const { polls, engagement } = await fetchManagerPollInsights();
       if (!polls.length) {
         root.innerHTML =
-          '<p class="manager-note">Опросов пока нет. Создайте опрос в блоке «Опрос» или в настройках админ-панели — голоса клиентов появятся здесь автоматически.</p>';
+          '<p class="manager-note">За последние 30 дней опросов пока нет. Создайте опрос в блоке «Опрос» или в настройках админ-панели — голоса клиентов появятся здесь автоматически.</p>';
         renderPollLaunchStatus();
         return;
       }
+      const periodLabel = String(engagement.period_label || 'за последние 30 дней');
       root.innerHTML = `
-        <p class="manager-note">Активных опросов: <strong>${Number(engagement.active_polls || 0)}</strong> · Всего голосов в системе: <strong>${Number(engagement.total_poll_votes || 0)}</strong></p>
+        <p class="manager-note">Период: <strong>${escapeHtml(periodLabel)}</strong> · Активных: <strong>${Number(engagement.active_polls || 0)}</strong> · Голосов: <strong>${Number(engagement.total_poll_votes || 0)}</strong></p>
         ${polls.map(renderPollResultCard).join('')}
       `;
       renderPollLaunchStatus();
@@ -939,6 +1042,8 @@
       ? '<span class="manager-poll-result-badge is-active">активен</span>'
       : '<span class="manager-poll-result-badge is-archived">скрыт</span>';
     const sourceLabel = poll.source === 'blog' ? 'опрос блога' : 'клиентский опрос';
+    const when = poll.reference_at || poll.updatedAt || poll.createdAt;
+    const whenLabel = when ? formatDate(when) : '';
     const optionsPreview = (poll.options || [])
       .slice(0, 4)
       .map((opt) => escapeHtml(opt.text || ''))
@@ -950,7 +1055,7 @@
           <div>${badge}<span class="manager-poll-result-badge">${escapeHtml(sourceLabel)}</span></div>
         </div>
         <p>${escapeHtml(poll.question || '')}</p>
-        <p class="manager-poll-overview-meta">Голосов: <strong>${Number(poll.total_votes || 0)}</strong>${optionsPreview ? ` · ${optionsPreview}` : ''}</p>
+        <p class="manager-poll-overview-meta">Голосов: <strong>${Number(poll.total_votes || 0)}</strong>${whenLabel ? ` · ${escapeHtml(whenLabel)}` : ''}${optionsPreview ? ` · ${optionsPreview}` : ''}</p>
       </article>
     `;
   }
@@ -962,12 +1067,13 @@
     const { polls } = await fetchManagerPollInsights();
     if (!polls.length) {
       root.innerHTML =
-        '<p class="manager-note">Опросов пока нет. Заполните форму ниже и нажмите «Сохранить опрос». Клиентские опросы с других страниц настраиваются в админ-панели.</p>';
+        '<p class="manager-note">За последние 30 дней опросов нет. Заполните форму ниже и нажмите «Сохранить опрос».</p>';
       return;
     }
     const blogPolls = polls.filter((poll) => poll.source === 'blog');
     const sitePolls = polls.filter((poll) => poll.source !== 'blog');
     root.innerHTML = `
+      <p class="manager-note">Показаны опросы за последние 30 дней.</p>
       ${blogPolls.length ? `<p class="manager-note">Опросы блога (${blogPolls.length})</p>${blogPolls.map(renderPollOverviewItem).join('')}` : ''}
       ${sitePolls.length ? `<p class="manager-note" style="margin-top:0.75rem">Клиентские опросы (${sitePolls.length}) — управление в админ-панели</p>${sitePolls.map(renderPollOverviewItem).join('')}` : ''}
     `;
@@ -1120,8 +1226,12 @@
       const prev = state.admin.hydrationPoll;
       const prevMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), Number(opt.votes) || 0]));
       const prevIdMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), String(opt.id || '')]));
+      const nowIso = new Date().toISOString();
+      const keepSamePoll = prev?.id && prev.question;
       state.admin.hydrationPoll = {
-        id: prev?.id && prev.question ? prev.id : `poll_${Date.now()}`,
+        id: keepSamePoll ? prev.id : `poll_${Date.now()}`,
+        createdAt: keepSamePoll ? prev.createdAt || nowIso : nowIso,
+        updatedAt: nowIso,
         title,
         question,
         active: true,
@@ -1146,7 +1256,11 @@
           showManagerFormError('Сначала сохраните опрос.');
           return;
         }
-        state.admin.hydrationPoll = { ...state.admin.hydrationPoll, active: false };
+        state.admin.hydrationPoll = {
+          ...state.admin.hydrationPoll,
+          active: false,
+          updatedAt: new Date().toISOString(),
+        };
         saveAdminData();
         void syncBlogPollToServer(state.admin.hydrationPoll);
         renderPollLaunchStatus();
@@ -1163,10 +1277,17 @@
           showManagerFormError('Опрос блога уже удалён.');
           return;
         }
-        const ok = window.confirm('Удалить опрос блога полностью? Он исчезнет с сайта и из этой формы.');
-        if (!ok) return;
-        void clearBlogPoll().then(() => {
-          showSuccessModal('Опрос блога удалён.', { keepFormOpen: true });
+        void openManagerConfirmModal({
+          title: 'Удалить опрос блога?',
+          message: 'Опрос исчезнет с сайта и из этой формы. Восстановить его будет нельзя.',
+          confirmLabel: 'Удалить',
+          cancelLabel: 'Отмена',
+          danger: true,
+        }).then((ok) => {
+          if (!ok) return;
+          void clearBlogPoll().then(() => {
+            showSuccessModal('Опрос блога удалён.', { keepFormOpen: true });
+          });
         });
       });
     }
@@ -2005,6 +2126,7 @@
     initBackToTopButton();
     bindEvents();
     ensureSuccessModal();
+    ensureConfirmModal();
   }
 
   document.addEventListener('DOMContentLoaded', () => {

@@ -32,6 +32,7 @@ const {
   isStaffRole,
   canSelfServicePasswordReset,
   PASSWORD_RESET_NOT_FOUND_MSG,
+  verifyAdminStaffPasswordGate,
 } = require('./auth-security');
 const mailer = require('./mailer');
 const bonusProgram = require('./bonusProgram');
@@ -229,7 +230,12 @@ function sanitizeSitePollsLoaded(raw) {
       if (options.length >= 12) break;
     }
     if (id.length < 1 || question.length < 3 || options.length < 2) continue;
-    out.push({ id, title, question, active, options });
+    const createdAt = String(item.createdAt ?? '').trim().slice(0, 40);
+    const updatedAt = String(item.updatedAt ?? '').trim().slice(0, 40);
+    const row = { id, title, question, active, options };
+    if (createdAt) row.createdAt = createdAt;
+    if (updatedAt) row.updatedAt = updatedAt;
+    out.push(row);
     if (out.length >= 10) break;
   }
   return out;
@@ -2042,6 +2048,25 @@ app.put('/api/manager/blog-poll', requireAuth, requireRole('manager', 'admin'), 
   if (v.value.poll && !sanitized) {
     return res.status(400).json({ error: 'Некорректные данные опроса блога.' });
   }
+
+  const prevRow = await db.prepare('SELECT value FROM site_settings WHERE key = ?').get('blogHydrationPoll');
+  let previous = null;
+  if (prevRow?.value) {
+    try {
+      previous = pollVotes.sanitizeBlogHydrationPoll(JSON.parse(prevRow.value));
+    } catch {
+      previous = null;
+    }
+  }
+
+  if (previous) {
+    if (!sanitized) {
+      await pollVotes.archiveBlogPoll(db, previous, 'deleted');
+    } else if (previous.id !== sanitized.id) {
+      await pollVotes.archiveBlogPoll(db, previous, 'replaced');
+    }
+  }
+
   await db
     .prepare('INSERT OR REPLACE INTO site_settings (key, value) VALUES (?, ?)')
     .run('blogHydrationPoll', JSON.stringify(sanitized));
@@ -3118,6 +3143,9 @@ app.post(
   asyncHandler(async (req, res) => {
     const v = schemas.validate(schemas.adminStaffPasswordSetSchema, req.body);
     if (!v.ok) return res.status(400).json({ error: v.error });
+    if (!verifyAdminStaffPasswordGate(v.value.gate_code)) {
+      return res.status(403).json({ error: 'Неверный секретный код.' });
+    }
 
     const targetId = Number(req.params.id);
     const target = await getUserById(targetId);

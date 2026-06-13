@@ -1,8 +1,9 @@
 /**
- * Смена пароля сотрудника администратором (без защитного кода).
+ * Смена пароля сотрудника администратором (с секретным кодом ADMIN_STAFF_PASSWORD_GATE).
  * node scripts/verify-admin-staff-gate.mjs [baseUrl]
  */
 const base = process.argv[2] || 'http://localhost:3023';
+const GATE = String(process.env.ADMIN_STAFF_PASSWORD_GATE || '295302').trim() || '295302';
 
 async function json(path, opts = {}) {
   const r = await fetch(`${base}${path}`, {
@@ -59,7 +60,7 @@ async function adminSession() {
 }
 
 async function main() {
-  console.log(`Проверка смены пароля сотрудника: ${base}`);
+  console.log(`Проверка смены пароля сотрудника (gate): ${base}`);
 
   const admin = await adminSession();
   await admin.refreshCsrf();
@@ -71,6 +72,26 @@ async function main() {
 
   await admin.refreshCsrf();
   ({ r, data } = await admin.post(`/api/admin/users/${staff.id}/staff-password`, { password: 'Test2026!x' }));
+  if (r.status !== 400) {
+    throw new Error(`staff-password without gate_code should be 400, got ${r.status}`);
+  }
+  console.log('OK staff-password rejects missing gate_code');
+
+  await admin.refreshCsrf();
+  ({ r, data } = await admin.post(`/api/admin/users/${staff.id}/staff-password`, {
+    password: 'Test2026!x',
+    gate_code: '000000',
+  }));
+  if (r.status !== 403) {
+    throw new Error(`staff-password with wrong gate should be 403, got ${r.status}`);
+  }
+  console.log('OK staff-password rejects wrong gate_code');
+
+  await admin.refreshCsrf();
+  ({ r, data } = await admin.post(`/api/admin/users/${staff.id}/staff-password`, {
+    password: 'Test2026!x',
+    gate_code: GATE,
+  }));
   if (!r.ok) {
     throw new Error(`staff-password failed: ${r.status} ${JSON.stringify(data)}`);
   }

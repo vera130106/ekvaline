@@ -9015,6 +9015,9 @@ button.about-cert-btn {
 .blogv2-stories-wrap .blogv2-stories {
   grid-column: 2;
   min-width: 0;
+  width: 100%;
+  max-width: 640px;
+  justify-self: center;
 }
 
 .blogv2-section-head h2 {
@@ -9035,7 +9038,6 @@ button.about-cert-btn {
   -ms-overflow-style: none;
   scrollbar-width: none;
   width: 100%;
-  max-width: 640px;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
 }
@@ -9811,12 +9813,13 @@ button.about-cert-btn {
   display: grid;
   place-items: end center;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.2s ease;
 }
 
 .blogv2-post-reader-modal.open {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
 }
 
@@ -18554,6 +18557,62 @@ body.opx-modal-open main.opx-shell {
 .manager-success-card p {
   margin: 0.55rem 0 0.9rem;
   color: #4d6285;
+}
+
+.manager-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: none;
+}
+
+.manager-confirm-modal.open {
+  display: block;
+}
+
+.manager-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 28, 52, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.manager-confirm-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92vw, 420px);
+  border-radius: 18px;
+  padding: 1.1rem 1.15rem 1rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f4fbff 100%);
+  border: 1px solid rgba(86, 204, 242, 0.42);
+  box-shadow: 0 22px 40px rgba(47, 128, 237, 0.22);
+}
+
+.manager-confirm-card h3 {
+  margin: 0;
+  color: #1b3f6d;
+  font-size: 1.08rem;
+}
+
+.manager-confirm-message {
+  margin: 0.65rem 0 1rem;
+  color: #4d6285;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.manager-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.manager-confirm-actions .manager-btn {
+  min-width: 7.5rem;
 }
 
 .order-success-modal {

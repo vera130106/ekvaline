@@ -221,6 +221,10 @@ const adminUserPatchSchema = Joi.object({
 
 const adminStaffPasswordSetSchema = Joi.object({
   password: passwordSchema.required(),
+  gate_code: Joi.string().trim().min(1).max(32).required().messages({
+    'any.required': 'Введите секретный код.',
+    'string.empty': 'Введите секретный код.',
+  }),
 });
 
 const adminUserCreateSchema = Joi.object({
@@ -460,6 +464,8 @@ const sitePollSchema = Joi.object({
   question: Joi.string().trim().min(3).max(400).required(),
   active: Joi.boolean().required(),
   options: Joi.array().items(sitePollOptionSchema).min(2).max(12).required(),
+  createdAt: Joi.string().trim().max(40).allow('').optional(),
+  updatedAt: Joi.string().trim().max(40).allow('').optional(),
 });
 
 const pollVoteSchema = Joi.object({
@@ -483,6 +489,8 @@ const blogHydrationPollPutSchema = Joi.object({
       .min(2)
       .max(8)
       .required(),
+    createdAt: Joi.string().trim().max(40).allow('').optional(),
+    updatedAt: Joi.string().trim().max(40).allow('').optional(),
   })
     .allow(null)
     .required(),

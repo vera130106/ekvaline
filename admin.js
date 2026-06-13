@@ -26,6 +26,7 @@
   const adminStaffPasswordModal = document.getElementById('adminStaffPasswordModal');
   const adminStaffPasswordWho = document.getElementById('adminStaffPasswordWho');
   const adminStaffPasswordForm = document.getElementById('adminStaffPasswordForm');
+  const adminStaffGateCode = document.getElementById('adminStaffGateCode');
   const adminStaffNewPassword = document.getElementById('adminStaffNewPassword');
   const adminStaffNewPasswordConfirm = document.getElementById('adminStaffNewPasswordConfirm');
   const adminStaffPasswordStrength = document.getElementById('adminStaffPasswordStrength');
@@ -873,11 +874,18 @@
     adminStaffPasswordModal.hidden = false;
     adminStaffPasswordModal.setAttribute('aria-hidden', 'false');
     window.EkvalinePasswordVisibility?.init(adminStaffPasswordModal);
-    window.setTimeout(() => adminStaffNewPassword?.focus?.(), 0);
+    window.setTimeout(() => adminStaffGateCode?.focus?.(), 0);
   }
 
   async function saveStaffPasswordFromModal() {
     if (!staffPasswordTargetId) return;
+    const gateCode = String(adminStaffGateCode?.value || '').trim();
+    if (!gateCode) {
+      if (adminStaffPasswordMsg instanceof HTMLElement) {
+        adminStaffPasswordMsg.textContent = 'Введите секретный код.';
+      }
+      return;
+    }
     const pwd = String(adminStaffNewPassword?.value || '');
     const pwd2 = String(adminStaffNewPasswordConfirm?.value || '');
     const authPw = window.EkvalineAuthPassword;
@@ -899,7 +907,7 @@
     }
     const r = await api.json(`/api/admin/users/${encodeURIComponent(staffPasswordTargetId)}/staff-password`, {
       method: 'POST',
-      body: { password: pwd },
+      body: { password: pwd, gate_code: gateCode },
     });
     if (!r.ok) {
       if (adminStaffPasswordMsg instanceof HTMLElement) {

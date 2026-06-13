@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260619pollmgr" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260619pollmgr" />
-    <link rel="stylesheet" href="staff-mobile.css?v=20260619pollmgr" />
+    <link rel="stylesheet" href="styles.css?v=20260619staffgate" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260619staffgate" />
+    <link rel="stylesheet" href="staff-mobile.css?v=20260619staffgate" />
   </head>
   <body class="admin-page">
     <header class="topbar">
@@ -932,6 +932,19 @@
           <h3 id="adminStaffPasswordTitle">Сменить пароль сотрудника</h3>
           <p id="adminStaffPasswordWho" class="admin-muted admin-staff-gate-hint"></p>
           <form id="adminStaffPasswordForm">
+            <label class="admin-field admin-staff-gate-field">
+              <span class="admin-field-label">Секретный код</span>
+              <input
+                type="password"
+                id="adminStaffGateCode"
+                name="gate_code"
+                class="admin-input admin-staff-gate-input"
+                maxlength="32"
+                autocomplete="off"
+                inputmode="numeric"
+                required
+              />
+            </label>
             <label class="admin-field">
               <span class="admin-field-label">Новый пароль</span>
               <div class="auth-password-wrap">
@@ -990,12 +1003,12 @@
     </div>
 
     <script src="api-client.js"></script>
-    <script src="client-guard.js?v=20260619pollmgr"></script>
-    <script src="auth-password.js?v=20260619pollmgr"></script>
+    <script src="client-guard.js?v=20260619staffgate"></script>
+    <script src="auth-password.js?v=20260619staffgate"></script>
     <script src="password-visibility.js?v=20260610pwdvis"></script>
-    <script src="orders-sync.js?v=20260619pollmgr"></script>
+    <script src="orders-sync.js?v=20260619staffgate"></script>
     <script src="pdf-export-boot.js?v=20260611pdf"></script>
     <script src="vendor/html2pdf.bundle.min.js?v=20260611pdf"></script>
-    <script src="admin.js?v=20260619pollmgr"></script>
+    <script src="admin.js?v=20260619staffgate"></script>
   </body>
 </html>
