@@ -1824,8 +1824,23 @@
     </div>`;
   }
 
-  if (isCabinetPage && !document.getElementById('mapPickerModal')) {
-    document.body.insertAdjacentHTML('beforeend', buildMapPickerModalHtml());
+  function ensureMapPickerModal() {
+    const existing = document.getElementById('mapPickerModal');
+    const stale = existing && !existing.querySelector('.map-picker-map-zone');
+    if (stale) {
+      existing.remove();
+    }
+    if (!document.getElementById('mapPickerModal')) {
+      document.body.insertAdjacentHTML('beforeend', buildMapPickerModalHtml());
+    }
+  }
+
+  ensureMapPickerModal();
+
+  if (isCatalogPage && document.getElementById('mapPickerModal')) {
+    /* catalog inserts its own modals below */
+  } else if (isCabinetPage) {
+    ensureMapPickerModal();
   }
 
   let cartBtn = null;
