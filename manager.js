@@ -94,7 +94,7 @@
     };
   }
 
-  function saveAdminData() {
+  function saveAdminDataLocal() {
     localStorage.setItem(BLOG_ADMIN_KEY, JSON.stringify(state.admin));
     try {
       window.dispatchEvent(new CustomEvent('ekvaline-blog-admin-updated'));
@@ -103,8 +103,66 @@
     }
   }
 
-  function saveArchivePosts() {
+  function saveAdminData() {
+    saveAdminDataLocal();
+    void syncBlogToServer();
+  }
+
+  function saveArchivePostsLocal() {
     localStorage.setItem(BLOG_ARCHIVE_KEY, JSON.stringify(state.posts));
+  }
+
+  function saveArchivePosts() {
+    saveArchivePostsLocal();
+    void syncBlogToServer();
+  }
+
+  async function syncBlogToServer() {
+    reconcileManagerPostReads();
+    saveArchivePostsLocal();
+    saveAdminDataLocal();
+    publishToClient();
+    const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
+    if (!api) return false;
+    try {
+      const r = await api.json('/api/manager/blog', {
+        method: 'PUT',
+        body: {
+          posts: state.posts,
+          admin: state.admin,
+          reads: readReadsMapRaw(),
+        },
+      });
+      api.resetCsrf?.();
+      return Boolean(r.ok);
+    } catch {
+      return false;
+    }
+  }
+
+  async function loadBlogFromServer() {
+    const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
+    if (!api) return false;
+    try {
+      const r = await api.json('/api/manager/blog');
+      if (!r.ok || !r.data) return false;
+      if (Array.isArray(r.data.posts) && r.data.posts.length) {
+        state.posts = sortByDateDesc(r.data.posts);
+      }
+      if (r.data.admin && typeof r.data.admin === 'object') {
+        state.admin = { ...readAdminData(), ...r.data.admin };
+      }
+      if (r.data.reads && typeof r.data.reads === 'object') {
+        saveReadsMap(r.data.reads);
+      }
+      reconcileManagerPostReads();
+      saveArchivePostsLocal();
+      saveAdminDataLocal();
+      publishToClient();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function readReadsMapRaw() {
@@ -283,6 +341,11 @@
       renderBlocksPreview();
     }
     if (modalId === 'managerStoryFormModal') renderStorySelect();
+    if (modalId === 'managerPollFormModal') {
+      bindPollFormEventsOnce();
+      renderPollForm();
+      void renderPollOverview();
+    }
   }
 
   function openLaunchFormModal(modalId) {
@@ -478,9 +541,9 @@
               <p>${isHidden ? 'Скрыт у клиента' : isPublished ? 'Видим клиенту' : 'В архиве (старый)'}</p>
               <div class="manager-post-tile-stats">
                 <span>👁 ${effectivePostReads(post)}</span>
-                <span>Нравится: ${post.likes || 0}</span>
-                <span>Полезно: ${reactions.useful || 0}</span>
-                <span>Интересно: ${reactions.new || 0}</span>
+                <span>❤️ ${post.likes || 0}</span>
+                <span>👍 ${reactions.useful || 0}</span>
+                <span>🔥 ${reactions.new || 0}</span>
                 <span>💬 ${commentsCount}</span>
               </div>
             </div>
@@ -816,27 +879,303 @@
     const api = window.EkvalineAPI;
     if (!api?.json) {
       root.innerHTML = '<p class="manager-note">Подключите сервер, чтобы видеть результаты опросов из базы данных.</p>';
+      renderPollLaunchStatus();
       return;
     }
     try {
-      const r = await api.json('/api/manager/content-insights');
-      if (!r.ok) {
-        root.innerHTML = '<p class="manager-note">Не удалось загрузить результаты опросов.</p>';
-        return;
-      }
-      const polls = Array.isArray(r.data?.polls) ? r.data.polls : [];
-      const engagement = r.data?.engagement || {};
+      const { polls, engagement } = await fetchManagerPollInsights();
       if (!polls.length) {
         root.innerHTML =
           '<p class="manager-note">Опросов пока нет. Создайте опрос в блоке «Опрос» или в настройках админ-панели — голоса клиентов появятся здесь автоматически.</p>';
+        renderPollLaunchStatus();
         return;
       }
       root.innerHTML = `
         <p class="manager-note">Активных опросов: <strong>${Number(engagement.active_polls || 0)}</strong> · Всего голосов в системе: <strong>${Number(engagement.total_poll_votes || 0)}</strong></p>
         ${polls.map(renderPollResultCard).join('')}
       `;
+      renderPollLaunchStatus();
     } catch {
       root.innerHTML = '<p class="manager-note">Не удалось загрузить результаты опросов.</p>';
+      renderPollLaunchStatus();
+    }
+  }
+
+  let managerPollsCache = [];
+  let pollFormEventsBound = false;
+  const POLL_FORM_LIMITS = { maxOptions: 8, minOptions: 2 };
+
+  async function fetchManagerPollInsights() {
+    const api = window.EkvalineAPI;
+    if (!api?.json) return { polls: [], engagement: {} };
+    try {
+      const r = await api.json('/api/manager/content-insights');
+      if (!r.ok) return { polls: [], engagement: {} };
+      const polls = Array.isArray(r.data?.polls) ? r.data.polls : [];
+      managerPollsCache = polls;
+      return { polls, engagement: r.data?.engagement || {} };
+    } catch {
+      return { polls: [], engagement: {} };
+    }
+  }
+
+  function renderPollLaunchStatus() {
+    const el = document.getElementById('managerPollLaunchStatus');
+    if (!(el instanceof HTMLElement)) return;
+    const blogPoll = state.admin.hydrationPoll;
+    if (!blogPoll || !blogPoll.question) {
+      el.textContent = 'Опрос блога пока не создан. Нажмите «Открыть», чтобы добавить новый.';
+      el.classList.add('is-empty');
+      return;
+    }
+    el.classList.remove('is-empty');
+    const status = blogPoll.active ? 'показывается на блоге' : 'скрыт с блога (данные сохранены)';
+    el.textContent = `Опрос блога: «${blogPoll.title || 'Опрос'}» — ${status}. Результаты — в блоке «Результаты опросов клиентов» выше.`;
+  }
+
+  function renderPollOverviewItem(poll) {
+    const active = !!poll.active;
+    const badge = active
+      ? '<span class="manager-poll-result-badge is-active">активен</span>'
+      : '<span class="manager-poll-result-badge is-archived">скрыт</span>';
+    const sourceLabel = poll.source === 'blog' ? 'опрос блога' : 'клиентский опрос';
+    const optionsPreview = (poll.options || [])
+      .slice(0, 4)
+      .map((opt) => escapeHtml(opt.text || ''))
+      .join(' · ');
+    return `
+      <article class="manager-poll-overview-item">
+        <div class="manager-poll-overview-item-head">
+          <strong>${escapeHtml(poll.title || 'Опрос')}</strong>
+          <div>${badge}<span class="manager-poll-result-badge">${escapeHtml(sourceLabel)}</span></div>
+        </div>
+        <p>${escapeHtml(poll.question || '')}</p>
+        <p class="manager-poll-overview-meta">Голосов: <strong>${Number(poll.total_votes || 0)}</strong>${optionsPreview ? ` · ${optionsPreview}` : ''}</p>
+      </article>
+    `;
+  }
+
+  async function renderPollOverview() {
+    const root = document.getElementById('managerPollOverview');
+    if (!(root instanceof HTMLElement)) return;
+    root.innerHTML = '<p class="manager-note">Загрузка списка опросов…</p>';
+    const { polls } = await fetchManagerPollInsights();
+    if (!polls.length) {
+      root.innerHTML =
+        '<p class="manager-note">Опросов пока нет. Заполните форму ниже и нажмите «Сохранить опрос». Клиентские опросы с других страниц настраиваются в админ-панели.</p>';
+      return;
+    }
+    const blogPolls = polls.filter((poll) => poll.source === 'blog');
+    const sitePolls = polls.filter((poll) => poll.source !== 'blog');
+    root.innerHTML = `
+      ${blogPolls.length ? `<p class="manager-note">Опросы блога (${blogPolls.length})</p>${blogPolls.map(renderPollOverviewItem).join('')}` : ''}
+      ${sitePolls.length ? `<p class="manager-note" style="margin-top:0.75rem">Клиентские опросы (${sitePolls.length}) — управление в админ-панели</p>${sitePolls.map(renderPollOverviewItem).join('')}` : ''}
+    `;
+  }
+
+  function getPollFormElements() {
+    const pollForm = document.getElementById('managerPollForm');
+    if (!(pollForm instanceof HTMLFormElement)) return null;
+    return {
+      pollForm,
+      titleField: pollForm.elements.namedItem('title'),
+      questionField: pollForm.elements.namedItem('question'),
+      optionsContainer: document.getElementById('pollOptionsContainer'),
+      addOptionBtn: document.getElementById('addPollOptionBtn'),
+    };
+  }
+
+  function collectPollOptionValues(optionsContainer) {
+    if (!(optionsContainer instanceof HTMLElement)) return [];
+    return Array.from(optionsContainer.querySelectorAll('input[name^="pollOption_"]'))
+      .map((input) => (input instanceof HTMLInputElement ? truncate(input.value.trim(), 60) : ''))
+      .filter(Boolean);
+  }
+
+  function syncPollOptionLimits(optionsContainer) {
+    if (!(optionsContainer instanceof HTMLElement)) return;
+    Array.from(optionsContainer.querySelectorAll('input[name^="pollOption_"]')).forEach((input, index) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      const limit = optionsContainer.querySelector(`[data-poll-option-limit="${index}"]`);
+      if (limit) limit.textContent = `${input.value.length}/60`;
+    });
+  }
+
+  function renderPollOptionFields(values) {
+    const ui = getPollFormElements();
+    if (!ui || !(ui.optionsContainer instanceof HTMLElement)) return;
+    const normalized = (Array.isArray(values) ? values : [])
+      .map((item) => truncate(String(item || '').trim(), 60))
+      .filter(Boolean);
+    while (normalized.length < POLL_FORM_LIMITS.minOptions) normalized.push('');
+    ui.optionsContainer.innerHTML = normalized
+      .map(
+        (value, index) => `
+            <label class="manager-poll-option-row">
+              <span>Вариант ${index + 1} (до 60)</span>
+              <div class="manager-poll-option-input-wrap">
+                <input type="text" name="pollOption_${index + 1}" maxlength="60" value="${escapeHtml(value)}" required />
+                <button type="button" class="manager-btn is-secondary manager-poll-remove-btn" data-remove-poll-option="${index}" ${
+                  normalized.length <= POLL_FORM_LIMITS.minOptions ? 'disabled' : ''
+                }>−</button>
+              </div>
+              <span class="manager-limit" data-poll-option-limit="${index}">${value.length}/60</span>
+            </label>
+          `
+      )
+      .join('');
+    if (ui.addOptionBtn instanceof HTMLButtonElement) {
+      ui.addOptionBtn.disabled = normalized.length >= POLL_FORM_LIMITS.maxOptions;
+    }
+  }
+
+  function renderPollForm() {
+    const ui = getPollFormElements();
+    if (!ui) return;
+    const current = state.admin.hydrationPoll;
+    if (current && current.question) {
+      if (ui.titleField instanceof HTMLInputElement) ui.titleField.value = current.title || 'Опрос дня';
+      if (ui.questionField instanceof HTMLTextAreaElement) ui.questionField.value = current.question || '';
+      renderPollOptionFields((current.options || []).map((item) => item.text));
+      [ui.titleField, ui.questionField].forEach((field) => {
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          field.dispatchEvent(new Event('input'));
+        }
+      });
+      syncPollOptionLimits(ui.optionsContainer);
+      return;
+    }
+    if (ui.titleField instanceof HTMLInputElement) ui.titleField.value = '';
+    if (ui.questionField instanceof HTMLTextAreaElement) ui.questionField.value = '';
+    renderPollOptionFields(['', '']);
+    [ui.titleField, ui.questionField].forEach((field) => {
+      if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+        field.dispatchEvent(new Event('input'));
+      }
+    });
+  }
+
+  async function clearBlogPoll() {
+    state.admin.hydrationPoll = null;
+    saveAdminData();
+    await syncBlogPollToServer(null);
+    renderPollForm();
+    renderPollLaunchStatus();
+    await renderPollOverview();
+    void renderPollResults();
+  }
+
+  function bindPollFormEventsOnce() {
+    if (pollFormEventsBound) return;
+    const ui = getPollFormElements();
+    if (!ui) return;
+    pollFormEventsBound = true;
+
+    bindLimitForField(ui.titleField, ui.pollForm.querySelector('[data-limit-for="poll-title"]'), 40);
+    bindLimitForField(ui.questionField, ui.pollForm.querySelector('[data-limit-for="poll-question"]'), 120);
+
+    if (ui.addOptionBtn instanceof HTMLButtonElement) {
+      ui.addOptionBtn.addEventListener('click', () => {
+        const values = collectPollOptionValues(ui.optionsContainer);
+        if (values.length >= POLL_FORM_LIMITS.maxOptions) return;
+        values.push('');
+        renderPollOptionFields(values);
+        syncPollOptionLimits(ui.optionsContainer);
+      });
+    }
+
+    if (ui.optionsContainer instanceof HTMLElement) {
+      ui.optionsContainer.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const removeBtn = target.closest('[data-remove-poll-option]');
+        if (!(removeBtn instanceof HTMLButtonElement)) return;
+        const index = Number(removeBtn.getAttribute('data-remove-poll-option'));
+        if (!Number.isInteger(index)) return;
+        const values = collectPollOptionValues(ui.optionsContainer);
+        if (values.length <= POLL_FORM_LIMITS.minOptions) return;
+        values.splice(index, 1);
+        renderPollOptionFields(values);
+        syncPollOptionLimits(ui.optionsContainer);
+      });
+
+      ui.optionsContainer.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        if (!target.matches('input[name^="pollOption_"]')) return;
+        syncPollOptionLimits(ui.optionsContainer);
+      });
+    }
+
+    ui.pollForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = truncate(String(ui.titleField?.value || 'Опрос дня').trim() || 'Опрос дня', 40);
+      const question = truncate(String(ui.questionField?.value || '').trim(), 120);
+      const values = collectPollOptionValues(ui.optionsContainer);
+      if (!question || values.length < POLL_FORM_LIMITS.minOptions) {
+        showManagerFormError('Укажите вопрос и минимум два варианта ответа.');
+        return;
+      }
+
+      const prev = state.admin.hydrationPoll;
+      const prevMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), Number(opt.votes) || 0]));
+      const prevIdMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), String(opt.id || '')]));
+      state.admin.hydrationPoll = {
+        id: prev?.id && prev.question ? prev.id : `poll_${Date.now()}`,
+        title,
+        question,
+        active: true,
+        options: values.map((text, idx) => ({
+          id: prevIdMap.get(text) || `o${idx + 1}`,
+          text,
+          votes: prevMap.get(text) || 0,
+        })),
+      };
+      saveAdminData();
+      void syncBlogPollToServer(state.admin.hydrationPoll);
+      renderPollLaunchStatus();
+      void renderPollOverview();
+      void renderPollResults();
+      showSuccessModal('Опрос сохранён и опубликован на блоге.', { keepFormOpen: true });
+    });
+
+    const deactivatePollBtn = document.getElementById('deactivatePollBtn');
+    if (deactivatePollBtn instanceof HTMLButtonElement) {
+      deactivatePollBtn.addEventListener('click', () => {
+        if (!state.admin.hydrationPoll?.question) {
+          showManagerFormError('Сначала сохраните опрос.');
+          return;
+        }
+        state.admin.hydrationPoll = { ...state.admin.hydrationPoll, active: false };
+        saveAdminData();
+        void syncBlogPollToServer(state.admin.hydrationPoll);
+        renderPollLaunchStatus();
+        void renderPollOverview();
+        void renderPollResults();
+        showSuccessModal('Опрос скрыт с блога. Его можно снова включить через «Сохранить опрос».', { keepFormOpen: true });
+      });
+    }
+
+    const deletePollBtn = document.getElementById('deletePollBtn');
+    if (deletePollBtn instanceof HTMLButtonElement) {
+      deletePollBtn.addEventListener('click', () => {
+        if (!state.admin.hydrationPoll?.question) {
+          showManagerFormError('Опрос блога уже удалён.');
+          return;
+        }
+        const ok = window.confirm('Удалить опрос блога полностью? Он исчезнет с сайта и из этой формы.');
+        if (!ok) return;
+        void clearBlogPoll().then(() => {
+          showSuccessModal('Опрос блога удалён.', { keepFormOpen: true });
+        });
+      });
+    }
+
+    const refreshPollOverviewBtn = document.getElementById('refreshPollOverviewBtn');
+    if (refreshPollOverviewBtn instanceof HTMLButtonElement) {
+      refreshPollOverviewBtn.addEventListener('click', () => {
+        void renderPollOverview();
+      });
     }
   }
 
@@ -1177,9 +1516,9 @@
     const factForm = document.getElementById('managerFactForm');
     const blocksForm = document.getElementById('managerBlocksForm');
     const storyForm = document.getElementById('managerStoryForm');
-    const pollForm = document.getElementById('managerPollForm');
-    const deactivatePollBtn = document.getElementById('deactivatePollBtn');
     const logoutBtn = document.getElementById('managerLogoutBtn');
+
+    bindPollFormEventsOnce();
 
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
@@ -1325,150 +1664,6 @@
         storyForm.reset();
         renderAll();
         showSuccessModal('История успешно добавлена.');
-      });
-    }
-
-    if (pollForm instanceof HTMLFormElement) {
-      const titleField = pollForm.elements.namedItem('title');
-      const questionField = pollForm.elements.namedItem('question');
-      const optionsContainer = document.getElementById('pollOptionsContainer');
-      const addOptionBtn = document.getElementById('addPollOptionBtn');
-      const maxPollOptions = 8;
-      const minPollOptions = 2;
-      bindLimitForField(titleField, pollForm.querySelector('[data-limit-for="poll-title"]'), 40);
-      bindLimitForField(questionField, pollForm.querySelector('[data-limit-for="poll-question"]'), 120);
-
-      const renderPollOptionFields = (values) => {
-        if (!(optionsContainer instanceof HTMLElement)) return;
-        const normalized = (Array.isArray(values) ? values : [])
-          .map((item) => truncate(String(item || '').trim(), 60))
-          .filter(Boolean);
-        while (normalized.length < minPollOptions) normalized.push('');
-        optionsContainer.innerHTML = normalized
-          .map(
-            (value, index) => `
-            <label class="manager-poll-option-row">
-              <span>Вариант ${index + 1} (до 60)</span>
-              <div class="manager-poll-option-input-wrap">
-                <input type="text" name="pollOption_${index + 1}" maxlength="60" value="${escapeHtml(value)}" required />
-                <button type="button" class="manager-btn is-secondary manager-poll-remove-btn" data-remove-poll-option="${index}" ${
-                  normalized.length <= minPollOptions ? 'disabled' : ''
-                }>−</button>
-              </div>
-              <span class="manager-limit" data-poll-option-limit="${index}">${value.length}/60</span>
-            </label>
-          `
-          )
-          .join('');
-        if (addOptionBtn instanceof HTMLButtonElement) {
-          addOptionBtn.disabled = normalized.length >= maxPollOptions;
-        }
-      };
-
-      const collectPollOptionValues = () => {
-        if (!(optionsContainer instanceof HTMLElement)) return [];
-        return Array.from(optionsContainer.querySelectorAll('input[name^="pollOption_"]'))
-          .map((input) => (input instanceof HTMLInputElement ? truncate(input.value.trim(), 60) : ''))
-          .filter(Boolean);
-      };
-
-      const syncPollOptionLimits = () => {
-        if (!(optionsContainer instanceof HTMLElement)) return;
-        Array.from(optionsContainer.querySelectorAll('input[name^="pollOption_"]')).forEach((input, index) => {
-          if (!(input instanceof HTMLInputElement)) return;
-          const limit = optionsContainer.querySelector(`[data-poll-option-limit="${index}"]`);
-          if (limit) limit.textContent = `${input.value.length}/60`;
-        });
-      };
-
-      const current = state.admin.hydrationPoll;
-      if (current && current.question) {
-        if (titleField instanceof HTMLInputElement) titleField.value = current.title || 'Опрос дня';
-        if (questionField instanceof HTMLTextAreaElement) questionField.value = current.question || '';
-        renderPollOptionFields((current.options || []).map((item) => item.text));
-        [titleField, questionField].forEach((field) => {
-          if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-            field.dispatchEvent(new Event('input'));
-          }
-        });
-        syncPollOptionLimits();
-      } else {
-        renderPollOptionFields(['', '']);
-      }
-
-      if (addOptionBtn instanceof HTMLButtonElement) {
-        addOptionBtn.addEventListener('click', () => {
-          const values = collectPollOptionValues();
-          if (values.length >= maxPollOptions) return;
-          values.push('');
-          renderPollOptionFields(values);
-          syncPollOptionLimits();
-        });
-      }
-
-      if (optionsContainer instanceof HTMLElement) {
-        optionsContainer.addEventListener('click', (event) => {
-          const target = event.target;
-          if (!(target instanceof HTMLElement)) return;
-          const removeBtn = target.closest('[data-remove-poll-option]');
-          if (!(removeBtn instanceof HTMLButtonElement)) return;
-          const index = Number(removeBtn.getAttribute('data-remove-poll-option'));
-          if (!Number.isInteger(index)) return;
-          const values = collectPollOptionValues();
-          if (values.length <= minPollOptions) return;
-          values.splice(index, 1);
-          renderPollOptionFields(values);
-          syncPollOptionLimits();
-        });
-
-        optionsContainer.addEventListener('input', (event) => {
-          const target = event.target;
-          if (!(target instanceof HTMLInputElement)) return;
-          syncPollOptionLimits();
-        });
-      }
-
-      pollForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const title = truncate(String(titleField?.value || 'Опрос дня').trim() || 'Опрос дня', 40);
-        const question = truncate(String(questionField?.value || '').trim(), 120);
-        const values = collectPollOptionValues();
-        if (!question || values.length < 2) {
-          showManagerFormError('Укажите вопрос и минимум два варианта ответа.');
-          return;
-        }
-
-        const prev = state.admin.hydrationPoll;
-        const prevMap = new Map((prev?.options || []).map((opt) => [String(opt.text || '').trim(), Number(opt.votes) || 0]));
-        state.admin.hydrationPoll = {
-          id: `poll_${Date.now()}`,
-          title,
-          question,
-          active: true,
-          options: values.map((text, idx) => ({
-            id: `o${idx + 1}`,
-            text,
-            votes: prevMap.get(text) || 0,
-          })),
-        };
-        saveAdminData();
-        void syncBlogPollToServer(state.admin.hydrationPoll);
-        void renderPollResults();
-        showSuccessModal('Опрос сохранён и опубликован.');
-      });
-    }
-
-    if (deactivatePollBtn instanceof HTMLButtonElement) {
-      deactivatePollBtn.addEventListener('click', () => {
-        if (!state.admin.hydrationPoll) {
-          showManagerFormError('Сначала сохраните опрос.');
-          return;
-        }
-        state.admin.hydrationPoll = { ...state.admin.hydrationPoll, active: false };
-        saveAdminData();
-        void syncBlogPollToServer(state.admin.hydrationPoll);
-        void renderPollResults();
-        showSuccessModal('Опрос скрыт с блога.');
       });
     }
 
@@ -1802,8 +1997,8 @@
     await hydrateManagerFromServerSession();
     if (!enforceAccess()) return;
     initState();
+    await loadBlogFromServer();
     void loadManagerFeedback();
-    void syncBlogPollToServer(state.admin.hydrationPoll);
     renderAll();
     initLaunchFormModals();
     setupArchiveCarousel();

@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260619mapfix2" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260619mapfix2" />
-    <link rel="stylesheet" href="staff-mobile.css?v=20260619mapfix2" />
+    <link rel="stylesheet" href="styles.css?v=20260619pollmgr" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260619pollmgr" />
+    <link rel="stylesheet" href="staff-mobile.css?v=20260619pollmgr" />
   </head>
   <body class="manager-page">
     <main class="manager-shell">
@@ -74,8 +74,9 @@
         <article class="manager-card manager-launch-card">
           <h2>Опрос</h2>
           <p>
-            Нажмите «Открыть», заполните форму и «Сохранить опрос». Чтобы опрос не показывался на блоге — в том же окне «Скрыть опрос».
+            Нажмите «Открыть», заполните форму и «Сохранить опрос». Список текущих опросов — внутри окна. Скрыть с блога — «Скрыть опрос», удалить полностью — «Удалить опрос блога».
           </p>
+          <p id="managerPollLaunchStatus" class="manager-note manager-poll-launch-status">Загрузка статуса опроса…</p>
           <button type="button" class="manager-btn is-green" data-open-form-modal="managerPollFormModal">Открыть</button>
         </article>
       </section>
@@ -214,8 +215,19 @@
         <button type="button" class="manager-modal-close" data-close-form-modal="managerPollFormModal">×</button>
         <h3 class="manager-modal-title">Опрос</h3>
         <p class="manager-note">
-          Заполните поля сверху вниз. Ответ — по одному полю; нужна ещё строка — «Добавить вариант». Сохранить — «Сохранить опрос», убрать опрос с блога — «Скрыть опрос».
+          Заполните поля сверху вниз. Ответ — по одному полю; нужна ещё строка — «Добавить вариант». Сохранить — «Сохранить опрос».
         </p>
+        <section class="manager-poll-overview" aria-labelledby="managerPollOverviewTitle">
+          <div class="manager-poll-overview-head">
+            <h4 id="managerPollOverviewTitle">Текущие опросы</h4>
+            <button type="button" class="manager-btn is-secondary manager-poll-overview-refresh" id="refreshPollOverviewBtn">
+              Обновить
+            </button>
+          </div>
+          <div id="managerPollOverview" class="manager-poll-overview-list" aria-live="polite">
+            <p class="manager-note">Загрузка…</p>
+          </div>
+        </section>
         <form id="managerPollForm" class="manager-form manager-modal-body" novalidate>
           <label>Заголовок (до 40)
             <input type="text" name="title" maxlength="40" placeholder="Опрос дня" />
@@ -227,8 +239,9 @@
           </label>
           <div id="pollOptionsContainer" class="manager-poll-options"></div>
           <button type="button" class="manager-btn is-secondary" id="addPollOptionBtn">Добавить вариант</button>
-          <div class="manager-post-edit-actions">
+          <div class="manager-post-edit-actions manager-poll-form-actions">
             <button type="button" class="manager-btn is-secondary" id="deactivatePollBtn">Скрыть опрос</button>
+            <button type="button" class="manager-btn is-danger" id="deletePollBtn">Удалить опрос блога</button>
             <button type="submit" class="manager-btn is-green">Сохранить опрос</button>
           </div>
         </form>
@@ -236,7 +249,7 @@
     </div>
 
     <script src="api-client.js"></script>
-    <script src="client-guard.js?v=20260619mapfix2"></script>
-    <script src="manager.js?v=20260619mapfix2"></script>
+    <script src="client-guard.js?v=20260619pollmgr"></script>
+    <script src="manager.js?v=20260619pollmgr"></script>
   </body>
 </html>

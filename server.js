@@ -37,6 +37,7 @@ const mailer = require('./mailer');
 const bonusProgram = require('./bonusProgram');
 const pollVotes = require('./pollVotes');
 const clientNotifications = require('./clientNotifications');
+const blogStore = require('./lib/blog-store');
 
 assertProductionSessionSecret();
 
@@ -2046,6 +2047,33 @@ app.put('/api/manager/blog-poll', requireAuth, requireRole('manager', 'admin'), 
     .run('blogHydrationPoll', JSON.stringify(sanitized));
   audit(db, req.user.id, 'manager_blog_poll', sanitized?.id || 'cleared', req.ip);
   res.json({ ok: true, poll: sanitized });
+}));
+
+app.get('/api/public/blog-feed', asyncHandler(async (req, res) => {
+  const feed = await blogStore.getPublicFeed(db);
+  res.json(feed);
+}));
+
+app.get('/api/manager/blog', requireAuth, requireRole('manager', 'admin'), asyncHandler(async (req, res) => {
+  const feed = await blogStore.getManagerFeed(db);
+  res.json(feed);
+}));
+
+app.put('/api/manager/blog', requireAuth, requireRole('manager', 'admin'), csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.blogManagerPutSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  await blogStore.writeManagerState(db, v.value);
+  audit(db, req.user.id, 'manager_blog_save', `posts=${v.value.posts.length}`, req.ip);
+  res.json({ ok: true });
+}));
+
+app.patch('/api/blog/posts/:postId/engagement', requireAuth, csrfMiddleware, asyncHandler(async (req, res) => {
+  const v = schemas.validate(schemas.blogEngagementSchema, req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const result = await blogStore.applyEngagement(db, req.params.postId, v.value, req.user);
+  if (result.error) return res.status(400).json({ error: result.error });
+  audit(db, req.user.id, 'blog_engagement', `${req.params.postId}:${v.value.op}`, req.ip);
+  res.json(result);
 }));
 
 app.get('/api/profile/bonus-program', requireAuth, asyncHandler(async (req, res) => {

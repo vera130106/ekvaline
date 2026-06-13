@@ -179,6 +179,8 @@
     /** Агрегаты голосов с сервера GET /api/public/poll-aggregates. */
     pollAggregates: {},
   };
+
+  let openPostReaderId = null;
   let revealObserver = null;
 
   function safeJsonParse(raw, fallback) {
@@ -192,6 +194,77 @@
 
   function savePosts() {
     localStorage.setItem(FEED_KEY, JSON.stringify(state.posts));
+  }
+
+  function applyServerFeed(data) {
+    if (!data || typeof data !== 'object') return false;
+    if (Array.isArray(data.posts) && data.posts.length) {
+      state.posts = enforcePostsLimit(data.posts);
+    }
+    if (data.admin && typeof data.admin === 'object') {
+      state.admin = { ...readAdminData(), ...data.admin };
+      localStorage.setItem(BLOG_ADMIN_KEY, JSON.stringify(state.admin));
+    }
+    if (data.reads && typeof data.reads === 'object' && !Array.isArray(data.reads)) {
+      saveReadsMap(data.reads);
+      migrateReadsFromPostObjects(state.posts);
+    }
+    savePosts();
+    return true;
+  }
+
+  async function hydrateBlogFromServer() {
+    try {
+      const res = await fetch('/api/public/blog-feed', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return applyServerFeed(data);
+    } catch {
+      return false;
+    }
+  }
+
+  async function persistEngagementToServer(postId, payload) {
+    const api = window.EkvalineAPI?.json ? window.EkvalineAPI : null;
+    if (!api) return null;
+    try {
+      const r = await api.json(`/api/blog/posts/${encodeURIComponent(String(postId))}/engagement`, {
+        method: 'PATCH',
+        body: payload,
+      });
+      api.resetCsrf?.();
+      if (!r.ok) return null;
+      return r.data;
+    } catch {
+      return null;
+    }
+  }
+
+  function syncPostFromServerResult(postId, result) {
+    if (!result || !result.post) return;
+    const i = state.posts.findIndex((p) => p.id === postId);
+    if (i < 0) return;
+    state.posts[i] = result.post;
+    if (result.reads && typeof result.reads === 'object') {
+      saveReadsMap(result.reads);
+    }
+    savePosts();
+  }
+
+  function initCommentFormStates(root = document) {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll('.blogv2-comment-form').forEach((form) => {
+      if (!(form instanceof HTMLFormElement)) return;
+      const textarea = form.querySelector('textarea[name="text"]');
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const limitEl = form.querySelector('[data-comment-limit]');
+      if (!(textarea instanceof HTMLTextAreaElement) || !(submitBtn instanceof HTMLButtonElement)) return;
+      const max = Number(textarea.getAttribute('maxlength') || '500');
+      const len = textarea.value.length;
+      const user = readCurrentUser();
+      if (limitEl) limitEl.textContent = `${len}/${max}`;
+      submitBtn.disabled = !user?.id || len === 0 || len > max;
+    });
   }
 
   function readReadsMapRaw() {
@@ -706,10 +779,176 @@
     if (recipesTitle) recipesTitle.textContent = String(titles.recipes || '').trim() || 'Рецепты с водой';
   }
 
-  function reactionLabel(type) {
-    if (type === 'useful') return 'Полезно';
-    if (type === 'new') return 'Интересно';
-    return 'Попробую';
+  function reactionMeta(kind) {
+    if (kind === 'like') return { emoji: '❤️', label: 'Нравится' };
+    if (kind === 'useful') return { emoji: '👍', label: 'Полезно' };
+    if (kind === 'new') return { emoji: '🔥', label: 'Интересно' };
+    return { emoji: '💧', label: 'Попробую' };
+  }
+
+  function renderPostReactionsHtml(post) {
+    const reactions = post.reactions || {};
+    const like = reactionMeta('like');
+    const useful = reactionMeta('useful');
+    const interesting = reactionMeta('new');
+    return `
+      <div class="blogv2-actions blogv2-post-reactions">
+        <button class="blogv2-action blogv2-like-btn" type="button" data-like="${escapeHtml(post.id)}" aria-label="${like.label}">
+          <span class="blogv2-action-emoji" aria-hidden="true">${like.emoji}</span>
+          <span class="blogv2-action-count">${post.likes || 0}</span>
+        </button>
+        <button class="blogv2-action blogv2-reaction useful" type="button" data-react-kind="useful" data-react-post="${escapeHtml(post.id)}" aria-label="${useful.label}">
+          <span class="blogv2-action-emoji" aria-hidden="true">${useful.emoji}</span>
+          <span class="blogv2-action-count">${reactions.useful || 0}</span>
+        </button>
+        <button class="blogv2-action blogv2-reaction new" type="button" data-react-kind="new" data-react-post="${escapeHtml(post.id)}" aria-label="${interesting.label}">
+          <span class="blogv2-action-emoji" aria-hidden="true">${interesting.emoji}</span>
+          <span class="blogv2-action-count">${reactions.new || 0}</span>
+        </button>
+      </div>
+    `;
+  }
+
+  function renderPostCommentsHtml(post, isAuthorized) {
+    const comments = post.comments || [];
+    return `
+      <div class="blogv2-comments" id="comments-${escapeHtml(post.id)}">
+        ${comments
+          .map(
+            (c) => `
+          <div class="blogv2-comment">
+            <div class="blogv2-avatar">${escapeHtml(initials(c.name))}</div>
+            <div class="blogv2-comment-body">
+              <strong>${escapeHtml(c.name)}</strong>
+              <p>${escapeHtml(c.text)}</p>
+              ${
+                Array.isArray(c.replies) && c.replies.length
+                  ? c.replies
+                      .map(
+                        (reply) => `
+                <div class="blogv2-comment-reply">
+                  <strong>${escapeHtml(reply.name || 'Менеджер')}</strong>
+                  <p>${escapeHtml(reply.text || '')}</p>
+                </div>
+              `
+                      )
+                      .join('')
+                  : ''
+              }
+            </div>
+            <button type="button" class="blogv2-comment-like" data-comment-like="${escapeHtml(post.id)}:${escapeHtml(c.id)}" aria-label="Нравится комментарий">
+              <span class="blogv2-action-emoji" aria-hidden="true">❤️</span>
+              <span class="blogv2-action-count">${c.likes || 0}</span>
+            </button>
+          </div>
+        `
+          )
+          .join('')}
+        <form class="blogv2-comment-form" data-comment-form="${escapeHtml(post.id)}">
+          <textarea name="text" maxlength="500" placeholder="${isAuthorized ? 'Написать комментарий...' : 'Только для зарегистрированных пользователей'}" ${isAuthorized ? '' : 'disabled'} required></textarea>
+          <div class="blogv2-comment-form-meta">
+            <span class="blogv2-comment-limit" data-comment-limit>0/500</span>
+            <button type="submit" class="blogv2-btn small"${isAuthorized ? '' : ' disabled title="Требуется вход"'}>Отправить</button>
+          </div>
+        </form>
+      </div>
+    `;
+  }
+
+  function findPostById(postId) {
+    return state.posts.find((p) => p.id === postId) || null;
+  }
+
+  function registerPostFullRead(postId) {
+    if (!postId) return;
+    try {
+      if (localStorage.getItem(FULLREAD_ONCE_PREFIX + postId) === '1') return;
+      localStorage.setItem(FULLREAD_ONCE_PREFIX + postId, '1');
+    } catch {
+      /* private mode */
+    }
+    void persistEngagementToServer(postId, { op: 'fullRead' }).then((result) => {
+      if (result?.post) {
+        syncPostFromServerResult(postId, result);
+        renderFeed();
+        renderPopular();
+        if (openPostReaderId === postId) fillPostReader(postId);
+      } else {
+        const total = incrementPostFullRead(postId);
+        const i = state.posts.findIndex((p) => p.id === postId);
+        if (i >= 0) {
+          state.posts[i] = { ...state.posts[i], views: total };
+          savePosts();
+        }
+      }
+    });
+  }
+
+  function buildPostReaderHtml(post) {
+    const isAuthorized = Boolean(readCurrentUser()?.id);
+    const fullText = post.details || post.excerpt || '';
+    return `
+      <article class="blogv2-post blogv2-post-reader-inner" data-post-id="${escapeHtml(post.id)}">
+        <div class="blogv2-post-media">
+          <img
+            src="${escapeHtml(post.image)}"
+            alt="${escapeHtml(post.title)}"
+            loading="lazy"
+            style="object-fit:${post.imageMode === 'contain' ? 'contain' : 'cover'};background:${escapeHtml(post.imageBg || '#ffffff')};"
+          />
+        </div>
+        <div class="blogv2-post-body">
+          <div class="blogv2-post-head">
+            <h3>${escapeHtml(post.title)}</h3>
+            <div class="blogv2-post-meta">
+              <span class="blogv2-post-date">${formatDate(post.createdAt)}</span>
+              <span class="blogv2-post-reads">Просмотры: ${getPostReadsForDisplay(post)}</span>
+            </div>
+          </div>
+          <p class="blogv2-post-details blogv2-post-reader-text">${escapeHtml(fullText)}</p>
+          ${renderPostReactionsHtml(post)}
+          ${renderPostCommentsHtml(post, isAuthorized)}
+        </div>
+      </article>
+    `;
+  }
+
+  function fillPostReader(postId) {
+    const body = document.getElementById('postReaderBody');
+    const post = findPostById(postId);
+    if (!(body instanceof HTMLElement) || !post) return;
+    body.innerHTML = buildPostReaderHtml(post);
+    initCommentFormStates(body);
+  }
+
+  function openPostReader(postId) {
+    const id = String(postId || '').trim();
+    const post = findPostById(id);
+    const modal = document.getElementById('postReaderModal');
+    if (!post || !(modal instanceof HTMLElement)) return;
+    closeStory();
+    openPostReaderId = id;
+    registerPostFullRead(id);
+    fillPostReader(id);
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    const card = modal.querySelector('.blogv2-post-reader-card');
+    if (card instanceof HTMLElement) {
+      card.scrollTop = 0;
+    }
+  }
+
+  function closePostReader() {
+    const modal = document.getElementById('postReaderModal');
+    if (!(modal instanceof HTMLElement)) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    openPostReaderId = null;
+    const storyModal = document.getElementById('storyModal');
+    if (!storyModal?.classList.contains('open')) {
+      document.body.style.overflow = '';
+    }
   }
 
   function renderFeed() {
@@ -724,7 +963,6 @@
 
     root.innerHTML = posts
       .map((post) => {
-        const comments = post.comments || [];
         return `
           <article class="blogv2-post" data-post-id="${post.id}">
             <div class="blogv2-post-media">
@@ -746,73 +984,21 @@
                 </div>
               </div>
               <p class="blogv2-post-excerpt">${escapeHtml(post.excerpt)}</p>
-              <p class="blogv2-post-details" hidden>${escapeHtml(post.details || post.excerpt)}</p>
 
-              <div class="blogv2-actions blogv2-post-reactions">
-                <button class="blogv2-action blogv2-like-btn" type="button" data-like="${post.id}">
-                  <span class="blogv2-action-label">Нравится</span>
-                  <span class="blogv2-action-count">${post.likes}</span>
-                </button>
-                <button class="blogv2-action blogv2-reaction useful" type="button" data-react-kind="useful" data-react-post="${post.id}">
-                  <span class="blogv2-action-label">${reactionLabel('useful')}</span>
-                  <span class="blogv2-action-count">${post.reactions.useful || 0}</span>
-                </button>
-                <button class="blogv2-action blogv2-reaction new" type="button" data-react-kind="new" data-react-post="${post.id}">
-                  <span class="blogv2-action-label">${reactionLabel('new')}</span>
-                  <span class="blogv2-action-count">${post.reactions.new || 0}</span>
-                </button>
-              </div>
+              ${renderPostReactionsHtml(post)}
 
               <div class="blogv2-post-footer">
-                <button type="button" class="blogv2-read-btn" data-read-post="${post.id}">Читать</button>
+                <button type="button" class="blogv2-read-btn" data-read-post="${escapeHtml(post.id)}">Читать</button>
               </div>
 
-              <div class="blogv2-comments" id="comments-${post.id}">
-                ${comments
-                  .map(
-                    (c) => `
-                  <div class="blogv2-comment">
-                    <div class="blogv2-avatar">${escapeHtml(initials(c.name))}</div>
-                    <div class="blogv2-comment-body">
-                      <strong>${escapeHtml(c.name)}</strong>
-                      <p>${escapeHtml(c.text)}</p>
-                      ${
-                        Array.isArray(c.replies) && c.replies.length
-                          ? c.replies
-                              .map(
-                                (reply) => `
-                        <div class="blogv2-comment-reply">
-                          <strong>${escapeHtml(reply.name || 'Менеджер')}</strong>
-                          <p>${escapeHtml(reply.text || '')}</p>
-                        </div>
-                      `
-                              )
-                              .join('')
-                          : ''
-                      }
-                    </div>
-                    <button type="button" class="blogv2-comment-like" data-comment-like="${post.id}:${c.id}" aria-label="Нравится комментарий">
-                      <span class="blogv2-action-label">Нравится</span>
-                      <span class="blogv2-action-count">${c.likes || 0}</span>
-                    </button>
-                  </div>
-                `
-                  )
-                  .join('')}
-                <form class="blogv2-comment-form" data-comment-form="${post.id}">
-                  <textarea name="text" maxlength="500" placeholder="${isAuthorized ? 'Написать комментарий...' : 'Только для зарегистрированных пользователей'}" ${isAuthorized ? '' : 'disabled'} required></textarea>
-                  <div class="blogv2-comment-form-meta">
-                    <span class="blogv2-comment-limit" data-comment-limit>0/500</span>
-                    <button type="submit" class="blogv2-btn small" ${isAuthorized ? 'disabled' : 'disabled title="Требуется вход"'}>Отправить</button>
-                  </div>
-                </form>
-              </div>
+              ${renderPostCommentsHtml(post, isAuthorized)}
             </div>
           </article>
         `;
       })
       .join('');
     initScrollReveal();
+    initCommentFormStates(root);
   }
 
   function renderAll() {
@@ -941,6 +1127,7 @@
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
+    closePostReader();
     restartStoryProgress();
   }
 
@@ -968,12 +1155,6 @@
       return;
     }
     openStory(next);
-  }
-
-  function goPrevStory() {
-    const prev = state.storyIndex - 1;
-    if (prev < 0) return;
-    openStory(prev);
   }
 
   function restartStoryProgress() {
@@ -1032,8 +1213,8 @@
     state.storyTimer = setTimeout(goNextStory, state.storyRemainingMs);
   }
 
-  function updatePost(postId, updater) {
-    const beforeEl = document.querySelector(`[data-post-id="${postId}"]`);
+  function updatePost(postId, updater, engagementPayload) {
+    const beforeEl = document.querySelector(`[data-post-id="${cssEscapeSel(postId)}"]`);
     const beforeTop = beforeEl instanceof HTMLElement ? beforeEl.getBoundingClientRect().top : null;
     const i = state.posts.findIndex((p) => p.id === postId);
     if (i < 0) return;
@@ -1042,12 +1223,25 @@
     savePosts();
     renderFeed();
     renderPopular();
-    if (beforeTop != null) {
-      const afterEl = document.querySelector(`[data-post-id="${postId}"]`);
+    if (openPostReaderId === postId) {
+      fillPostReader(postId);
+    }
+    if (beforeTop != null && !openPostReaderId) {
+      const afterEl = document.querySelector(`[data-post-id="${cssEscapeSel(postId)}"]`);
       if (afterEl instanceof HTMLElement) {
         const afterTop = afterEl.getBoundingClientRect().top;
         window.scrollBy({ top: afterTop - beforeTop, left: 0, behavior: 'auto' });
       }
+    }
+    if (engagementPayload) {
+      void persistEngagementToServer(postId, engagementPayload).then((result) => {
+        if (result?.post) {
+          syncPostFromServerResult(postId, result);
+          renderFeed();
+          renderPopular();
+          if (openPostReaderId === postId) fillPostReader(postId);
+        }
+      });
     }
   }
 
@@ -1083,13 +1277,102 @@
     }, 520);
   }
 
+  function parseHydrationInputValue(raw) {
+    const normalized = String(raw || '')
+      .trim()
+      .replace(',', '.')
+      .replace(/[^\d.]/g, '');
+    const parts = normalized.split('.');
+    const intPart = (parts[0] || '').slice(0, 1);
+    const fracPart = (parts[1] || '').slice(0, 1);
+    const compact = fracPart ? `${intPart}.${fracPart}` : intPart;
+    const value = Number(compact);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.min(HYDRATION_MAX, value);
+  }
+
+  function showHydrationHint(message) {
+    const hint = document.getElementById('hydrationInputHint');
+    const input = document.getElementById('hydrationInput');
+    if (!(hint instanceof HTMLElement)) return;
+    if (!message) {
+      hint.textContent = '';
+      hint.hidden = true;
+      hint.classList.remove('is-visible');
+      if (input instanceof HTMLInputElement) input.removeAttribute('aria-invalid');
+      return;
+    }
+    hint.textContent = message;
+    hint.hidden = false;
+    hint.classList.add('is-visible');
+    if (input instanceof HTMLInputElement) input.setAttribute('aria-invalid', 'true');
+  }
+
+  function submitHydrationForm(form) {
+    if (!(form instanceof HTMLFormElement)) return false;
+    const input = form.querySelector('#hydrationInput');
+    if (!(input instanceof HTMLInputElement)) return false;
+    const value = parseHydrationInputValue(input.value);
+    if (value == null) {
+      showHydrationHint('Введите объём, например 0.3');
+      input.focus();
+      return false;
+    }
+    showHydrationHint('');
+    state.water = Math.max(0, Math.min(HYDRATION_MAX, state.water + value));
+    input.value = '';
+    saveWater();
+    renderHydration();
+    return true;
+  }
+
+  function bindHydrationControls(root = document) {
+    const scope = root instanceof HTMLElement || root instanceof Document ? root : document;
+    scope.querySelectorAll('[data-hydration-form]').forEach((form) => {
+      if (!(form instanceof HTMLFormElement)) return;
+      const input = form.querySelector('#hydrationInput');
+      if (!(input instanceof HTMLInputElement)) return;
+      if (input.dataset.hydrationBound === '1') return;
+      input.dataset.hydrationBound = '1';
+      input.addEventListener('input', () => {
+        const compact = String(input.value || '')
+          .replace(',', '.')
+          .replace(/[^\d.]/g, '');
+        const parts = compact.split('.');
+        const intPart = (parts[0] || '').slice(0, 1);
+        const fracPart = (parts[1] || '').slice(0, 1);
+        const normalized = fracPart ? `${intPart}.${fracPart}` : intPart;
+        input.value = normalized.slice(0, 3);
+        if (input.value.trim()) showHydrationHint('');
+      });
+    });
+  }
+
   function bindEvents() {
     document.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
 
-      const storyBtn = target.closest('[data-story-index]');
-      if (storyBtn) {
+      if (target.closest('[data-hydration-form], .blogv2-hydration-card')) {
+        return;
+      }
+
+      if (target.closest('[data-post-reader-close="true"]')) {
+        closePostReader();
+        return;
+      }
+
+      const readBtn = target.closest('[data-read-post]');
+      if (readBtn) {
+        const postId = String(readBtn.getAttribute('data-read-post') || '').trim();
+        if (postId) openPostReader(postId);
+        return;
+      }
+
+      const storyBtn = target.closest('button.blogv2-story[data-story-index]');
+      if (storyBtn && !target.closest('[data-hydration-form], .blogv2-hydration-card')) {
+        event.preventDefault();
+        event.stopPropagation();
         openStory(Number(storyBtn.getAttribute('data-story-index')));
         return;
       }
@@ -1107,15 +1390,17 @@
 
       const likeBtn = target.closest('[data-like]');
       if (likeBtn) {
+        event.stopPropagation();
         if (!requireAuthorizedAction()) return;
         const postId = likeBtn.getAttribute('data-like');
         animateReaction(likeBtn, event);
-        updatePost(postId, (post) => ({ ...post, likes: (post.likes || 0) + 1 }));
+        updatePost(postId, (post) => ({ ...post, likes: (post.likes || 0) + 1 }), { op: 'like' });
         return;
       }
 
       const saveBtn = target.closest('[data-save]');
       if (saveBtn) {
+        event.stopPropagation();
         if (!requireAuthorizedAction()) return;
         const postId = saveBtn.getAttribute('data-save');
         animateReaction(saveBtn, event);
@@ -1125,26 +1410,31 @@
 
       const reactBtn = target.closest('[data-react-kind]');
       if (reactBtn) {
+        event.stopPropagation();
         if (!requireAuthorizedAction()) return;
         const postId = reactBtn.getAttribute('data-react-post');
         const reactionType = reactBtn.getAttribute('data-react-kind');
         if (!postId || !reactionType) return;
         animateReaction(reactBtn, event);
-        updatePost(postId, (post) => {
-          const reactions = post.reactions || {};
-          const normalizedType = reactionType === 'try' ? 'tryIt' : reactionType;
-          const currentValue =
-            normalizedType === 'tryIt'
-              ? (reactions.tryIt || reactions.try || 0)
-              : (reactions[normalizedType] || 0);
-          return {
-            ...post,
-            reactions: {
-              ...reactions,
-              [normalizedType]: currentValue + 1,
-            },
-          };
-        });
+        const normalizedType = reactionType === 'try' ? 'tryIt' : reactionType;
+        updatePost(
+          postId,
+          (post) => {
+            const reactions = post.reactions || {};
+            const currentValue =
+              normalizedType === 'tryIt'
+                ? (reactions.tryIt || reactions.try || 0)
+                : (reactions[normalizedType] || 0);
+            return {
+              ...post,
+              reactions: {
+                ...reactions,
+                [normalizedType]: currentValue + 1,
+              },
+            };
+          },
+          { op: 'react', kind: normalizedType }
+        );
         return;
       }
 
@@ -1217,36 +1507,6 @@
         return;
       }
 
-      const readBtn = target.closest('[data-read-post]');
-      if (readBtn) {
-        const postId = String(readBtn.getAttribute('data-read-post') || '');
-        const root = document.querySelector(`article.blogv2-post[data-post-id="${cssEscapeSel(postId)}"]`);
-        const excerptEl = root?.querySelector(':scope > .blogv2-post-body .blogv2-post-excerpt');
-        const details = root?.querySelector(':scope > .blogv2-post-body .blogv2-post-details');
-        if (excerptEl instanceof HTMLElement && details instanceof HTMLElement) {
-          excerptEl.hidden = true;
-          details.hidden = false;
-          readBtn.textContent = 'Открыто';
-          readBtn.setAttribute('disabled', 'true');
-          try {
-            if (postId && localStorage.getItem(FULLREAD_ONCE_PREFIX + postId) !== '1') {
-              localStorage.setItem(FULLREAD_ONCE_PREFIX + postId, '1');
-              const total = incrementPostFullRead(postId);
-              const i = state.posts.findIndex((p) => p.id === postId);
-              if (i >= 0) {
-                state.posts[i] = { ...state.posts[i], views: total };
-                savePosts();
-              }
-              const readsBadge = root?.querySelector('.blogv2-post-reads');
-              if (readsBadge) readsBadge.textContent = `👁 ${total}`;
-            }
-          } catch {
-            /* private mode и т.п. */
-          }
-        }
-        return;
-      }
-
       const focusBtn = target.closest('[data-focus-comments]');
       if (focusBtn) {
         const postId = focusBtn.getAttribute('data-focus-comments');
@@ -1257,16 +1517,21 @@
 
       const commentLikeBtn = target.closest('[data-comment-like]');
       if (commentLikeBtn) {
+        event.stopPropagation();
         if (!requireAuthorizedAction()) return;
         const payload = commentLikeBtn.getAttribute('data-comment-like') || '';
         const [postId, commentId] = payload.split(':');
         animateReaction(commentLikeBtn, event);
-        updatePost(postId, (post) => ({
-          ...post,
-          comments: (post.comments || []).map((comment) =>
-            comment.id === commentId ? { ...comment, likes: (comment.likes || 0) + 1 } : comment
-          ),
-        }));
+        updatePost(
+          postId,
+          (post) => ({
+            ...post,
+            comments: (post.comments || []).map((comment) =>
+              comment.id === commentId ? { ...comment, likes: (comment.likes || 0) + 1 } : comment
+            ),
+          }),
+          { op: 'commentLike', commentId }
+        );
         return;
       }
     });
@@ -1274,6 +1539,14 @@
     document.addEventListener('submit', (event) => {
       const form = event.target;
       if (!(form instanceof HTMLFormElement)) return;
+
+      if (form.matches('[data-hydration-form]')) {
+        event.preventDefault();
+        event.stopPropagation();
+        submitHydrationForm(form);
+        return;
+      }
+
       const postId = form.getAttribute('data-comment-form');
       if (!postId) return;
       event.preventDefault();
@@ -1282,18 +1555,22 @@
       if (!(textarea instanceof HTMLTextAreaElement)) return;
       const text = textarea.value.trim();
       if (!text) return;
-      updatePost(postId, (post) => ({
-        ...post,
-        comments: [
-          ...(post.comments || []),
-          {
-            id: `c_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
-            name: userName(),
-            text,
-            likes: 0,
-          },
-        ],
-      }));
+      updatePost(
+        postId,
+        (post) => ({
+          ...post,
+          comments: [
+            ...(post.comments || []),
+            {
+              id: `c_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
+              name: userName(),
+              text,
+              likes: 0,
+            },
+          ],
+        }),
+        { op: 'addComment', text }
+      );
       textarea.value = '';
       const limitEl = form.querySelector('[data-comment-limit]');
       const submitBtn = form.querySelector('button[type="submit"]');
@@ -1319,35 +1596,17 @@
       }
     });
 
-    const hydrationAddBtn = document.getElementById('hydrationAddBtn');
-    const hydrationInput = document.getElementById('hydrationInput');
-    if (hydrationAddBtn && hydrationInput) {
-      hydrationInput.addEventListener('input', () => {
-        const compact = String(hydrationInput.value || '')
-          .replace(',', '.')
-          .replace(/[^\d.]/g, '');
-        const parts = compact.split('.');
-        const intPart = (parts[0] || '').slice(0, 1);
-        const fracPart = (parts[1] || '').slice(0, 1);
-        const normalized = fracPart ? `${intPart}.${fracPart}` : intPart;
-        hydrationInput.value = normalized.slice(0, 3);
-      });
-      hydrationAddBtn.addEventListener('click', () => {
-        const value = Number(hydrationInput.value);
-        if (!Number.isFinite(value) || value <= 0) return;
-        state.water = Math.max(0, Math.min(HYDRATION_MAX, state.water + value));
-        hydrationInput.value = '';
-        saveWater();
-        renderHydration();
-      });
-    }
+    bindHydrationControls();
 
     document.addEventListener('keydown', (event) => {
-      const modal = document.getElementById('storyModal');
-      if (!modal || !modal.classList.contains('open')) return;
+      const storyModal = document.getElementById('storyModal');
+      const readerModal = document.getElementById('postReaderModal');
+      if (readerModal?.classList.contains('open') && event.key === 'Escape') {
+        closePostReader();
+        return;
+      }
+      if (!storyModal || !storyModal.classList.contains('open')) return;
       if (event.key === 'Escape') closeStory();
-      if (event.key === 'ArrowRight') goNextStory();
-      if (event.key === 'ArrowLeft') openStory(Math.max(0, state.storyIndex - 1));
     });
   }
 
@@ -1567,6 +1826,11 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     initState();
+    void hydrateBlogFromServer().then((loaded) => {
+      if (loaded) {
+        renderAll();
+      }
+    });
     renderAll();
     lockBlogForManager();
     bindEvents();
@@ -1577,22 +1841,12 @@
       if (event.key === BLOG_ADMIN_KEY || event.key === FEED_KEY) onBlogAdminDataUpdated();
     });
     const storyCtaBtn = document.getElementById('storyCtaBtn');
-    const storyPrevZone = document.getElementById('storyPrevZone');
-    const storyNextZone = document.getElementById('storyNextZone');
     const storyShell = document.querySelector('.blogv2-story-shell');
     if (storyCtaBtn) {
       storyCtaBtn.addEventListener('click', () => {
-        jumpToPost(storyCtaBtn.getAttribute('data-story-post-id'));
-      });
-    }
-    if (storyPrevZone) {
-      storyPrevZone.addEventListener('click', () => {
-        goPrevStory();
-      });
-    }
-    if (storyNextZone) {
-      storyNextZone.addEventListener('click', () => {
-        goNextStory();
+        const postId = String(storyCtaBtn.getAttribute('data-story-post-id') || '').trim();
+        closeStory();
+        if (postId) openPostReader(postId);
       });
     }
     if (storyShell instanceof HTMLElement) {
@@ -1601,7 +1855,7 @@
       pauseEvents.forEach((eventName) => {
         storyShell.addEventListener(eventName, (event) => {
           const target = event.target;
-          if (target instanceof HTMLElement && target.closest('[data-story-close="true"], #storyPrevZone, #storyNextZone, #storyCtaBtn')) {
+          if (target instanceof HTMLElement && target.closest('[data-story-close="true"], #storyCtaBtn')) {
             return;
           }
           pauseStoryPlayback();

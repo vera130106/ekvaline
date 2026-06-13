@@ -1739,7 +1739,7 @@ body.cabinet-page-full section {
   }
 
   body.client-site.community-page .blogv2-comment-form textarea,
-  body.client-site.community-page .blogv2-water-controls input {
+  body.client-site.community-page .blogv2-water-controls-row input {
     font-size: 16px;
     min-height: var(--mobile-touch);
     min-width: 0;
@@ -1760,13 +1760,14 @@ body.cabinet-page-full section {
     justify-content: center;
   }
 
-  body.client-site.community-page .blogv2-water-controls {
+  body.client-site.community-page .blogv2-water-controls-row {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.5rem;
     align-items: center;
   }
 
-  body.client-site.community-page .blogv2-water-controls .blogv2-btn.small {
+  body.client-site.community-page .blogv2-water-controls-row .blogv2-btn.small,
+  body.client-site.community-page .blogv2-hydration-add-btn {
     min-height: var(--mobile-touch);
     padding-inline: 0.85rem;
     white-space: nowrap;
@@ -1802,10 +1803,29 @@ body.cabinet-page-full section {
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.3rem;
-    border-radius: 10px;
+    gap: 0.4rem;
+    padding: 0.4rem 0.35rem;
+    border-radius: 999px;
     text-align: center;
+  }
+
+  body.client-site.community-page .blogv2-post-reactions .blogv2-action-emoji {
+    font-size: 1.1rem;
+  }
+
+  body.client-site.community-page .blogv2-post-reader-modal.open {
+    z-index: 1320;
+  }
+
+  body.client-site.community-page .blogv2-post-reader-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(94dvh, 100dvh);
+    border-radius: 18px 18px 0 0;
+  }
+
+  body.client-site.community-page .blogv2-post-reader-scroll {
+    padding-inline: max(0.75rem, env(safe-area-inset-left)) max(0.75rem, env(safe-area-inset-right));
   }
 
   body.client-site.community-page .blogv2-post-footer {

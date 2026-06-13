@@ -10,8 +10,8 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260619mapfix2" />
-    <link rel="stylesheet" href="responsive-mobile.css?v=20260619mapfix2" />
+    <link rel="stylesheet" href="styles.css?v=20260619pollmgr" />
+    <link rel="stylesheet" href="responsive-mobile.css?v=20260619pollmgr" />
   </head>
   <body class="client-site community-page">
     <header class="topbar">
@@ -103,20 +103,26 @@
             <div class="blogv2-water-track" aria-hidden="true">
               <div class="blogv2-water-fill" id="hydrationFill"></div>
             </div>
-            <label class="blogv2-input-label" for="hydrationInput">Добавить выпитую воду (л)</label>
-            <div class="blogv2-water-controls">
-              <input
-                id="hydrationInput"
-                type="number"
-                min="0.1"
-                max="5"
-                step="0.1"
-                inputmode="decimal"
-                maxlength="4"
-                placeholder="0.3"
-              />
-              <button type="button" class="blogv2-btn small" id="hydrationAddBtn">Добавить</button>
-            </div>
+            <form class="blogv2-water-controls" data-hydration-form novalidate>
+              <label class="blogv2-input-label" for="hydrationInput">Добавить выпитую воду (л)</label>
+              <div class="blogv2-water-controls-row">
+                <input
+                  id="hydrationInput"
+                  type="number"
+                  min="0.1"
+                  max="5"
+                  step="0.1"
+                  inputmode="decimal"
+                  maxlength="4"
+                  placeholder="0.3"
+                  aria-describedby="hydrationInputHint"
+                />
+                <button type="submit" class="blogv2-btn small blogv2-hydration-add-btn" id="hydrationAddBtn" data-hydration-add>
+                  Добавить
+                </button>
+              </div>
+              <p class="blogv2-hydration-hint" id="hydrationInputHint" hidden></p>
+            </form>
           </section>
 
           <section class="blogv2-card" id="hydrationPollCard" hidden>
@@ -127,18 +133,24 @@
         </aside>
       </section>
 
+      <div class="blogv2-post-reader-modal" id="postReaderModal" aria-hidden="true">
+        <div class="blogv2-post-reader-backdrop" data-post-reader-close="true"></div>
+        <div class="blogv2-post-reader-card" role="dialog" aria-modal="true" aria-labelledby="postReaderTitle">
+          <button type="button" class="blogv2-post-reader-close" data-post-reader-close="true" aria-label="Закрыть">×</button>
+          <div class="blogv2-post-reader-scroll" id="postReaderBody"></div>
+        </div>
+      </div>
+
       <div class="blogv2-story-modal" id="storyModal" aria-hidden="true">
         <div class="blogv2-story-backdrop" data-story-close="true"></div>
         <div class="blogv2-story-shell" role="dialog" aria-modal="true" aria-labelledby="storyTitle">
           <div class="blogv2-story-progress" id="storyProgress"></div>
-          <button type="button" class="blogv2-story-tap-zone blogv2-story-tap-zone-prev" id="storyPrevZone" aria-label="Предыдущая история"></button>
-          <button type="button" class="blogv2-story-tap-zone blogv2-story-tap-zone-next" id="storyNextZone" aria-label="Следующая история"></button>
           <button type="button" class="blogv2-story-close" data-story-close="true" aria-label="Закрыть">×</button>
           <div class="blogv2-story-content">
             <p class="blogv2-story-kicker" id="storyKicker">История</p>
             <h3 id="storyTitle"></h3>
             <p id="storyBody"></p>
-            <button type="button" class="blogv2-story-cta" id="storyCtaBtn">К посту</button>
+            <button type="button" class="blogv2-story-cta" id="storyCtaBtn">Читать полностью</button>
           </div>
         </div>
       </div>
@@ -186,15 +198,15 @@
       </div>
     </footer>
 
-    <script src="mobile-nav.js?v=20260619mapfix2"></script>
+    <script src="mobile-nav.js?v=20260619pollmgr"></script>
     <script src="app-core.js?v=20260425-2"></script>
     <script src="api-client.js?v=20260425-2"></script>
-    <script src="notifications-client.js?v=20260619mapfix2"></script>
-    <script src="maps-runtime.js?v=20260619mapfix2"></script>
+    <script src="notifications-client.js?v=20260619pollmgr"></script>
+    <script src="maps-runtime.js?v=20260619pollmgr"></script>
     <script src="/ekvaline-runtime.js"></script>
-    <script src="auth-password.js?v=20260619mapfix2"></script>
+    <script src="auth-password.js?v=20260619pollmgr"></script>
     <script src="password-visibility.js?v=20260610pwdvis"></script>
-    <script src="script.js?v=20260619mapfix2"></script>
-    <script src="community.js?v=20260619mapfix2"></script>
+    <script src="script.js?v=20260619pollmgr"></script>
+    <script src="community.js?v=20260619pollmgr"></script>
   </body>
 </html>

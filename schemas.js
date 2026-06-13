@@ -488,6 +488,74 @@ const blogHydrationPollPutSchema = Joi.object({
     .required(),
 });
 
+const blogCommentSchema = Joi.object({
+  id: Joi.string().trim().min(1).max(80).required(),
+  name: Joi.string().trim().max(80).allow('').required(),
+  text: Joi.string().trim().min(1).max(500).required(),
+  likes: Joi.number().integer().min(0).default(0),
+  userId: Joi.alternatives().try(Joi.number().integer().positive(), Joi.valid(null)).optional(),
+  createdAt: Joi.string().trim().max(40).allow('').optional(),
+  replies: Joi.array().items(Joi.object()).max(20).optional(),
+}).unknown(true);
+
+const blogPostSchema = Joi.object({
+  id: Joi.string().trim().min(1).max(40).required(),
+  title: Joi.string().trim().min(1).max(120).required(),
+  excerpt: Joi.string().trim().max(400).allow('').required(),
+  details: Joi.string().trim().max(4000).allow('').optional(),
+  image: Joi.string().trim().max(280).allow('').required(),
+  imageMode: Joi.string().valid('cover', 'contain').optional(),
+  imageBg: Joi.string().trim().max(20).allow('').optional(),
+  readTime: Joi.string().trim().max(20).allow('').optional(),
+  createdAt: Joi.string().trim().max(40).required(),
+  likes: Joi.number().integer().min(0).default(0),
+  views: Joi.number().integer().min(0).optional(),
+  comments: Joi.array().items(blogCommentSchema).max(200).default([]),
+  reactions: Joi.object({
+    useful: Joi.number().integer().min(0).default(0),
+    new: Joi.number().integer().min(0).default(0),
+    tryIt: Joi.number().integer().min(0).default(0),
+  }).default({ useful: 0, new: 0, tryIt: 0 }),
+  saved: Joi.boolean().optional(),
+}).unknown(true);
+
+const blogAdminDataSchema = Joi.object({
+  factOfDay: Joi.string().trim().max(400).allow('').required(),
+  hiddenPostIds: Joi.array().items(Joi.string().trim().max(40)).max(50).required(),
+  extraStories: Joi.array().items(Joi.object()).max(30).required(),
+  storyOverrides: Joi.object().required(),
+  tips: Joi.array().items(Joi.string().trim().max(120)).max(20).required(),
+  recipes: Joi.array().items(Joi.string().trim().max(120)).max(20).required(),
+  popular: Joi.array().items(Joi.string().trim().max(120)).max(20).required(),
+  blockTitles: Joi.object().required(),
+  hydrationPoll: Joi.alternatives().try(Joi.object().unknown(true), Joi.valid(null)).required(),
+}).unknown(true);
+
+const blogManagerPutSchema = Joi.object({
+  posts: Joi.array().items(blogPostSchema).max(50).required(),
+  admin: blogAdminDataSchema.required(),
+  reads: Joi.object().pattern(Joi.string(), Joi.number().integer().min(0)).optional(),
+});
+
+const blogEngagementSchema = Joi.object({
+  op: Joi.string().valid('like', 'react', 'addComment', 'commentLike', 'fullRead').required(),
+  kind: Joi.string().valid('useful', 'new', 'tryIt', 'try').when('op', {
+    is: 'react',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  text: Joi.string().trim().min(1).max(500).when('op', {
+    is: 'addComment',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  commentId: Joi.string().trim().min(1).max(80).when('op', {
+    is: 'commentLike',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+});
+
 /** Сертификаты на странице «О компании». */
 const aboutCertificatePdfPathSchema = Joi.string()
   .trim()
@@ -690,6 +758,8 @@ module.exports = {
   sitePollOptionSchema,
   pollVoteSchema,
   blogHydrationPollPutSchema,
+  blogManagerPutSchema,
+  blogEngagementSchema,
   aboutCertificateItemSchema,
   deliveryCoverageCardSchema,
   deliveryCoveragePanelSchema,
