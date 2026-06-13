@@ -2008,6 +2008,26 @@ body {
 
 .map-picker-card .checkout-map-address {
   margin: 0 0 0.55rem;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.map-picker-card .checkout-map-root {
+  min-height: 168px;
+}
+
+.map-picker-card .checkout-map-root.ek-map-host,
+.map-picker-card .checkout-map-root > ymaps,
+.map-picker-card .checkout-map-root [class*='ymaps'][class*='-map'],
+.map-picker-card .checkout-map-root [class*='-ground-pane'],
+.map-picker-card .checkout-map-root [class*='-events-pane'],
+.map-picker-card .checkout-map-root [class*='-layers-pane'] {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
 }
 
 .checkout-map-layout {
@@ -2516,10 +2536,8 @@ button.opx-zone-popup-cc {
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
-    gap: 0.65rem;
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    gap: 0.5rem;
+    overflow: hidden;
     grid-template-areas: none;
     grid-template-columns: 1fr;
   }
@@ -2528,16 +2546,20 @@ button.opx-zone-popup-cc {
     flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
-    height: clamp(180px, 32dvh, 220px);
-    min-height: 180px;
+    height: clamp(168px, 30dvh, 210px);
+    min-height: 168px;
+    max-height: 210px;
     border-radius: 14px;
   }
 
   .map-picker-card .checkout-map-panel {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-height: 0;
     max-height: none;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 0;
     border: 0;
     background: transparent;
@@ -2547,6 +2569,7 @@ button.opx-zone-popup-cc {
     overflow: visible;
     max-height: none;
     padding-right: 0;
+    gap: 0.45rem;
   }
 
   .map-picker-card .map-picker-actions-bar {

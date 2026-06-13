@@ -269,6 +269,10 @@
 
     function invalidateSize() {
       try {
+        if (container instanceof HTMLElement) {
+          void container.offsetWidth;
+          void container.offsetHeight;
+        }
         map.container.fitToViewport();
       } catch (_) {
         /**/

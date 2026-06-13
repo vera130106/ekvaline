@@ -1307,20 +1307,21 @@ body.cabinet-page-full section {
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
+    overflow: hidden;
     grid-template-areas: none;
     grid-template-columns: 1fr;
+    gap: 0.5rem;
   }
 
   body.client-site .cart-modal-card.map-picker-card .checkout-map-panel,
   body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-panel {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-height: 0;
     max-height: none;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     border: 0;
     background: transparent;
     padding: 0;
@@ -1331,15 +1332,17 @@ body.cabinet-page-full section {
     overflow: visible;
     max-height: none;
     min-width: 0;
+    gap: 0.45rem;
   }
 
   body.client-site .cart-modal-card.map-picker-card .checkout-map-root,
   body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root {
     flex: 0 0 auto;
     order: unset;
-    height: clamp(180px, 32dvh, 220px);
-    min-height: 180px;
-    margin-bottom: 0.65rem;
+    height: clamp(168px, 30dvh, 210px);
+    min-height: 168px;
+    max-height: 210px;
+    margin-bottom: 0;
     overflow: hidden;
   }
 
@@ -1353,11 +1356,18 @@ body.cabinet-page-full section {
     box-shadow: 0 -8px 22px rgba(16, 44, 76, 0.07);
   }
 
-  body.client-site .cart-modal-card.map-picker-card .checkout-map-root ymaps,
+  body.client-site .cart-modal-card.map-picker-card .checkout-map-root.ek-map-host,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root.ek-map-host,
+  body.client-site .cart-modal-card.map-picker-card .checkout-map-root > ymaps,
+  body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root > ymaps,
+  body.client-site .cart-modal-card.map-picker-card .checkout-map-root [class*='ymaps'][class*='-map'],
   body.cabinet-page-full .cart-modal-card.map-picker-card .checkout-map-root [class*='ymaps'][class*='-map'] {
-    max-width: 100% !important;
+    position: absolute !important;
+    inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
   }
 
   body.client-site #mapPickerModal.open .map-picker-card,

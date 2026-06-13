@@ -3317,6 +3317,48 @@
     if (mapStreetInput instanceof HTMLInputElement) mapStreetInput.focus();
   }
 
+  let mapPickerResizeObserver = null;
+  let mapInitedWhileHidden = false;
+
+  function isMapPickerVisible() {
+    return mapPickerModal?.classList.contains('open') === true;
+  }
+
+  function destroyMapPickerMap() {
+    mapPickerResizeObserver?.disconnect?.();
+    mapPickerResizeObserver = null;
+    if (checkoutMapCtl && typeof checkoutMapCtl.destroy === 'function') {
+      try {
+        checkoutMapCtl.destroy();
+      } catch {
+        /**/
+      }
+    }
+    checkoutMapCtl = null;
+    mapInitedWhileHidden = false;
+  }
+
+  function scheduleMapPickerResize() {
+    const run = () => checkoutMapCtl?.invalidateSize?.();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(run));
+    [120, 350, 700, 1200].forEach((ms) => window.setTimeout(run, ms));
+  }
+
+  function bindMapPickerResizeObserver() {
+    if (!(checkoutMapRoot instanceof HTMLElement) || typeof ResizeObserver !== 'function') return;
+    mapPickerResizeObserver?.disconnect?.();
+    mapPickerResizeObserver = new ResizeObserver(() => {
+      if (isMapPickerVisible()) checkoutMapCtl?.invalidateSize?.();
+    });
+    mapPickerResizeObserver.observe(checkoutMapRoot);
+  }
+
+  function waitMapPickerPaint() {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    });
+  }
+
   async function initMapPicker() {
     if (!(checkoutMapRoot instanceof HTMLElement)) return;
     const EM = window.EkvalineMaps;
@@ -3324,6 +3366,13 @@
       checkoutMapRoot.innerHTML =
         '<div class="ek-map-unavailable" role="status">Карта недоступна — заполните поля адреса ниже (улица, дом, квартира).</div>';
       return;
+    }
+    if (!isMapPickerVisible()) {
+      mapInitedWhileHidden = Boolean(checkoutMapCtl) || mapInitedWhileHidden;
+      return;
+    }
+    if (checkoutMapCtl && mapInitedWhileHidden) {
+      destroyMapPickerMap();
     }
     if (!checkoutMapCtl) {
       checkoutMapCtl = await EM.attachInteractiveMap(
@@ -3345,9 +3394,10 @@
           },
         }
       );
+      mapInitedWhileHidden = false;
+      bindMapPickerResizeObserver();
     }
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize?.()));
-    window.setTimeout(() => checkoutMapCtl?.invalidateSize?.(), 400);
+    scheduleMapPickerResize();
   }
 
   function parseFormattedAddressLine(line) {
@@ -3398,6 +3448,8 @@
     mapPickerModal?.setAttribute('aria-hidden', 'false');
     document.body.classList.add('map-picker-open');
     document.body.style.overflow = 'hidden';
+    await waitMapPickerPaint();
+    destroyMapPickerMap();
     try {
       await initMapPicker();
       const p = readAddressParts();
@@ -3413,7 +3465,7 @@
         'info'
       );
     }
-    window.setTimeout(() => checkoutMapCtl?.invalidateSize?.(), 500);
+    scheduleMapPickerResize();
   }
 
   function closeMapPicker() {
@@ -4094,16 +4146,7 @@
   updateStreetClearButton();
 
   function warmMapPicker() {
-    if (!(checkoutMapRoot instanceof HTMLElement)) return;
     window.EkvalineMaps?.prefetch?.();
-    const run = () => {
-      void initMapPicker().catch(() => {});
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(run, { timeout: 2500 });
-    } else {
-      window.setTimeout(run, 600);
-    }
   }
 
   window.EkvalineMapPicker = {
