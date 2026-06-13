@@ -1773,6 +1773,7 @@
         <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
         <p class="checkout-subtitle">Заполните поля или отметьте дом на карте. Доставка только по Оренбургу.</p>
         <div class="checkout-map-layout">
+          <div id="checkoutMapRoot" class="checkout-map-root" aria-label="Карта выбора адреса"></div>
           <aside class="checkout-map-panel">
             <div class="checkout-map-panel-fields">
             <label class="checkout-field checkout-map-field">Город
@@ -1804,17 +1805,16 @@
             </p>
             <datalist id="mapCitySuggestions"></datalist>
             </div>
-            <div class="checkout-map-panel-footer">
-            <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
-            <div class="checkout-map-panel-actions checkout-map-panel-actions-main">
-              <button type="button" class="checkout-map-action-btn" id="findMapAddressBtn">Найти</button>
-              <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
-              <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn" disabled>Выбрать</button>
-              <button type="button" class="checkout-map-action-btn" data-map-close="true">Отмена</button>
-            </div>
-            </div>
           </aside>
-          <div id="checkoutMapRoot" class="checkout-map-root"></div>
+        </div>
+        <div class="map-picker-actions-bar">
+          <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
+          <div class="checkout-map-panel-actions checkout-map-panel-actions-main">
+            <button type="button" class="checkout-map-action-btn" id="findMapAddressBtn">Найти</button>
+            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
+            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn" disabled>Выбрать</button>
+            <button type="button" class="checkout-map-action-btn" data-map-close="true">Отмена</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -1897,18 +1897,15 @@
     <div id="orderSuccessModal" class="order-success-modal" aria-hidden="true">
       <div class="order-success-backdrop" data-order-success-close="true"></div>
       <div class="order-success-card" role="dialog" aria-modal="true" aria-labelledby="orderSuccessTitle">
-        <div class="order-success-icon" aria-hidden="true">✓</div>
+        <button type="button" class="order-success-close" data-order-success-close="true" aria-label="Закрыть">×</button>
         <p class="order-success-kicker">Заказ оформлен</p>
         <h3 id="orderSuccessTitle">Заявка принята</h3>
         <dl class="order-success-details" id="orderSuccessDetails"></dl>
         <p class="order-success-note" id="orderSuccessNote"></p>
         <div class="order-success-actions">
-          <a href="cabinet.html" class="order-success-btn order-success-btn-primary" id="orderSuccessCabinetBtn">
-            Личный кабинет
-          </a>
           <button
             type="button"
-            class="order-success-btn order-success-btn-secondary"
+            class="order-success-btn"
             id="orderSuccessContinueBtn"
             data-order-success-close="true"
           >
@@ -2060,7 +2057,7 @@
       <div><dt>Итого к оплате</dt><dd><strong>${total} ₽</strong></dd></div>
     `;
     if (note instanceof HTMLElement) {
-      note.textContent = `Статус «В обработке» — оператор подтвердит доставку. Начислено бонусов: ${bonusEarned}. Следите за статусом в личном кабинете и в уведомлениях на сайте.`;
+      note.textContent = `Статус «В обработке» — оператор подтвердит доставку. Начислено бонусов: ${bonusEarned}. Следите за статусом в уведомлениях на сайте.`;
     }
 
     modal.classList.add('open');
@@ -3350,6 +3347,7 @@
       );
     }
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => checkoutMapCtl?.invalidateSize?.()));
+    window.setTimeout(() => checkoutMapCtl?.invalidateSize?.(), 400);
   }
 
   function parseFormattedAddressLine(line) {
@@ -3415,6 +3413,7 @@
         'info'
       );
     }
+    window.setTimeout(() => checkoutMapCtl?.invalidateSize?.(), 500);
   }
 
   function closeMapPicker() {

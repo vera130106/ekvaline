@@ -39,7 +39,7 @@ must('mobile-nav.js', 'EkvalineSiteNav', 'закрытие меню перед �
 must('script.js', 'EkvalineSiteNav?.close', 'вход закрывает мобильное меню');
 must('script.js', 'bindCheckoutDatePickerEvents', 'выбор даты оформления на mobile');
 must('responsive-mobile.css', 'checkout-map-panel-fields', 'прокрутка полей адреса');
-must('responsive-mobile.css', 'checkout-map-panel-actions-main', 'кнопки адреса на карте');
+must('responsive-mobile.css', 'map-picker-actions-bar', 'кнопки карты адреса');
 
 must('operator-mobile.css', 'opx-map-card', 'карта адреса оператора');
 must('operator-mobile.css', 'opx-zone-map-canvas', 'карта зон оператора');

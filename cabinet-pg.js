@@ -451,27 +451,30 @@
     });
   }
 
-  function renderCabinetSlotOptions(dateIso, selectedKey) {
-    const slots = availableCabinetSlots(dateIso);
-    if (!slots.length) {
-      return '<option value="">Нет доступных интервалов на эту дату</option>';
+  function renderCabinetSlotFieldHtml(dateIso, selectedKey) {
+    if (!availableCabinetSlots(dateIso).length) {
+      return '<p class="cabinet-order-slot-empty">Нет доступных интервалов на эту дату</p>';
     }
-    return slots
-      .map((s) => {
-        const sel = s.key === selectedKey ? ' selected' : '';
-        return `<option value="${escapeHtml(s.key)}"${sel}>${escapeHtml(s.label)}</option>`;
-      })
-      .join('');
+    const buttons = CABINET_SLOT_DEFS.map((def) => {
+      const closed = isCabinetSlotClosed(dateIso, def.key);
+      const active = def.key === selectedKey && !closed;
+      if (closed) {
+        return `<button type="button" class="cabinet-slot-chip is-unavailable" disabled title="Интервал закрыт оператором">${escapeHtml(def.label)}</button>`;
+      }
+      return `<button type="button" class="cabinet-slot-chip${active ? ' is-active' : ''}" data-cabinet-slot="${escapeHtml(def.key)}" role="radio" aria-checked="${active ? 'true' : 'false'}">${escapeHtml(def.label)}</button>`;
+    }).join('');
+    return `<div class="cabinet-order-slot-picker" role="radiogroup" aria-label="Интервал доставки">${buttons}</div>`;
   }
 
   function syncCabinetOrderBookingForm(form) {
     if (!(form instanceof HTMLFormElement)) return;
     const hiddenDate = form.elements.namedItem('delivery_date');
-    const selectSlot = form.elements.namedItem('delivery_slot');
+    const hiddenSlot = form.elements.namedItem('delivery_slot');
     const dateField = form.querySelector('.cabinet-order-date-field');
     const calendarMount = form.querySelector('.cabinet-order-date-calendar');
     const triggerLabel = form.querySelector('.cabinet-order-date-trigger-label');
-    if (!(hiddenDate instanceof HTMLInputElement) || !(selectSlot instanceof HTMLSelectElement) || !dateField) return;
+    const slotField = form.querySelector('.cabinet-order-slot-field');
+    if (!(hiddenDate instanceof HTMLInputElement) || !(hiddenSlot instanceof HTMLInputElement) || !dateField) return;
 
     const orderId = Number(form.getAttribute('data-order-id'));
     const order = currentOrders.find((o) => Number(o.id) === orderId);
@@ -489,11 +492,13 @@
       triggerLabel.textContent = cabinetDateTriggerLabel(date);
     }
 
-    const wantSlot = normalizeCabinetSlotKey(selectSlot.value || order?.delivery_slot);
+    const wantSlot = normalizeCabinetSlotKey(hiddenSlot.value || order?.delivery_slot);
     const slot = wantSlot && !isCabinetSlotClosed(date, wantSlot) ? wantSlot : initialCabinetEditSlot(order || {}, date);
-    selectSlot.innerHTML = renderCabinetSlotOptions(date, slot);
-    selectSlot.value = slot;
-    selectSlot.disabled = !availableCabinetSlots(date).length;
+    hiddenSlot.value = slot;
+    hiddenSlot.disabled = !availableCabinetSlots(date).length;
+    if (slotField instanceof HTMLElement) {
+      slotField.innerHTML = renderCabinetSlotFieldHtml(date, slot);
+    }
   }
 
   function initCabinetOrderEditForms() {
@@ -913,10 +918,10 @@
         ${
           editable
             ? `<form class="cabinet-order-edit-form" data-order-id="${order.id}">
-                <label>Изменить адрес
-                  <input type="text" name="address" maxlength="180" value="${escapeHtml(order.address || '')}" />
+                <label class="cabinet-order-field">Изменить адрес
+                  <input type="text" name="address" maxlength="180" value="${escapeHtml(order.address || '')}" autocomplete="street-address" />
                 </label>
-                <label>Дата доставки
+                <label class="cabinet-order-field">Дата доставки
                   <input type="hidden" name="delivery_date" value="${escapeHtml(editDate)}" />
                   <div class="cabinet-order-date-field">
                     <button type="button" class="cabinet-order-date-trigger" data-cabinet-date-trigger aria-expanded="false" aria-haspopup="dialog">
@@ -929,12 +934,11 @@
                   </div>
                   <span class="cabinet-order-date-hint">${escapeHtml(CABINET_DELIVERY_HINT)}</span>
                 </label>
-                <label>Интервал
-                  <select name="delivery_slot" required>
-                    ${renderCabinetSlotOptions(editDate, editSlot)}
-                  </select>
+                <label class="cabinet-order-field">Интервал
+                  <input type="hidden" name="delivery_slot" value="${escapeHtml(editSlot)}" required />
+                  <div class="cabinet-order-slot-field"></div>
                 </label>
-                <label>Причина изменения или переноса (обязательно при сохранении)
+                <label class="cabinet-order-field">Причина изменения (обязательно)
                   <textarea name="change_reason" maxlength="2000" rows="3" placeholder="Укажите, почему меняются адрес или доставка"></textarea>
                 </label>
                 <div class="cabinet-order-edit-actions">
@@ -1578,6 +1582,20 @@
       if (hiddenDate instanceof HTMLInputElement) hiddenDate.value = iso;
       const field = chip.closest('.cabinet-order-date-field');
       if (field instanceof HTMLElement) setCabinetDatePopoverOpen(field, false);
+      syncCabinetOrderBookingForm(form);
+      return;
+    }
+
+    const slotChip = target instanceof Element ? target.closest('[data-cabinet-slot]') : null;
+    if (slotChip instanceof HTMLButtonElement) {
+      const form = slotChip.closest('.cabinet-order-edit-form');
+      if (!(form instanceof HTMLFormElement)) return;
+      const key = String(slotChip.getAttribute('data-cabinet-slot') || '').trim();
+      const hiddenDate = form.elements.namedItem('delivery_date');
+      const dateIso = hiddenDate instanceof HTMLInputElement ? hiddenDate.value : '';
+      if (isCabinetSlotClosed(dateIso, key)) return;
+      const hiddenSlot = form.elements.namedItem('delivery_slot');
+      if (hiddenSlot instanceof HTMLInputElement) hiddenSlot.value = key;
       syncCabinetOrderBookingForm(form);
       return;
     }
