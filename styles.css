@@ -4810,10 +4810,10 @@ h1 span {
 
 .catalog-modal-image-vatten {
   width: auto;
-  height: min(440px, 58vh);
-  max-width: 100%;
+  height: min(280px, 38vh);
+  max-width: min(220px, 72%);
   object-fit: contain;
-  transform: scale(1.18);
+  transform: none;
   transform-origin: center center;
 }
 
@@ -5084,17 +5084,17 @@ h1 span {
   }
 
   .catalog-modal-image-wrap-clean {
-    min-height: clamp(340px, 72vw, 460px);
-    padding: 0.1rem;
+    min-height: clamp(210px, 46vw, 280px);
+    padding: 0.65rem 0.5rem;
     order: -1;
   }
 
   .catalog-modal-image-vatten {
-    width: min(92vw, 340px);
+    width: min(58vw, 200px);
     height: auto;
-    max-height: min(520px, 68vh);
-    max-width: none;
-    transform: scale(1.42);
+    max-height: min(240px, 34vh);
+    max-width: 100%;
+    transform: none;
   }
 
   .catalog-modal-image-ael {
@@ -6966,11 +6966,16 @@ button.about-cert-btn {
   grid-template-columns: 1.15fr 0.85fr;
   gap: 1rem;
   align-items: start;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .delivery-map-board {
   position: relative;
   aspect-ratio: 16 / 9;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border-radius: 28px;
   border: 1px solid #e4edf9;
   background:
@@ -6978,6 +6983,9 @@ button.about-cert-btn {
     radial-gradient(circle at 18% 82%, rgba(109, 197, 255, 0.12), transparent 40%),
     linear-gradient(150deg, rgba(255, 255, 255, 0.97), rgba(231, 244, 255, 0.9));
   overflow: hidden;
+  clip-path: inset(0 round 28px);
+  isolation: isolate;
+  contain: paint;
   box-shadow: 0 20px 36px rgba(16, 57, 104, 0.12);
 }
 
@@ -6985,6 +6993,23 @@ button.about-cert-btn {
   position: absolute;
   inset: 0;
   z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  clip-path: inset(0 round 28px);
+}
+
+.delivery-yandex-map ymaps,
+.delivery-yandex-map [class*='ymaps'][class*='-map'],
+.delivery-yandex-map [class*='-ground-pane'],
+.delivery-yandex-map [class*='-events-pane'],
+.delivery-yandex-map [class*='-layers-pane'] {
+  border-radius: inherit !important;
+  overflow: hidden !important;
+}
+
+.delivery-map-board [class*='controls__toolbar'],
+.delivery-map-board [class*='controls__control'] {
+  margin: 10px !important;
 }
 
 .delivery-zone-title {
@@ -7693,6 +7718,17 @@ button.about-cert-btn {
 
   .delivery-map-board {
     min-height: 280px;
+    border-radius: 20px;
+    clip-path: inset(0 round 20px);
+  }
+
+  .delivery-yandex-map {
+    clip-path: inset(0 round 20px);
+  }
+
+  .delivery-map-board [class*='controls__toolbar'],
+  .delivery-map-board [class*='controls__control'] {
+    margin: 8px !important;
   }
 
   .zone-tooltip {

@@ -839,8 +839,38 @@ body.cabinet-page-full section {
     grid-template-columns: 1fr !important;
   }
 
+  body.client-site.delivery-page .delivery-map-section .container {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
   body.client-site.delivery-page .delivery-map-board {
-    min-height: 240px;
+    width: 100%;
+    max-width: 100%;
+    min-height: clamp(220px, 56vw, 320px);
+    aspect-ratio: 4 / 3;
+    border-radius: 18px;
+    clip-path: inset(0 round 18px);
+    overflow: hidden;
+  }
+
+  body.client-site.delivery-page .delivery-yandex-map {
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    clip-path: inset(0 round 18px);
+  }
+
+  body.client-site.delivery-page .delivery-yandex-map ymaps,
+  body.client-site.delivery-page .delivery-yandex-map [class*='ymaps'][class*='-map'] {
+    max-width: 100% !important;
+    border-radius: inherit !important;
+    overflow: hidden !important;
+  }
+
+  body.client-site.delivery-page .delivery-map-board [class*='controls__toolbar'],
+  body.client-site.delivery-page .delivery-map-board [class*='controls__control'] {
+    margin: max(6px, env(safe-area-inset-left, 0px)) !important;
   }
 
   /* в”Ђв”Ђ Рћ РєРѕРјРїР°РЅРёРё / РєРѕРЅС‚Р°РєС‚С‹ в”Ђв”Ђ */
