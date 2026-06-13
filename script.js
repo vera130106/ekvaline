@@ -1769,11 +1769,17 @@
     <div class="cart-modal" id="mapPickerModal" aria-hidden="true">
       <div class="cart-modal-overlay" data-map-close="true"></div>
       <div class="cart-modal-card map-picker-card" role="dialog" aria-modal="true" aria-labelledby="mapPickerTitle">
-        <button type="button" class="cart-modal-close" data-map-close="true">×</button>
-        <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
-        <p class="checkout-subtitle">Заполните поля или отметьте дом на карте. Доставка только по Оренбургу.</p>
-        <div class="checkout-map-layout">
+        <header class="map-picker-head">
+          <div class="map-picker-head-text">
+            <h3 id="mapPickerTitle">Выбор адреса на карте</h3>
+            <p class="checkout-subtitle">Заполните поля или отметьте дом на карте. Доставка только по Оренбургу.</p>
+          </div>
+          <button type="button" class="cart-modal-close map-picker-close" data-map-close="true" aria-label="Закрыть">×</button>
+        </header>
+        <div class="map-picker-map-zone">
           <div id="checkoutMapRoot" class="checkout-map-root" aria-label="Карта выбора адреса"></div>
+        </div>
+        <div class="map-picker-fields-zone">
           <aside class="checkout-map-panel">
             <div class="checkout-map-panel-fields">
             <label class="checkout-field checkout-map-field">Город
@@ -1808,12 +1814,10 @@
           </aside>
         </div>
         <div class="map-picker-actions-bar">
-          <p id="checkoutMapAddress" class="checkout-map-address">Адрес не выбран.</p>
-          <div class="checkout-map-panel-actions checkout-map-panel-actions-main">
-            <button type="button" class="checkout-map-action-btn" id="findMapAddressBtn">Найти</button>
+          <p id="checkoutMapAddress" class="checkout-map-address">Заполните: город, улица, дом.</p>
+          <div class="map-picker-actions-row">
+            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn">Выбрать</button>
             <button type="button" class="checkout-map-action-btn checkout-map-action-btn-ghost" id="resetMapPickerBtn">Сброс</button>
-            <button type="button" class="checkout-map-action-btn checkout-map-action-btn-primary" id="applyMapAddressBtn" disabled>Выбрать</button>
-            <button type="button" class="checkout-map-action-btn" data-map-close="true">Отмена</button>
           </div>
         </div>
       </div>
@@ -1957,7 +1961,6 @@
   const checkoutMapAddress = document.getElementById('checkoutMapAddress');
   const applyMapAddressBtn = document.getElementById('applyMapAddressBtn');
   const resetMapPickerBtn = document.getElementById('resetMapPickerBtn');
-  const findMapAddressBtn = document.getElementById('findMapAddressBtn');
   const mapCityInput = document.getElementById('mapCityInput');
   const mapStreetInput = document.getElementById('mapStreetInput');
   const mapHouseInput = document.getElementById('mapHouseInput');
