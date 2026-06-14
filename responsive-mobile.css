@@ -889,7 +889,12 @@ body.cabinet-page-full section {
   }
 
   body.client-site.delivery-page .delivery-yandex-map ymaps,
-  body.client-site.delivery-page .delivery-yandex-map [class*='ymaps'][class*='-map'] {
+  body.client-site.delivery-page .delivery-yandex-map [class*='ymaps'][class*='-map'],
+  body.client-site.delivery-page .delivery-yandex-map [class*='-ground-pane'],
+  body.client-site.delivery-page .delivery-yandex-map [class*='-events-pane'],
+  body.client-site.delivery-page .delivery-yandex-map [class*='-layers-pane'] {
+    width: 100% !important;
+    height: 100% !important;
     max-width: 100% !important;
     border-radius: inherit !important;
     overflow: hidden !important;

@@ -17,10 +17,10 @@
     }
   }
 
-  function cacheFromKey(key) {
+  function cacheFromKey(key, refererHint) {
     const trimmed = String(key || '').trim();
-    if (!trimmed) return { provider: 'none', yandexMapsKey: null };
-    return { provider: 'yandex', yandexMapsKey: trimmed };
+    if (!trimmed) return { provider: 'none', yandexMapsKey: null, refererHint: refererHint || null };
+    return { provider: 'yandex', yandexMapsKey: trimmed, refererHint: refererHint || null };
   }
 
   function getConfig() {
@@ -38,15 +38,19 @@
         .then((r) => (r.ok ? r.json() : {}))
         .then((c) => {
           const key = typeof c.yandexMapsKey === 'string' ? c.yandexMapsKey.trim() : '';
+          const refererHint = typeof c.refererHint === 'string' ? c.refererHint.trim() : '';
           configCache = {
             provider: key ? 'yandex' : 'none',
             yandexMapsKey: key || null,
+            refererHint: refererHint || null,
           };
           return configCache;
         })
         .catch(() => {
           const fallback = readRuntimeMapsKey();
-          configCache = fallback ? cacheFromKey(fallback) : { provider: 'none', yandexMapsKey: null };
+          configCache = fallback
+            ? cacheFromKey(fallback)
+            : { provider: 'none', yandexMapsKey: null, refererHint: null };
           return configCache;
         });
     }
@@ -88,8 +92,9 @@
     return 'http://31.129.96.146:3001/*';
   }
 
-  function ymapsLoadFailMessage() {
-    return `Не удалось загрузить Яндекс.Карты. Проверьте YANDEX_MAPS_API_KEY в .env и HTTP Referer в кабинете developer.tech.yandex.ru: ${ymapsRefererHint()}`;
+  function ymapsLoadFailMessage(refererHint) {
+    const hint = String(refererHint || ymapsRefererHint()).trim();
+    return `Не удалось загрузить Яндекс.Карты. Проверьте YANDEX_MAPS_API_KEY в .env на сервере и HTTP Referer в кабинете developer.tech.yandex.ru (ключ JavaScript API): ${hint}`;
   }
 
   function buildYmapsScriptUrl(apiKey, cspMode) {
@@ -266,31 +271,76 @@
     window.setTimeout(run, 450);
   }
 
-  function waitForContainerSize(container, timeoutMs = 2500) {
+  function measureMapHostSize(container) {
+    if (!(container instanceof HTMLElement)) return { w: 0, h: 0 };
+    let w = container.offsetWidth;
+    let h = container.offsetHeight;
+    if (w > 48 && h > 48) return { w, h };
+    const parent = container.parentElement;
+    if (parent instanceof HTMLElement) {
+      w = Math.max(w, parent.clientWidth, parent.offsetWidth);
+      h = Math.max(h, parent.clientHeight, parent.offsetHeight);
+    }
+    return { w, h };
+  }
+
+  function waitForContainerSize(container, timeoutMs = 3500) {
     return new Promise((resolve) => {
       if (!(container instanceof HTMLElement)) {
         resolve(false);
         return;
       }
-      const ready = () => container.offsetWidth > 48 && container.offsetHeight > 48;
+      const ready = () => {
+        const { w, h } = measureMapHostSize(container);
+        return w > 48 && h > 48;
+      };
       if (ready()) {
         resolve(true);
         return;
       }
       let obs = null;
+      const observeTarget =
+        container.parentElement instanceof HTMLElement &&
+        container.parentElement.offsetHeight > container.offsetHeight
+          ? container.parentElement
+          : container;
       if (typeof ResizeObserver === 'function') {
         obs = new ResizeObserver(() => {
           if (!ready()) return;
           obs?.disconnect();
           resolve(true);
         });
-        obs.observe(container);
+        obs.observe(observeTarget);
       }
       window.setTimeout(() => {
         obs?.disconnect();
         resolve(ready());
       }, timeoutMs);
     });
+  }
+
+  function mapTilesLikelyRendered(container) {
+    if (!(container instanceof HTMLElement)) return false;
+    if (container.querySelector('[class*="-tiles-pane"] img, [class*="-ground-pane"] img, [class*="-ground-pane"] canvas')) {
+      return true;
+    }
+    const ground = container.querySelector('[class*="-ground-pane"]');
+    if (ground instanceof HTMLElement) {
+      const bg = window.getComputedStyle(ground).backgroundImage;
+      if (bg && bg !== 'none' && !/rgba\(0,\s*0,\s*0,\s*0\)/.test(bg)) return true;
+    }
+    return false;
+  }
+
+  /** Если тайлы не появились — чаще всего неверный HTTP Referer ключа на хосте. */
+  function scheduleMapRenderCheck(container, invalidateSize, onLikelyBlank) {
+    scheduleMapInvalidate(invalidateSize);
+    const check = () => {
+      scheduleMapInvalidate(invalidateSize);
+      if (!mapTilesLikelyRendered(container)) onLikelyBlank?.();
+    };
+    window.setTimeout(check, 5000);
+    window.setTimeout(check, 9000);
   }
 
   function createYandexMap(container, centerLatLng, zoom, options) {
@@ -341,19 +391,37 @@
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
     const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 12;
     return waitForContainerSize(container)
-      .then(() => loadYmaps())
-      .then((ymaps) => {
+      .then(() => Promise.all([loadYmaps(), getConfig()]))
+      .then(([ymaps, cfg]) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
+        let blankHandled = false;
+        const failMsg = () => ymapsLoadFailMessage(cfg?.refererHint);
+        scheduleMapRenderCheck(container, invalidateSize, () => {
+          if (blankHandled) return;
+          blankHandled = true;
+          try {
+            detachMapChrome?.();
+          } catch (_) {
+            /**/
+          }
+          try {
+            map.destroy();
+          } catch (_) {
+            /**/
+          }
+          renderMapPlaceholder(container, failMsg());
+        });
         return {
           engine: 'yandex',
           map,
           invalidateSize,
           destroy() {
+            blankHandled = true;
             try {
               detachMapChrome?.();
             } catch (_) {
@@ -368,7 +436,9 @@
           },
         };
       })
-      .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
+      .catch(() =>
+        getConfig().then((cfg) => renderMapPlaceholder(container, ymapsLoadFailMessage(cfg?.refererHint)))
+      );
   }
 
   /**

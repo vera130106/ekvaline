@@ -2451,8 +2451,20 @@ button.opx-zone-popup-cc {
 .checkout-map-root [class*='ymaps'][class*='-map'],
 .checkout-map-root [class*='-ground-pane'],
 .checkout-map-root [class*='-events-pane'],
-.checkout-map-root [class*='-layers-pane'] {
+.checkout-map-root [class*='-layers-pane'],
+.delivery-yandex-map ymaps,
+.delivery-yandex-map [class*='ymaps'][class*='-map'],
+.delivery-yandex-map [class*='-ground-pane'],
+.delivery-yandex-map [class*='-events-pane'],
+.delivery-yandex-map [class*='-layers-pane'] {
   border-radius: inherit !important;
+}
+
+.checkout-map-root [class*='ymaps'][class*='-map'],
+.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: inherit;
 }
 
 .checkout-map-root [class*='controls__toolbar'],
@@ -7235,7 +7247,6 @@ button.about-cert-btn {
   overflow: hidden;
   clip-path: inset(0 round 28px);
   isolation: isolate;
-  contain: paint;
   box-shadow: 0 20px 36px rgba(16, 57, 104, 0.12);
 }
 

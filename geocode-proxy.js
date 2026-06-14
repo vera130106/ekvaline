@@ -359,10 +359,19 @@ async function nominatimReverse(lat, lon) {
 function mountGeocodeRoutes(app, { asyncHandler }) {
   app.get('/api/public/maps-config', (req, res) => {
     res.set('Cache-Control', 'private, max-age=120');
+    const forwarded = String(req.get('x-forwarded-proto') || '')
+      .split(',')[0]
+      .trim();
+    const proto = forwarded || req.protocol || 'http';
+    const host = String(req.get('x-forwarded-host') || req.get('host') || '')
+      .split(',')[0]
+      .trim();
+    const origin = host ? `${proto}://${host}`.replace(/\/+$/, '') : '';
     res.json({
       provider: YMAPS_KEY ? 'yandex' : 'none',
       yandexMapsKey: YMAPS_KEY || null,
       geocoderConfigured: Boolean(YGEO_KEY),
+      refererHint: origin ? `${origin}/*` : null,
     });
   });
 

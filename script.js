@@ -5068,8 +5068,18 @@ async function hydrateDeliveryCoverageSection() {
 void hydrateDeliveryCoverageSection();
 
 const deliveryZoneMap = document.getElementById('deliveryZoneMap');
+let deliveryZoneMapBooted = false;
 
-if (deliveryZoneMap && window.EkvalineMaps && typeof window.EkvalineMaps.initStaticMap === 'function') {
+function deliveryZoneMapNeedsBoot() {
+  if (!(deliveryZoneMap instanceof HTMLElement)) return false;
+  if (deliveryZoneMap.querySelector('[class*="ymaps"], .ek-map-unavailable')) return false;
+  return true;
+}
+
+function wireDeliveryZoneMap() {
+  if (deliveryZoneMapBooted || !deliveryZoneMapNeedsBoot()) return;
+  if (!window.EkvalineMaps || typeof window.EkvalineMaps.initStaticMap !== 'function') return;
+  deliveryZoneMapBooted = true;
   void window.EkvalineMaps.initStaticMap(deliveryZoneMap, [51.768, 55.102], 12)
     .then((ctl) => {
       if (!ctl?.invalidateSize) return;
@@ -5086,7 +5096,18 @@ if (deliveryZoneMap && window.EkvalineMaps && typeof window.EkvalineMaps.initSta
       }
       window.addEventListener('resize', () => ctl.invalidateSize(), { passive: true });
     })
-    .catch(() => {});
+    .catch((err) => {
+      deliveryZoneMapBooted = false;
+      // eslint-disable-next-line no-console
+      console.warn('[delivery-map]', err && err.message ? err.message : err);
+    });
+}
+
+wireDeliveryZoneMap();
+if (document.readyState === 'complete') {
+  window.setTimeout(wireDeliveryZoneMap, 400);
+} else {
+  window.addEventListener('load', () => window.setTimeout(wireDeliveryZoneMap, 400), { once: true });
 }
 
 const aboutSteps = document.getElementById('aboutSteps');
