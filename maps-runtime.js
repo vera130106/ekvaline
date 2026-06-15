@@ -319,17 +319,34 @@
     });
   }
 
+  function forceYmapsDomFill(container, map) {
+    if (!(container instanceof HTMLElement)) return;
+    const w = container.offsetWidth;
+    const h = container.offsetHeight;
+    if (w < 48 || h < 48) return;
+    container.style.width = '100%';
+    container.style.height = `${h}px`;
+    container.style.minHeight = `${h}px`;
+    const nodes = container.querySelectorAll('ymaps, [class*="ymaps-2-1"]');
+    nodes.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.style.width = `${w}px`;
+      node.style.height = `${h}px`;
+      node.style.minHeight = `${h}px`;
+      node.style.maxWidth = '100%';
+    });
+    try {
+      map?.container?.fitToViewport?.();
+    } catch (_) {
+      /**/
+    }
+  }
+
   function ensureMapHostPixels(container) {
     if (!(container instanceof HTMLElement)) return;
-    const board =
-      container.closest('.delivery-map-board') instanceof HTMLElement
-        ? container.closest('.delivery-map-board')
-        : container.parentElement;
-    const measureEl =
-      board instanceof HTMLElement && board.offsetHeight > container.offsetHeight ? board : container;
-    const rect = measureEl.getBoundingClientRect();
-    const w = Math.round(rect.width || measureEl.offsetWidth || 0);
-    const h = Math.round(rect.height || measureEl.offsetHeight || 0);
+    const rect = container.getBoundingClientRect();
+    const w = Math.round(rect.width || container.offsetWidth || 0);
+    const h = Math.round(rect.height || container.offsetHeight || 0);
     if (w > 48 && h > 48) {
       container.style.width = '100%';
       container.style.height = `${h}px`;
@@ -340,8 +357,6 @@
   function markDeliveryMapReady(container) {
     if (!(container instanceof HTMLElement)) return;
     container.classList.add('is-map-ready');
-    const board = container.closest('.delivery-map-board');
-    if (board instanceof HTMLElement) board.classList.add('is-map-ready');
   }
 
   function createYandexMap(container, centerLatLng, zoom, options) {
@@ -353,7 +368,7 @@
     const mapTarget =
       container instanceof HTMLElement && container.id ? container.id : container;
     const map = new window.ymaps.Map(
-      mapTarget,
+      container instanceof HTMLElement ? container : mapTarget,
       {
         center: centerLatLng,
         zoom,
@@ -375,7 +390,7 @@
           void container.offsetWidth;
           void container.offsetHeight;
         }
-        map.container.fitToViewport();
+        forceYmapsDomFill(container, map);
       } catch (_) {
         /**/
       }
@@ -711,10 +726,7 @@
       return Promise.resolve(null);
     }
 
-    const board =
-      document.getElementById('deliveryMapBoard') instanceof HTMLElement
-        ? document.getElementById('deliveryMapBoard')
-        : container.parentElement;
+    const board = container;
 
     const runBoot = () => {
       ensureMapHostPixels(container);
@@ -722,20 +734,24 @@
         if (!ctl?.invalidateSize) return ctl;
         container.dataset.ekDeliveryMapBoot = '1';
         markDeliveryMapReady(container);
-        scheduleMapInvalidate(ctl.invalidateSize);
-        window.setTimeout(() => ctl.invalidateSize(), 600);
-        window.setTimeout(() => ctl.invalidateSize(), 1500);
-        window.setTimeout(() => ctl.invalidateSize(), 3000);
+        const resizeAll = () => {
+          forceYmapsDomFill(container, ctl.map);
+          ctl.invalidateSize();
+        };
+        scheduleMapInvalidate(resizeAll);
+        window.setTimeout(resizeAll, 600);
+        window.setTimeout(resizeAll, 1500);
+        window.setTimeout(resizeAll, 3000);
         if (typeof IntersectionObserver === 'function' && board instanceof HTMLElement) {
           const obs = new IntersectionObserver(
             (entries) => {
-              if (entries.some((entry) => entry.isIntersecting)) ctl.invalidateSize();
+              if (entries.some((entry) => entry.isIntersecting)) resizeAll();
             },
             { threshold: 0.05 }
           );
           obs.observe(board);
         }
-        window.addEventListener('resize', () => ctl.invalidateSize(), { passive: true });
+        window.addEventListener('resize', resizeAll, { passive: true });
         return ctl;
       });
     };

@@ -880,19 +880,12 @@ body.cabinet-page-full section {
     overflow: hidden;
   }
 
-  body.client-site.delivery-page .delivery-yandex-map {
-    width: 100%;
-    height: 100%;
-    min-height: 100%;
-    border-radius: inherit;
-  }
-
-  body.client-site.delivery-page .delivery-yandex-map ymaps,
-  body.client-site.delivery-page .delivery-yandex-map [class*='ymaps'][class*='-map'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-inner-panes'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-ground-pane'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-events-pane'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-layers-pane'] {
+  body.client-site.delivery-page .delivery-map-board ymaps,
+  body.client-site.delivery-page .delivery-map-board [class*='ymaps'][class*='-map'],
+  body.client-site.delivery-page .delivery-map-board [class*='-inner-panes'],
+  body.client-site.delivery-page .delivery-map-board [class*='-ground-pane'],
+  body.client-site.delivery-page .delivery-map-board [class*='-events-pane'],
+  body.client-site.delivery-page .delivery-map-board [class*='-layers-pane'] {
     width: 100% !important;
     height: 100% !important;
     min-height: 100% !important;

@@ -5087,8 +5087,7 @@ function wireDeliveryZoneMap() {
   void window.EkvalineMaps.initStaticMap(deliveryZoneMap, [51.768, 55.102], 12)
     .then((ctl) => {
       if (!ctl?.invalidateSize) return;
-      const board = document.getElementById('deliveryMapBoard');
-      const target = board instanceof HTMLElement ? board : deliveryZoneMap;
+      const target = deliveryZoneMap;
       if (typeof IntersectionObserver === 'function' && target instanceof HTMLElement) {
         const obs = new IntersectionObserver(
           (entries) => {
