@@ -1220,14 +1220,14 @@
   }
 
   const OPERATOR_TOAST_PHRASES = {
-    'API недоступен': 'Сервер не отвечает. Запустите npm start и обновите страницу (F5).',
+    'API недоступен': 'Сервер не отвечает. Проверьте, что сайт запущен, и обновите страницу.',
     'Ошибка сети при загрузке заказов.': 'Заказы не загрузились — нет связи с сервером. Нажмите «Обновить» (⟳).',
     'Ошибка сети при сохранении заказа.': 'Заказ не сохранился — нет связи с сервером. Повторите через несколько секунд.',
     'Ошибка сети при создании заказа': 'Заказ не создан — нет связи с сервером. Проверьте интернет и повторите.',
     'Ошибка при обновлении.': 'Список не обновился. Нажмите «Обновить» (⟳) ещё раз.',
-    'Сбой при загрузке — проверьте консоль или сеть.': 'Не всё загрузилось. Обновите страницу (F5) или проверьте npm start.',
+    'Сбой при загрузке — проверьте консоль или сеть.': 'Не всё загрузилось. Обновите страницу или проверьте связь с сервером.',
     'Не удалось получить заказы. Проверьте сервер или ответ не JSON.':
-      'Сервер ответил с ошибкой. Перезагрузите страницу (F5) и проверьте npm start.',
+      'Сервер ответил с ошибкой. Перезагрузите страницу и проверьте, что сайт запущен.',
     'Не удалось сохранить настройки': 'Настройки приёма заказов не сохранились. Повторите или обновите страницу.',
     'Не удалось выполнить сохранение': 'Изменения не сохранились. Повторите действие.',
     'Адрес не найден': 'Адрес не найден. Проверьте улицу и дом или выберите точку на карте.',
@@ -1264,12 +1264,67 @@
     return 'Сообщение';
   }
 
+  function sanitizeOperatorToastText(text) {
+    let msg = String(text || '').trim();
+    if (!msg) return '';
+
+    const fieldReplacements = [
+      [/\bcustomer_phone\b/gi, 'Телефон'],
+      [/\bcustomer_name\b/gi, 'Имя или организация'],
+      [/\bdelivery_date\b/gi, 'Дата доставки'],
+      [/\bdelivery_slot\b/gi, 'Интервал доставки'],
+      [/\bpayment_method\b/gi, 'Способ оплаты'],
+      [/\bcourier_note\b/gi, 'Примечание'],
+      [/\bproduct_title\b/gi, 'Товар'],
+      [/\bunit_price\b/gi, 'Цена'],
+      [/\bitems_json\b/gi, 'Состав заказа'],
+      [/\bchange_reason\b/gi, 'Причина изменения'],
+    ];
+    fieldReplacements.forEach(([re, ru]) => {
+      msg = msg.replace(re, ru);
+    });
+
+    const phraseReplacements = [
+      [/\bis required\b/gi, 'обязательное поле'],
+      [/\bis not allowed to be empty\b/gi, 'не может быть пустым'],
+      [/\bmust contain at least one of\b[^.]*\.?/gi, 'добавьте нужные данные'],
+      [/\bnpm start\b/gi, 'запуск сервера'],
+      [/\bJSON\b/g, 'ответ сервера'],
+      [/\bAPI\b/g, 'Сервер'],
+      [/\bHTTP\b/g, ''],
+      [/\bCSRF\b/g, 'защита формы'],
+      [/\bfetch failed\b/gi, 'нет связи с сервером'],
+      [/\bNetworkError\b/gi, 'ошибка сети'],
+      [/\bUnauthorized\b/gi, 'нужен вход'],
+      [/\bForbidden\b/gi, 'недостаточно прав'],
+      [/\bToo Many Requests\b/gi, 'слишком много запросов'],
+    ];
+    phraseReplacements.forEach(([re, ru]) => {
+      msg = msg.replace(re, ru);
+    });
+
+    msg = msg.replace(/\s{2,}/g, ' ').trim();
+    msg = msg.replace(/^[a-z][a-z0-9_]*:\s*/i, (head) => {
+      const key = head.slice(0, -1).trim();
+      const map = {
+        customer_phone: 'Телефон',
+        customer_name: 'Имя или организация',
+        address: 'Адрес доставки',
+        phone: 'Телефон',
+        value: 'Данные',
+      };
+      const label = map[key.toLowerCase()] || 'Поле';
+      return `${label}: `;
+    });
+    return msg;
+  }
+
   function clarifyOperatorToastMessage(text) {
     const raw = String(text || '').trim();
     if (!raw) return '';
     if (OPERATOR_TOAST_PHRASES[raw]) return OPERATOR_TOAST_PHRASES[raw];
     if (/не JSON/i.test(raw)) {
-      return 'Сервер ответил с ошибкой. Перезагрузите страницу (F5) и проверьте npm start.';
+      return 'Сервер ответил с ошибкой. Перезагрузите страницу и проверьте, что сайт запущен.';
     }
     if (/^изменено:/i.test(raw)) {
       return raw
@@ -1277,7 +1332,7 @@
         .replace(/без изменений:\s*(\d+)/i, 'без изменений: $1')
         .replace(/ошибок:\s*(\d+)/i, 'ошибок: $1');
     }
-    return raw;
+    return sanitizeOperatorToastText(raw);
   }
 
   function paintOperatorToastChrome(variant) {
@@ -3323,7 +3378,7 @@
     const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
     if (!api) {
       SETTINGS_DAYS_LIST.innerHTML =
-        '<p class="opx-settings-empty">Сервер не отвечает. Запустите npm start и обновите страницу.</p>';
+        '<p class="opx-settings-empty">Сервер не отвечает. Проверьте, что сайт запущен, и обновите страницу.</p>';
       return;
     }
     try {
@@ -3347,7 +3402,7 @@
     } catch (e) {
       console.error(e);
       SETTINGS_DAYS_LIST.innerHTML = settingsLoadErrorHtml(
-        'Нет связи с сервером. Запустите npm start и обновите страницу.'
+        'Нет связи с сервером. Проверьте, что сайт запущен, и обновите страницу.'
       );
     }
   }
@@ -3357,7 +3412,7 @@
     const payload = buildSettingsAvailabilityPayload();
     const api = typeof window.EkvalineAPI?.json === 'function' ? window.EkvalineAPI : null;
     if (!api) {
-      showToast('API недоступен');
+      showToast('Сервер не отвечает');
       return;
     }
     try {

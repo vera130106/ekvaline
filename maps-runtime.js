@@ -321,20 +321,27 @@
 
   function ensureMapHostPixels(container) {
     if (!(container instanceof HTMLElement)) return;
-    const { w, h } = measureMapHostSize(container);
-    if (w > 48 && h > 48) return;
     const board =
       container.closest('.delivery-map-board') instanceof HTMLElement
         ? container.closest('.delivery-map-board')
         : container.parentElement;
-    if (!(board instanceof HTMLElement)) return;
-    const bw = board.offsetWidth || board.clientWidth;
-    const bh = board.offsetHeight || board.clientHeight;
-    if (bw > 48 && bh > 48) {
+    const measureEl =
+      board instanceof HTMLElement && board.offsetHeight > container.offsetHeight ? board : container;
+    const rect = measureEl.getBoundingClientRect();
+    const w = Math.round(rect.width || measureEl.offsetWidth || 0);
+    const h = Math.round(rect.height || measureEl.offsetHeight || 0);
+    if (w > 48 && h > 48) {
       container.style.width = '100%';
-      container.style.height = `${bh}px`;
-      container.style.minHeight = `${bh}px`;
+      container.style.height = `${h}px`;
+      container.style.minHeight = `${h}px`;
     }
+  }
+
+  function markDeliveryMapReady(container) {
+    if (!(container instanceof HTMLElement)) return;
+    container.classList.add('is-map-ready');
+    const board = container.closest('.delivery-map-board');
+    if (board instanceof HTMLElement) board.classList.add('is-map-ready');
   }
 
   function createYandexMap(container, centerLatLng, zoom, options) {
@@ -397,6 +404,9 @@
         scheduleMapInvalidate(invalidateSize);
         window.setTimeout(() => invalidateSize(), 800);
         window.setTimeout(() => invalidateSize(), 2000);
+        if (container.id === 'deliveryZoneMap' || container.classList.contains('delivery-yandex-map')) {
+          markDeliveryMapReady(container);
+        }
         return {
           engine: 'yandex',
           map,
@@ -711,7 +721,11 @@
       return initStaticMap(container, DELIVERY_ZONE_MAP_CENTER, 12).then((ctl) => {
         if (!ctl?.invalidateSize) return ctl;
         container.dataset.ekDeliveryMapBoot = '1';
+        markDeliveryMapReady(container);
         scheduleMapInvalidate(ctl.invalidateSize);
+        window.setTimeout(() => ctl.invalidateSize(), 600);
+        window.setTimeout(() => ctl.invalidateSize(), 1500);
+        window.setTimeout(() => ctl.invalidateSize(), 3000);
         if (typeof IntersectionObserver === 'function' && board instanceof HTMLElement) {
           const obs = new IntersectionObserver(
             (entries) => {
