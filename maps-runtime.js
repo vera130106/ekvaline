@@ -319,56 +319,25 @@
     });
   }
 
-  function forceYmapsDomFill(container, map) {
-    if (!(container instanceof HTMLElement)) return;
-    const w = container.offsetWidth;
-    const h = container.offsetHeight;
-    if (w < 48 || h < 48) return;
-    container.style.width = '100%';
-    container.style.height = `${h}px`;
-    container.style.minHeight = `${h}px`;
-    const nodes = container.querySelectorAll('ymaps, [class*="ymaps-2-1"]');
-    nodes.forEach((node) => {
-      if (!(node instanceof HTMLElement)) return;
-      node.style.width = `${w}px`;
-      node.style.height = `${h}px`;
-      node.style.minHeight = `${h}px`;
-      node.style.maxWidth = '100%';
-    });
+  function resizeYandexMapViewport(container, map) {
     try {
+      if (container instanceof HTMLElement) {
+        void container.offsetWidth;
+        void container.offsetHeight;
+      }
       map?.container?.fitToViewport?.();
     } catch (_) {
       /**/
     }
   }
 
-  function ensureMapHostPixels(container) {
-    if (!(container instanceof HTMLElement)) return;
-    const rect = container.getBoundingClientRect();
-    const w = Math.round(rect.width || container.offsetWidth || 0);
-    const h = Math.round(rect.height || container.offsetHeight || 0);
-    if (w > 48 && h > 48) {
-      container.style.width = '100%';
-      container.style.height = `${h}px`;
-      container.style.minHeight = `${h}px`;
-    }
-  }
-
-  function markDeliveryMapReady(container) {
-    if (!(container instanceof HTMLElement)) return;
-    container.classList.add('is-map-ready');
-  }
-
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
-    ensureMapHostPixels(container);
     if (container instanceof HTMLElement && !container.id) {
       container.id = `ek-map-${Math.random().toString(36).slice(2, 10)}`;
     }
-    const mapTarget =
-      container instanceof HTMLElement && container.id ? container.id : container;
     const map = new window.ymaps.Map(
-      container instanceof HTMLElement ? container : mapTarget,
+      container instanceof HTMLElement ? container : container.id,
       {
         center: centerLatLng,
         zoom,
@@ -385,21 +354,57 @@
     const stopChromeObserver = hideYandexMapChrome(container);
 
     function invalidateSize() {
-      try {
-        if (container instanceof HTMLElement) {
-          void container.offsetWidth;
-          void container.offsetHeight;
-        }
-        forceYmapsDomFill(container, map);
-      } catch (_) {
-        /**/
-      }
+      resizeYandexMapViewport(container, map);
       applyYandexMapChromeHide(container);
     }
 
     scheduleMapInvalidate(invalidateSize);
 
     return { map, invalidateSize, detachMapChrome: stopChromeObserver };
+  }
+
+  /** Карта на странице «Доставка» — отдельная инициализация без лишних CSS-надстроек. */
+  function initDeliveryCoverageMap(container) {
+    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
+    const center = DELIVERY_ZONE_MAP_CENTER;
+    const z = 12;
+    return waitForContainerSize(container, 6000)
+      .then(() => loadYmaps())
+      .then((ymaps) => {
+        if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
+        container.innerHTML = '';
+        const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
+          disableScrollZoom: false,
+        });
+        const relayout = () => resizeYandexMapViewport(container, map);
+        scheduleMapInvalidate(relayout);
+        window.setTimeout(relayout, 200);
+        window.setTimeout(relayout, 800);
+        window.setTimeout(relayout, 2000);
+        container.classList.add('is-map-ready');
+        return {
+          engine: 'yandex',
+          map,
+          invalidateSize: relayout,
+          destroy() {
+            try {
+              detachMapChrome?.();
+            } catch (_) {
+              /**/
+            }
+            try {
+              map.destroy();
+            } catch (_) {
+              /**/
+            }
+            container.innerHTML = '';
+            container.classList.remove('is-map-ready');
+          },
+        };
+      })
+      .catch(() =>
+        getConfig().then((cfg) => renderMapPlaceholder(container, ymapsLoadFailMessage(cfg?.refererHint)))
+      );
   }
 
   /** Демо-карта на странице «Доставка». */
@@ -412,16 +417,10 @@
       .then(([ymaps, cfg]) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
-        ensureMapHostPixels(container);
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
-        window.setTimeout(() => invalidateSize(), 800);
-        window.setTimeout(() => invalidateSize(), 2000);
-        if (container.id === 'deliveryZoneMap' || container.classList.contains('delivery-yandex-map')) {
-          markDeliveryMapReady(container);
-        }
         return {
           engine: 'yandex',
           map,
@@ -714,11 +713,11 @@
   const DELIVERY_ZONE_MAP_CENTER = [51.768, 55.102];
   let deliveryZoneMapBootPromise = null;
 
-  /** Карта «Зоны покрытия» на delivery.html — отдельный запуск, т.к. контейнер absolute внутри aspect-ratio. */
   function bootDeliveryZoneMap() {
     const container = document.getElementById('deliveryZoneMap');
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
-    if (container.dataset.ekDeliveryMapBoot === '1') {
+    const bootState = container.dataset.ekDeliveryMapBoot || '';
+    if (bootState === '1' || bootState === 'pending') {
       return deliveryZoneMapBootPromise || Promise.resolve(null);
     }
     if (container.querySelector('[class*="ymaps"], .ek-map-unavailable')) {
@@ -726,52 +725,50 @@
       return Promise.resolve(null);
     }
 
-    const board = container;
-
-    const runBoot = () => {
-      ensureMapHostPixels(container);
-      return initStaticMap(container, DELIVERY_ZONE_MAP_CENTER, 12).then((ctl) => {
-        if (!ctl?.invalidateSize) return ctl;
+    container.dataset.ekDeliveryMapBoot = 'pending';
+    deliveryZoneMapBootPromise = initDeliveryCoverageMap(container)
+      .then((ctl) => {
         container.dataset.ekDeliveryMapBoot = '1';
-        markDeliveryMapReady(container);
-        const resizeAll = () => {
-          forceYmapsDomFill(container, ctl.map);
-          ctl.invalidateSize();
-        };
-        scheduleMapInvalidate(resizeAll);
-        window.setTimeout(resizeAll, 600);
-        window.setTimeout(resizeAll, 1500);
-        window.setTimeout(resizeAll, 3000);
-        if (typeof IntersectionObserver === 'function' && board instanceof HTMLElement) {
-          const obs = new IntersectionObserver(
-            (entries) => {
-              if (entries.some((entry) => entry.isIntersecting)) resizeAll();
-            },
-            { threshold: 0.05 }
-          );
-          obs.observe(board);
+        if (ctl?.invalidateSize) {
+          const relayout = () => ctl.invalidateSize();
+          window.addEventListener('resize', relayout, { passive: true });
+          if (typeof IntersectionObserver === 'function') {
+            const obs = new IntersectionObserver(
+              (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) relayout();
+              },
+              { threshold: 0.08 }
+            );
+            obs.observe(container);
+          }
         }
-        window.addEventListener('resize', resizeAll, { passive: true });
         return ctl;
+      })
+      .catch(() => {
+        container.dataset.ekDeliveryMapBoot = '';
+        deliveryZoneMapBootPromise = null;
+        return null;
       });
-    };
-
-    deliveryZoneMapBootPromise = waitForContainerSize(container, 5000).then(() => runBoot());
     return deliveryZoneMapBootPromise;
   }
 
   function scheduleDeliveryZoneMapBoot() {
     if (!document.getElementById('deliveryZoneMap')) return;
-    const attempt = () => {
+    const run = () => {
       void bootDeliveryZoneMap();
     };
-    attempt();
-    window.setTimeout(attempt, 350);
-    window.setTimeout(attempt, 1200);
     if (document.readyState === 'complete') {
-      window.setTimeout(attempt, 2200);
+      run();
+      window.setTimeout(run, 500);
     } else {
-      window.addEventListener('load', () => window.setTimeout(attempt, 250), { once: true });
+      window.addEventListener(
+        'load',
+        () => {
+          run();
+          window.setTimeout(run, 500);
+        },
+        { once: true }
+      );
     }
   }
 

@@ -2451,17 +2451,11 @@ button.opx-zone-popup-cc {
 .checkout-map-root [class*='ymaps'][class*='-map'],
 .checkout-map-root [class*='-ground-pane'],
 .checkout-map-root [class*='-events-pane'],
-.checkout-map-root [class*='-layers-pane'],
-.delivery-yandex-map ymaps,
-.delivery-yandex-map [class*='ymaps'][class*='-map'],
-.delivery-yandex-map [class*='-ground-pane'],
-.delivery-yandex-map [class*='-events-pane'],
-.delivery-yandex-map [class*='-layers-pane'] {
+.checkout-map-root [class*='-layers-pane'] {
   border-radius: inherit !important;
 }
 
-.checkout-map-root [class*='ymaps'][class*='-map'],
-.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+.checkout-map-root [class*='ymaps'][class*='-map'] {
   width: 100% !important;
   height: 100% !important;
   min-height: 100%;
@@ -2474,9 +2468,7 @@ button.opx-zone-popup-cc {
 
 .checkout-map-root,
 .opx-map-canvas,
-.opx-zone-map-canvas,
-.delivery-map-board,
-.delivery-yandex-map {
+.opx-zone-map-canvas {
   min-height: 280px;
   width: 100%;
   overflow: hidden;
@@ -2488,9 +2480,7 @@ button.opx-zone-popup-cc {
 .opx-zone-map-canvas .ymaps-2-1-79-map,
 .checkout-map-root [class*='ymaps'][class*='-map'],
 .opx-map-canvas [class*='ymaps'][class*='-map'],
-.opx-zone-map-canvas [class*='ymaps'][class*='-map'],
-.delivery-map-board [class*='ymaps'][class*='-map'],
-.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+.opx-zone-map-canvas [class*='ymaps'][class*='-map'] {
   width: 100% !important;
   height: 100% !important;
   min-height: 100% !important;
@@ -2498,9 +2488,7 @@ button.opx-zone-popup-cc {
 
 .checkout-map-root ymaps,
 .opx-map-canvas ymaps,
-.opx-zone-map-canvas ymaps,
-.delivery-map-board ymaps,
-.delivery-yandex-map ymaps {
+.opx-zone-map-canvas ymaps {
   width: 100% !important;
   height: 100% !important;
   min-height: 100% !important;
@@ -7252,8 +7240,8 @@ button.about-cert-btn {
   position: relative;
   width: 100%;
   max-width: 100%;
-  height: clamp(320px, 42vw, 480px);
-  min-height: clamp(320px, 42vw, 480px);
+  height: 420px;
+  min-height: 420px;
   box-sizing: border-box;
   border-radius: 28px;
   border: 1px solid #e4edf9;
@@ -7262,18 +7250,28 @@ button.about-cert-btn {
   box-shadow: 0 20px 36px rgba(16, 57, 104, 0.12);
 }
 
-.delivery-map-board.is-map-ready {
-  background: #dfe8f2;
+.delivery-yandex-map {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
 }
 
-.delivery-map-board [class*='-inner-panes'],
-.delivery-map-board [class*='-ground-pane'],
-.delivery-map-board [class*='-events-pane'],
-.delivery-map-board [class*='-layers-pane'],
-.delivery-map-board [class*='-places-pane'] {
+.delivery-yandex-map.ek-map-host {
+  position: absolute !important;
+  inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  min-height: 100% !important;
+}
+
+.delivery-yandex-map ymaps,
+.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
 }
 
 .delivery-map-board [class*='controls__toolbar'],
@@ -7986,13 +7984,13 @@ button.about-cert-btn {
   }
 
   .delivery-map-board {
-    min-height: 280px;
+    min-height: 300px;
     height: min(72vw, 380px);
     border-radius: 20px;
   }
 
   .delivery-yandex-map {
-    min-height: 100%;
+    border-radius: inherit;
   }
 
   .delivery-map-board [class*='controls__toolbar'],

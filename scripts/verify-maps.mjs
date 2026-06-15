@@ -87,16 +87,21 @@ function checkPageMapWiring(spec) {
 }
 
 function checkScriptDeliveryInit() {
-  const src = read('script.js');
-  if (!src.includes('deliveryZoneMap') || !src.includes('initStaticMap')) {
-    fail('script.js: нет инициализации deliveryZoneMap');
+  const mapsRt = read('maps-runtime.js');
+  const delivery = read('delivery.html');
+  if (!delivery.includes('id="deliveryZoneMap"')) {
+    fail('delivery.html: нет #deliveryZoneMap');
     return;
   }
-  if (!src.includes('EkvalineMapPicker')) {
+  if (!mapsRt.includes('bootDeliveryZoneMap') || !mapsRt.includes('initDeliveryCoverageMap')) {
+    fail('maps-runtime.js: нет bootDeliveryZoneMap / initDeliveryCoverageMap');
+    return;
+  }
+  if (!read('script.js').includes('EkvalineMapPicker')) {
     fail('script.js: нет EkvalineMapPicker (кабинет / каталог)');
     return;
   }
-  ok('script.js: deliveryZoneMap + EkvalineMapPicker');
+  ok('delivery: #deliveryZoneMap + maps-runtime boot');
 }
 
 function checkOperatorMapsSource() {
