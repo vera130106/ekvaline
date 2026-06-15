@@ -362,22 +362,59 @@ const adminProductPatchSchema = Joi.object({
 }).min(1);
 
 const operatorOrderLineSchema = Joi.object({
-  title: Joi.string().trim().min(1).max(180).required(),
-  qty: Joi.number().integer().min(1).max(50).required(),
-  unit_price: Joi.number().min(0).max(1_000_000).required(),
+  title: Joi.string().trim().min(1).max(180).required().messages({
+    'any.required': 'Товар: укажите название.',
+    'string.empty': 'Товар: укажите название.',
+    'string.min': 'Товар: укажите название.',
+  }),
+  qty: Joi.number().integer().min(1).max(50).required().messages({
+    'any.required': 'Количество: укажите число от 1 до 50.',
+    'number.min': 'Количество: минимум 1.',
+    'number.max': 'Количество: не более 50.',
+  }),
+  unit_price: Joi.number().min(0).max(1_000_000).required().messages({
+    'any.required': 'Цена: укажите стоимость позиции.',
+    'number.min': 'Цена: не может быть отрицательной.',
+    'number.max': 'Цена: слишком большое значение.',
+  }),
   product_id: Joi.number().integer().positive().allow(null).optional(),
 });
 
 const operatorOrderCreateSchema = Joi.object({
-  customer_name: Joi.string().trim().min(2).max(NAME_MAX).required(),
-  customer_phone: Joi.string().trim().min(10).max(32).required(),
-  address: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
+  customer_name: Joi.string().trim().min(2).max(NAME_MAX).required().messages({
+    'any.required': 'Имя или организация: укажите минимум 2 символа.',
+    'string.empty': 'Имя или организация: укажите минимум 2 символа.',
+    'string.min': 'Имя или организация: минимум 2 символа.',
+    'string.max': `Имя или организация: не более ${NAME_MAX} символов.`,
+  }),
+  customer_phone: Joi.string().trim().min(10).max(32).required().messages({
+    'any.required': 'Телефон: укажите номер (11 цифр, +7…).',
+    'string.empty': 'Телефон: укажите номер (11 цифр, +7…).',
+    'string.min': 'Телефон: укажите номер (11 цифр, +7…).',
+  }),
+  address: Joi.string().trim().min(5).max(ADDRESS_MAX).required().messages({
+    'any.required': 'Адрес доставки: обязательное поле.',
+    'string.empty': 'Адрес доставки: укажите улицу и дом в Оренбурге.',
+    'string.min': 'Адрес доставки: слишком короткий.',
+    'string.max': `Адрес доставки: не более ${ADDRESS_MAX} символов.`,
+  }),
   delivery_date: Joi.string()
     .pattern(/^\d{4}-\d{2}-\d{2}$/)
     .required()
-    .messages({ 'string.pattern.base': 'Дата доставки: формат ГГГГ-ММ-ДД.' }),
-  delivery_slot: Joi.string().trim().min(3).max(SLOT_MAX).required(),
-  payment_method: Joi.string().trim().min(2).max(64).required(),
+    .messages({
+      'any.required': 'Дата доставки: обязательное поле.',
+      'string.empty': 'Дата доставки: укажите дату.',
+      'string.pattern.base': 'Дата доставки: формат ГГГГ-ММ-ДД.',
+    }),
+  delivery_slot: Joi.string().trim().min(3).max(SLOT_MAX).required().messages({
+    'any.required': 'Интервал доставки: выберите время.',
+    'string.empty': 'Интервал доставки: выберите время.',
+    'string.min': 'Интервал доставки: укажите интервал.',
+  }),
+  payment_method: Joi.string().trim().min(2).max(64).required().messages({
+    'any.required': 'Способ оплаты: выберите из списка.',
+    'string.empty': 'Способ оплаты: выберите из списка.',
+  }),
   zone: Joi.string().trim().max(120).allow('').optional(),
   driver: Joi.string().trim().max(120).allow('').optional(),
   courier_note: Joi.string().trim().max(NOTE_MAX).allow('').optional(),
@@ -386,7 +423,11 @@ const operatorOrderCreateSchema = Joi.object({
   product_title: Joi.string().trim().min(1).max(180).optional(),
   qty: Joi.number().integer().min(1).max(50).optional(),
   unit_price: Joi.number().min(0).max(1_000_000).optional(),
-}).or('items', 'product_title');
+})
+  .or('items', 'product_title')
+  .messages({
+    'object.missing': 'Добавьте хотя бы один товар на вкладке «Товары».',
+  });
 
 const orderCreateSchema = Joi.object({
   address: Joi.string().trim().min(5).max(ADDRESS_MAX).required(),
@@ -442,7 +483,11 @@ const orderClientPatchSchema = Joi.object({
 }).min(1);
 
 const orderCancelReasonSchema = Joi.object({
-  reason: Joi.string().trim().min(3).max(2000).required(),
+  reason: Joi.string().trim().min(3).max(2000).required().messages({
+    'any.required': 'Причина отмены: укажите минимум 3 символа.',
+    'string.empty': 'Причина отмены: не может быть пустой.',
+    'string.min': 'Причина отмены: минимум 3 символа.',
+  }),
 });
 
 /** Вопросы в блоке FAQ на странице «Доставка» (редактирует администратор в настройках). */
@@ -680,13 +725,43 @@ const JOI_FIELD_LABELS_RU = {
   hidden: 'Видимость',
   first_name: 'Имя',
   last_name: 'Фамилия',
-  email: 'Email',
+  email: 'Почта',
   phone: 'Телефон',
   password: 'Пароль',
   role: 'Роль',
   credential: 'Логин',
   message: 'Сообщение',
+  customer_phone: 'Телефон',
+  customer_name: 'Имя или организация',
+  address: 'Адрес доставки',
+  delivery_date: 'Дата доставки',
+  delivery_slot: 'Интервал доставки',
+  payment_method: 'Способ оплаты',
+  courier_note: 'Примечание',
+  product_title: 'Товар',
+  unit_price: 'Цена',
+  qty: 'Количество',
+  items: 'Товары',
+  items_json: 'Состав заказа',
+  zone: 'Зона',
+  driver: 'Водитель',
+  title: 'Название товара',
+  pickup: 'Самовывоз',
+  product_id: 'Товар',
+  change_reason: 'Причина изменения',
+  total_sum: 'Сумма',
+  status: 'Статус',
+  reason: 'Причина',
+  value: 'Данные',
+  gate_code: 'Секретный код',
 };
+
+function joiFieldLabelRu(fieldKey) {
+  const key = String(fieldKey || '').trim();
+  if (JOI_FIELD_LABELS_RU[key]) return JOI_FIELD_LABELS_RU[key];
+  if (/^[a-z][a-z0-9_]*$/i.test(key)) return 'Поле';
+  return key;
+}
 
 /** Перевод типовых сообщений Joi (если нет своего .messages). */
 function translateJoiMessage(raw) {
@@ -694,6 +769,10 @@ function translateJoiMessage(raw) {
     .replace(/"/g, '')
     .trim();
   if (!msg) return 'Проверьте введённые данные.';
+
+  if (/must contain at least one of/i.test(msg)) {
+    return 'Добавьте хотя бы один товар в заказ.';
+  }
 
   const rules = [
     [/must be a safe number$/i, 'число слишком большое — уменьшите значение'],
@@ -703,13 +782,16 @@ function translateJoiMessage(raw) {
     [/is not allowed to be empty$/i, 'не может быть пустым'],
     [/length must be at least (\d+)/i, 'минимум $1 символов'],
     [/length must be less than or equal to (\d+)/i, 'не более $1 символов'],
+    [/must be greater than or equal to (\d+)/i, 'не меньше $1'],
+    [/must be less than or equal to (\d+)/i, 'не больше $1'],
+    [/must be one of/i, 'недопустимое значение'],
     [/fails to match the required pattern/i, 'недопустимые символы — проверьте поле'],
   ];
   for (const [re, ru] of rules) {
     const m = msg.match(re);
     if (m) {
       const fieldKey = msg.split(' ')[0];
-      const label = JOI_FIELD_LABELS_RU[fieldKey] || fieldKey;
+      const label = joiFieldLabelRu(fieldKey);
       if (m[1]) return `${label}: ${ru.replace('$1', m[1])}.`;
       return `${label}: ${ru}.`;
     }
@@ -718,6 +800,8 @@ function translateJoiMessage(raw) {
   const firstWord = msg.split(' ')[0];
   if (JOI_FIELD_LABELS_RU[firstWord]) {
     msg = `${JOI_FIELD_LABELS_RU[firstWord]}${msg.slice(firstWord.length)}`;
+  } else if (/^[a-z][a-z0-9_]*$/i.test(firstWord)) {
+    msg = `${joiFieldLabelRu(firstWord)}${msg.slice(firstWord.length)}`;
   }
   if (!/[.!?]$/.test(msg)) msg += '.';
   if (msg[0] >= 'a' && msg[0] <= 'z') msg = msg[0].toUpperCase() + msg.slice(1);

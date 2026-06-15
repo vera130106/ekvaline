@@ -319,32 +319,27 @@
     });
   }
 
-  function mapTilesLikelyRendered(container) {
-    if (!(container instanceof HTMLElement)) return false;
-    if (container.querySelector('[class*="-tiles-pane"] img, [class*="-ground-pane"] img, [class*="-ground-pane"] canvas')) {
-      return true;
+  function ensureMapHostPixels(container) {
+    if (!(container instanceof HTMLElement)) return;
+    const { w, h } = measureMapHostSize(container);
+    if (w > 48 && h > 48) return;
+    const board =
+      container.closest('.delivery-map-board') instanceof HTMLElement
+        ? container.closest('.delivery-map-board')
+        : container.parentElement;
+    if (!(board instanceof HTMLElement)) return;
+    const bw = board.offsetWidth || board.clientWidth;
+    const bh = board.offsetHeight || board.clientHeight;
+    if (bw > 48 && bh > 48) {
+      container.style.width = '100%';
+      container.style.height = `${bh}px`;
+      container.style.minHeight = `${bh}px`;
     }
-    const ground = container.querySelector('[class*="-ground-pane"]');
-    if (ground instanceof HTMLElement) {
-      const bg = window.getComputedStyle(ground).backgroundImage;
-      if (bg && bg !== 'none' && !/rgba\(0,\s*0,\s*0,\s*0\)/.test(bg)) return true;
-    }
-    return false;
-  }
-
-  /** Если тайлы не появились — чаще всего неверный HTTP Referer ключа на хосте. */
-  function scheduleMapRenderCheck(container, invalidateSize, onLikelyBlank) {
-    scheduleMapInvalidate(invalidateSize);
-    const check = () => {
-      scheduleMapInvalidate(invalidateSize);
-      if (!mapTilesLikelyRendered(container)) onLikelyBlank?.();
-    };
-    window.setTimeout(check, 5000);
-    window.setTimeout(check, 9000);
   }
 
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
+    ensureMapHostPixels(container);
     if (container instanceof HTMLElement && !container.id) {
       container.id = `ek-map-${Math.random().toString(36).slice(2, 10)}`;
     }
@@ -395,33 +390,18 @@
       .then(([ymaps, cfg]) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
+        ensureMapHostPixels(container);
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
-        let blankHandled = false;
-        const failMsg = () => ymapsLoadFailMessage(cfg?.refererHint);
-        scheduleMapRenderCheck(container, invalidateSize, () => {
-          if (blankHandled) return;
-          blankHandled = true;
-          try {
-            detachMapChrome?.();
-          } catch (_) {
-            /**/
-          }
-          try {
-            map.destroy();
-          } catch (_) {
-            /**/
-          }
-          renderMapPlaceholder(container, failMsg());
-        });
+        window.setTimeout(() => invalidateSize(), 800);
+        window.setTimeout(() => invalidateSize(), 2000);
         return {
           engine: 'yandex',
           map,
           invalidateSize,
           destroy() {
-            blankHandled = true;
             try {
               detachMapChrome?.();
             } catch (_) {
@@ -706,11 +686,71 @@
       .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
 
+  const DELIVERY_ZONE_MAP_CENTER = [51.768, 55.102];
+  let deliveryZoneMapBootPromise = null;
+
+  /** Карта «Зоны покрытия» на delivery.html — отдельный запуск, т.к. контейнер absolute внутри aspect-ratio. */
+  function bootDeliveryZoneMap() {
+    const container = document.getElementById('deliveryZoneMap');
+    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
+    if (container.dataset.ekDeliveryMapBoot === '1') {
+      return deliveryZoneMapBootPromise || Promise.resolve(null);
+    }
+    if (container.querySelector('[class*="ymaps"], .ek-map-unavailable')) {
+      container.dataset.ekDeliveryMapBoot = '1';
+      return Promise.resolve(null);
+    }
+
+    const board =
+      document.getElementById('deliveryMapBoard') instanceof HTMLElement
+        ? document.getElementById('deliveryMapBoard')
+        : container.parentElement;
+
+    const runBoot = () => {
+      ensureMapHostPixels(container);
+      return initStaticMap(container, DELIVERY_ZONE_MAP_CENTER, 12).then((ctl) => {
+        if (!ctl?.invalidateSize) return ctl;
+        container.dataset.ekDeliveryMapBoot = '1';
+        scheduleMapInvalidate(ctl.invalidateSize);
+        if (typeof IntersectionObserver === 'function' && board instanceof HTMLElement) {
+          const obs = new IntersectionObserver(
+            (entries) => {
+              if (entries.some((entry) => entry.isIntersecting)) ctl.invalidateSize();
+            },
+            { threshold: 0.05 }
+          );
+          obs.observe(board);
+        }
+        window.addEventListener('resize', () => ctl.invalidateSize(), { passive: true });
+        return ctl;
+      });
+    };
+
+    deliveryZoneMapBootPromise = waitForContainerSize(container, 5000).then(() => runBoot());
+    return deliveryZoneMapBootPromise;
+  }
+
+  function scheduleDeliveryZoneMapBoot() {
+    if (!document.getElementById('deliveryZoneMap')) return;
+    const attempt = () => {
+      void bootDeliveryZoneMap();
+    };
+    attempt();
+    window.setTimeout(attempt, 350);
+    window.setTimeout(attempt, 1200);
+    if (document.readyState === 'complete') {
+      window.setTimeout(attempt, 2200);
+    } else {
+      window.addEventListener('load', () => window.setTimeout(attempt, 250), { once: true });
+    }
+  }
+
   window.EkvalineMaps = {
     prefetch,
     getConfig,
     loadYmaps,
     initStaticMap,
+    bootDeliveryZoneMap,
     attachInteractiveMap,
     createOrdersMapHost,
     async usesYandexTiles() {
@@ -722,6 +762,7 @@
   if (typeof document !== 'undefined') {
     const startMapsWarmup = () => {
       if (documentLikelyUsesMaps()) prefetch();
+      scheduleDeliveryZoneMapBoot();
     };
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startMapsWarmup, { once: true });

@@ -5077,6 +5077,10 @@ function deliveryZoneMapNeedsBoot() {
 }
 
 function wireDeliveryZoneMap() {
+  if (window.EkvalineMaps && typeof window.EkvalineMaps.bootDeliveryZoneMap === 'function') {
+    void window.EkvalineMaps.bootDeliveryZoneMap();
+    return;
+  }
   if (deliveryZoneMapBooted || !deliveryZoneMapNeedsBoot()) return;
   if (!window.EkvalineMaps || typeof window.EkvalineMaps.initStaticMap !== 'function') return;
   deliveryZoneMapBooted = true;

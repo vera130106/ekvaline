@@ -230,23 +230,52 @@
     counterEl.textContent = `${len}/${PHONE_DIGITS_MAX}`;
   }
 
-  function bindPhoneInput(el, onTrim) {
+  function enforcePhoneInput(el, onTrim) {
     if (!(el instanceof HTMLInputElement)) return;
     const counterId = el.getAttribute('data-phone-digits-count-for');
     const counterEl = counterId ? document.getElementById(counterId) : null;
+    const hadExcess = phoneInputWouldExceedLimit(el.value);
+    const formatted = formatPhoneMaskRu(el.value);
+    if (el.value !== formatted) el.value = formatted;
+    syncPhoneDigitCounter(el, counterEl);
+    if (hadExcess && typeof onTrim === 'function') onTrim(PHONE_DIGITS_MAX);
+  }
+
+  function bindPhoneInput(el, onTrim) {
+    if (!(el instanceof HTMLInputElement)) return;
+    if (el.dataset.ekPhoneBound === '1') return;
+    el.dataset.ekPhoneBound = '1';
     el.maxLength = PHONE_MASK_MAX;
     el.setAttribute('inputmode', 'tel');
     el.setAttribute('autocomplete', 'tel');
 
-    const apply = () => {
-      const trimmed = phoneInputWouldExceedLimit(el.value);
-      const formatted = formatPhoneMaskRu(el.value);
-      if (el.value !== formatted) el.value = formatted;
-      syncPhoneDigitCounter(el, counterEl);
-      if (trimmed && typeof onTrim === 'function') onTrim(PHONE_DIGITS_MAX);
-    };
+    const apply = () => enforcePhoneInput(el, onTrim);
 
     el.addEventListener('input', apply);
+    el.addEventListener('change', apply);
+    el.addEventListener('blur', apply);
+    el.addEventListener('paste', () => window.setTimeout(apply, 0));
+    el.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (
+        e.key === 'Backspace' ||
+        e.key === 'Delete' ||
+        e.key === 'Tab' ||
+        e.key === 'Escape' ||
+        e.key === 'Enter' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight' ||
+        e.key === 'Home' ||
+        e.key === 'End'
+      ) {
+        return;
+      }
+      const digits = phoneDigitsFromRaw(el.value);
+      if (digits.length >= PHONE_DIGITS_MAX && /\d/.test(e.key)) {
+        e.preventDefault();
+        if (typeof onTrim === 'function') onTrim(PHONE_DIGITS_MAX);
+      }
+    });
     apply();
   }
 
@@ -299,6 +328,7 @@
     phoneDigitsFromRaw,
     formatPhoneMaskRu,
     syncPhoneDigitCounter,
+    enforcePhoneInput,
     bindPhoneInput,
     SEARCH_MAX,
     MAP_STREET_MAX,

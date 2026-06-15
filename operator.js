@@ -8917,6 +8917,10 @@
     window.setTimeout(() => purgeUnexpectedOrdersSearchAutofill(), 350);
   }
 
+  function enforceOperatorPhoneField(el) {
+    opxLimits()?.enforcePhoneInput?.(el, () => showToast('Не более 11 цифр', 2400, 'info'));
+  }
+
   function bind() {
     TOAST_CLOSE?.addEventListener('click', () => {
       if (!(TOAST instanceof HTMLElement)) return;
@@ -9506,6 +9510,7 @@
       orderNotesMigrateStorageWhenIdentityChanges();
     });
     MODAL_PHONE?.addEventListener('input', () => {
+      enforceOperatorPhoneField(MODAL_PHONE);
       if (state.creatingOrder) {
         const dig = normalizePhoneRuDigits(MODAL_PHONE instanceof HTMLInputElement ? MODAL_PHONE.value : '');
         if (!dig || state.clientRepeatAppliedKey !== `phone:${dig}`) state.clientRepeatAppliedKey = '';
@@ -9513,6 +9518,15 @@
         if (dig.length === 11) tryAutoFillClientRepeatOrder();
       }
       orderNotesMigrateStorageWhenIdentityChanges();
+    });
+    MODAL_PHONE?.addEventListener('paste', () => {
+      window.setTimeout(() => enforceOperatorPhoneField(MODAL_PHONE), 0);
+    });
+    CLIENT_PHONE_INPUT?.addEventListener('input', () => {
+      enforceOperatorPhoneField(CLIENT_PHONE_INPUT);
+    });
+    CLIENT_PHONE_INPUT?.addEventListener('paste', () => {
+      window.setTimeout(() => enforceOperatorPhoneField(CLIENT_PHONE_INPUT), 0);
     });
     MODAL_PHONE?.addEventListener('blur', () => {
       if (state.creatingOrder) tryAutoFillClientRepeatOrder();
