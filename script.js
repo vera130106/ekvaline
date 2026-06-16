@@ -5083,16 +5083,14 @@ function wireDeliveryZoneMap() {
   void window.EkvalineMaps.initStaticMap(deliveryZoneMap, [51.768, 55.102], 12)
     .then((ctl) => {
       if (!ctl?.invalidateSize) return;
-      const board = document.getElementById('deliveryMapBoard');
-      const target = board instanceof HTMLElement ? board : deliveryZoneMap;
-      if (typeof IntersectionObserver === 'function' && target instanceof HTMLElement) {
+      if (typeof IntersectionObserver === 'function' && deliveryZoneMap instanceof HTMLElement) {
         const obs = new IntersectionObserver(
           (entries) => {
             if (entries.some((entry) => entry.isIntersecting)) ctl.invalidateSize();
           },
           { threshold: 0.05 }
         );
-        obs.observe(target);
+        obs.observe(deliveryZoneMap);
       }
       window.addEventListener('resize', () => ctl.invalidateSize(), { passive: true });
     })

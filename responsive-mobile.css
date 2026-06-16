@@ -874,30 +874,17 @@ body.cabinet-page-full section {
   body.client-site.delivery-page .delivery-map-board {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(220px, 56vw, 320px);
-    aspect-ratio: 4 / 3;
+    min-height: 300px;
+    height: min(72vw, 380px);
     border-radius: 18px;
-    clip-path: inset(0 round 18px);
     overflow: hidden;
   }
 
-  body.client-site.delivery-page .delivery-yandex-map {
-    inset: 0;
-    overflow: hidden;
-    border-radius: inherit;
-    clip-path: inset(0 round 18px);
-  }
-
-  body.client-site.delivery-page .delivery-yandex-map ymaps,
-  body.client-site.delivery-page .delivery-yandex-map [class*='ymaps'][class*='-map'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-ground-pane'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-events-pane'],
-  body.client-site.delivery-page .delivery-yandex-map [class*='-layers-pane'] {
+  body.client-site.delivery-page #deliveryZoneMap ymaps,
+  body.client-site.delivery-page #deliveryZoneMap [class*='ymaps'][class*='-map'] {
     width: 100% !important;
     height: 100% !important;
-    max-width: 100% !important;
-    border-radius: inherit !important;
-    overflow: hidden !important;
+    display: block !important;
   }
 
   body.client-site.delivery-page .delivery-map-board [class*='controls__toolbar'],

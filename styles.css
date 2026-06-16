@@ -2451,17 +2451,11 @@ button.opx-zone-popup-cc {
 .checkout-map-root [class*='ymaps'][class*='-map'],
 .checkout-map-root [class*='-ground-pane'],
 .checkout-map-root [class*='-events-pane'],
-.checkout-map-root [class*='-layers-pane'],
-.delivery-yandex-map ymaps,
-.delivery-yandex-map [class*='ymaps'][class*='-map'],
-.delivery-yandex-map [class*='-ground-pane'],
-.delivery-yandex-map [class*='-events-pane'],
-.delivery-yandex-map [class*='-layers-pane'] {
+.checkout-map-root [class*='-layers-pane'] {
   border-radius: inherit !important;
 }
 
-.checkout-map-root [class*='ymaps'][class*='-map'],
-.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+.checkout-map-root [class*='ymaps'][class*='-map'] {
   width: 100% !important;
   height: 100% !important;
   min-height: inherit;
@@ -2474,8 +2468,7 @@ button.opx-zone-popup-cc {
 
 .checkout-map-root,
 .opx-map-canvas,
-.opx-zone-map-canvas,
-.delivery-yandex-map {
+.opx-zone-map-canvas {
   min-height: 280px;
   width: 100%;
   overflow: hidden;
@@ -2484,8 +2477,7 @@ button.opx-zone-popup-cc {
 
 .checkout-map-root .ymaps-2-1-79-map,
 .opx-map-canvas .ymaps-2-1-79-map,
-.opx-zone-map-canvas .ymaps-2-1-79-map,
-.delivery-yandex-map .ymaps-2-1-79-map {
+.opx-zone-map-canvas .ymaps-2-1-79-map {
   width: 100% !important;
   height: 100% !important;
   min-height: inherit;
@@ -2510,27 +2502,22 @@ button.opx-zone-popup-cc {
 .checkout-map-root [class*='copyright'],
 .opx-map-canvas [class*='copyright'],
 .opx-zone-map-canvas [class*='copyright'],
-.delivery-yandex-map [class*='copyright'],
 .ek-map-host [class*='gotoymaps'],
 .checkout-map-root [class*='gotoymaps'],
 .opx-map-canvas [class*='gotoymaps'],
 .opx-zone-map-canvas [class*='gotoymaps'],
-.delivery-yandex-map [class*='gotoymaps'],
 .ek-map-host [class*='gototech'],
 .checkout-map-root [class*='gototech'],
 .opx-map-canvas [class*='gototech'],
 .opx-zone-map-canvas [class*='gototech'],
-.delivery-yandex-map [class*='gototech'],
 .ek-map-host [class*='open-block'],
 .checkout-map-root [class*='open-block'],
 .opx-map-canvas [class*='open-block'],
 .opx-zone-map-canvas [class*='open-block'],
-.delivery-yandex-map [class*='open-block'],
 .ek-map-host [class*='map-open'],
 .checkout-map-root [class*='map-open'],
 .opx-map-canvas [class*='map-open'],
-.opx-zone-map-canvas [class*='map-open'],
-.delivery-yandex-map [class*='map-open'] {
+.opx-zone-map-canvas [class*='map-open'] {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
@@ -7246,21 +7233,21 @@ button.about-cert-btn {
   box-shadow: 0 20px 36px rgba(16, 57, 104, 0.12);
 }
 
-.delivery-yandex-map {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  border-radius: inherit;
-}
-
-.delivery-yandex-map ymaps,
-.delivery-yandex-map [class*='ymaps'][class*='-map'] {
+#deliveryZoneMap ymaps,
+#deliveryZoneMap [class*='ymaps'][class*='-map'] {
   width: 100% !important;
   height: 100% !important;
   display: block !important;
+}
+
+#deliveryZoneMap [class*='copyright'],
+#deliveryZoneMap [class*='gotoymaps'],
+#deliveryZoneMap [class*='gototech'],
+#deliveryZoneMap [class*='open-block'],
+#deliveryZoneMap [class*='map-open'],
+#deliveryZoneMap [class*='searchpanel'],
+#deliveryZoneMap [class*='searchbox'] {
+  display: none !important;
 }
 
 .delivery-map-board [class*='controls__toolbar'],

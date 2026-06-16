@@ -362,6 +362,17 @@
   }
 
   /** Карта на странице «Доставка» (initStaticMap больше нигде не вызывается). */
+  function prepDeliveryMapHost(container) {
+    if (!(container instanceof HTMLElement)) return;
+    if (!container.classList.contains('delivery-map-board')) return;
+    const rect = container.getBoundingClientRect();
+    const h = Math.round(rect.height || container.offsetHeight || 420);
+    if (h > 48) {
+      container.style.height = `${h}px`;
+      container.style.minHeight = `${h}px`;
+    }
+  }
+
   function initStaticMap(container, centerLatLng, zoom) {
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
@@ -370,18 +381,23 @@
       .then(() => loadYmaps())
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
+        prepDeliveryMapHost(container);
         container.innerHTML = '';
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
-        scheduleMapInvalidate(invalidateSize);
-        window.setTimeout(invalidateSize, 300);
-        window.setTimeout(invalidateSize, 900);
-        window.setTimeout(invalidateSize, 2000);
+        const relayout = () => {
+          prepDeliveryMapHost(container);
+          invalidateSize();
+        };
+        scheduleMapInvalidate(relayout);
+        window.setTimeout(relayout, 300);
+        window.setTimeout(relayout, 900);
+        window.setTimeout(relayout, 2000);
         return {
           engine: 'yandex',
           map,
-          invalidateSize,
+          invalidateSize: relayout,
           destroy() {
             try {
               detachMapChrome?.();
