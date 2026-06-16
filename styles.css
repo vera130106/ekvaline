@@ -7274,6 +7274,22 @@ button.about-cert-btn {
   display: block !important;
 }
 
+.delivery-map-board [class*='searchpanel'],
+.delivery-map-board [class*='search-panel'],
+.delivery-map-board [class*='searchbox'],
+.delivery-map-board [class*='open-block'],
+.delivery-map-board [class*='map-open'],
+.delivery-yandex-map [class*='searchpanel'],
+.delivery-yandex-map [class*='search-panel'],
+.delivery-yandex-map [class*='searchbox'],
+.delivery-yandex-map [class*='open-block'],
+.delivery-yandex-map [class*='map-open'] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .delivery-map-board [class*='controls__toolbar'],
 .delivery-map-board [class*='controls__control'] {
   margin: 10px !important;

@@ -225,9 +225,22 @@
     '[class*="map-open"]',
   ];
 
-  function applyYandexMapChromeHide(container) {
+  const DELIVERY_EXTRA_CHROME_SELECTORS = [
+    '[class*="searchpanel"]',
+    '[class*="search-panel"]',
+    '[class*="searchbox"]',
+  ];
+
+  function isDeliveryMapHost(container) {
+    return (
+      container instanceof HTMLElement &&
+      (container.id === 'deliveryZoneMap' || container.classList.contains('delivery-yandex-map'))
+    );
+  }
+
+  function hideChromeNodes(container, selectors) {
     if (!(container instanceof HTMLElement)) return;
-    YMAP_CHROME_SELECTORS.forEach((sel) => {
+    selectors.forEach((sel) => {
       container.querySelectorAll(sel).forEach((node) => {
         if (!(node instanceof HTMLElement)) return;
         node.style.setProperty('display', 'none', 'important');
@@ -237,6 +250,45 @@
         node.setAttribute('aria-hidden', 'true');
       });
     });
+  }
+
+  function applyYandexMapChromeHide(container) {
+    hideChromeNodes(container, YMAP_CHROME_SELECTORS);
+    if (isDeliveryMapHost(container)) {
+      hideChromeNodes(container, DELIVERY_EXTRA_CHROME_SELECTORS);
+    }
+  }
+
+  function ensureMapHostPixels(container) {
+    if (!(container instanceof HTMLElement)) return;
+    const rect = container.getBoundingClientRect();
+    const w = Math.round(rect.width || container.offsetWidth || 0);
+    const h = Math.round(rect.height || container.offsetHeight || 0);
+    if (w > 48 && h > 48) {
+      container.style.width = '100%';
+      container.style.height = `${h}px`;
+      container.style.minHeight = `${h}px`;
+    }
+  }
+
+  function syncInteractiveMapDom(container, map) {
+    if (!(container instanceof HTMLElement)) return;
+    ensureMapHostPixels(container);
+    container.querySelectorAll(':scope > ymaps, :scope > [class*="ymaps"][class*="-map"]').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.style.width = '100%';
+      node.style.height = '100%';
+    });
+    resizeYandexMapViewport(container, map);
+  }
+
+  function removeSearchControl(map) {
+    try {
+      const ctl = map?.controls?.get?.('searchControl');
+      if (ctl) map.controls.remove(ctl);
+    } catch (_) {
+      /**/
+    }
   }
 
   /** Скрывает © и «Открыть в Яндекс.Картах» (классы меняются между версиями 2.1.x). */
@@ -333,6 +385,7 @@
 
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
+    ensureMapHostPixels(container);
     if (container instanceof HTMLElement && !container.id) {
       container.id = `ek-map-${Math.random().toString(36).slice(2, 10)}`;
     }
@@ -350,11 +403,17 @@
     );
     if (opts.disableScrollZoom) map.behaviors.disable('scrollZoom');
     else map.behaviors.enable('scrollZoom');
+    removeSearchControl(map);
 
     const stopChromeObserver = hideYandexMapChrome(container);
 
     function invalidateSize() {
-      resizeYandexMapViewport(container, map);
+      if (isDeliveryMapHost(container)) {
+        ensureMapHostPixels(container);
+        resizeYandexMapViewport(container, map);
+      } else {
+        syncInteractiveMapDom(container, map);
+      }
       applyYandexMapChromeHide(container);
     }
 
@@ -373,10 +432,13 @@
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
+        ensureMapHostPixels(container);
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
+          controls: ['zoomControl'],
         });
-        const relayout = () => resizeYandexMapViewport(container, map);
+        removeSearchControl(map);
+        const relayout = () => invalidateSize();
         scheduleMapInvalidate(relayout);
         window.setTimeout(relayout, 200);
         window.setTimeout(relayout, 800);
@@ -460,10 +522,12 @@
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
+        ensureMapHostPixels(container);
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
+        [300, 900, 1800].forEach((ms) => window.setTimeout(invalidateSize, ms));
         let placemark = null;
 
         function setMarker(lat, lon) {
