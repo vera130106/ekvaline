@@ -225,22 +225,9 @@
     '[class*="map-open"]',
   ];
 
-  const DELIVERY_EXTRA_CHROME_SELECTORS = [
-    '[class*="searchpanel"]',
-    '[class*="search-panel"]',
-    '[class*="searchbox"]',
-  ];
-
-  function isDeliveryMapHost(container) {
-    return (
-      container instanceof HTMLElement &&
-      (container.id === 'deliveryZoneMap' || container.classList.contains('delivery-yandex-map'))
-    );
-  }
-
-  function hideChromeNodes(container, selectors) {
+  function applyYandexMapChromeHide(container) {
     if (!(container instanceof HTMLElement)) return;
-    selectors.forEach((sel) => {
+    YMAP_CHROME_SELECTORS.forEach((sel) => {
       container.querySelectorAll(sel).forEach((node) => {
         if (!(node instanceof HTMLElement)) return;
         node.style.setProperty('display', 'none', 'important');
@@ -250,45 +237,6 @@
         node.setAttribute('aria-hidden', 'true');
       });
     });
-  }
-
-  function applyYandexMapChromeHide(container) {
-    hideChromeNodes(container, YMAP_CHROME_SELECTORS);
-    if (isDeliveryMapHost(container)) {
-      hideChromeNodes(container, DELIVERY_EXTRA_CHROME_SELECTORS);
-    }
-  }
-
-  function ensureMapHostPixels(container) {
-    if (!(container instanceof HTMLElement)) return;
-    const rect = container.getBoundingClientRect();
-    const w = Math.round(rect.width || container.offsetWidth || 0);
-    const h = Math.round(rect.height || container.offsetHeight || 0);
-    if (w > 48 && h > 48) {
-      container.style.width = '100%';
-      container.style.height = `${h}px`;
-      container.style.minHeight = `${h}px`;
-    }
-  }
-
-  function syncInteractiveMapDom(container, map) {
-    if (!(container instanceof HTMLElement)) return;
-    ensureMapHostPixels(container);
-    container.querySelectorAll(':scope > ymaps, :scope > [class*="ymaps"][class*="-map"]').forEach((node) => {
-      if (!(node instanceof HTMLElement)) return;
-      node.style.width = '100%';
-      node.style.height = '100%';
-    });
-    resizeYandexMapViewport(container, map);
-  }
-
-  function removeSearchControl(map) {
-    try {
-      const ctl = map?.controls?.get?.('searchControl');
-      if (ctl) map.controls.remove(ctl);
-    } catch (_) {
-      /**/
-    }
   }
 
   /** Скрывает © и «Открыть в Яндекс.Картах» (классы меняются между версиями 2.1.x). */
@@ -371,26 +319,39 @@
     });
   }
 
-  function resizeYandexMapViewport(container, map) {
-    try {
-      if (container instanceof HTMLElement) {
-        void container.offsetWidth;
-        void container.offsetHeight;
-      }
-      map?.container?.fitToViewport?.();
-    } catch (_) {
-      /**/
+  function mapTilesLikelyRendered(container) {
+    if (!(container instanceof HTMLElement)) return false;
+    if (container.querySelector('[class*="-tiles-pane"] img, [class*="-ground-pane"] img, [class*="-ground-pane"] canvas')) {
+      return true;
     }
+    const ground = container.querySelector('[class*="-ground-pane"]');
+    if (ground instanceof HTMLElement) {
+      const bg = window.getComputedStyle(ground).backgroundImage;
+      if (bg && bg !== 'none' && !/rgba\(0,\s*0,\s*0,\s*0\)/.test(bg)) return true;
+    }
+    return false;
+  }
+
+  /** Если тайлы не появились — чаще всего неверный HTTP Referer ключа на хосте. */
+  function scheduleMapRenderCheck(container, invalidateSize, onLikelyBlank) {
+    scheduleMapInvalidate(invalidateSize);
+    const check = () => {
+      scheduleMapInvalidate(invalidateSize);
+      if (!mapTilesLikelyRendered(container)) onLikelyBlank?.();
+    };
+    window.setTimeout(check, 5000);
+    window.setTimeout(check, 9000);
   }
 
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
-    ensureMapHostPixels(container);
     if (container instanceof HTMLElement && !container.id) {
       container.id = `ek-map-${Math.random().toString(36).slice(2, 10)}`;
     }
+    const mapTarget =
+      container instanceof HTMLElement && container.id ? container.id : container;
     const map = new window.ymaps.Map(
-      container instanceof HTMLElement ? container : container.id,
+      mapTarget,
       {
         center: centerLatLng,
         zoom,
@@ -403,16 +364,18 @@
     );
     if (opts.disableScrollZoom) map.behaviors.disable('scrollZoom');
     else map.behaviors.enable('scrollZoom');
-    removeSearchControl(map);
 
     const stopChromeObserver = hideYandexMapChrome(container);
 
     function invalidateSize() {
-      if (isDeliveryMapHost(container)) {
-        ensureMapHostPixels(container);
-        resizeYandexMapViewport(container, map);
-      } else {
-        syncInteractiveMapDom(container, map);
+      try {
+        if (container instanceof HTMLElement) {
+          void container.offsetWidth;
+          void container.offsetHeight;
+        }
+        map.container.fitToViewport();
+      } catch (_) {
+        /**/
       }
       applyYandexMapChromeHide(container);
     }
@@ -420,53 +383,6 @@
     scheduleMapInvalidate(invalidateSize);
 
     return { map, invalidateSize, detachMapChrome: stopChromeObserver };
-  }
-
-  /** Карта на странице «Доставка» — отдельная инициализация без лишних CSS-надстроек. */
-  function initDeliveryCoverageMap(container) {
-    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
-    const center = DELIVERY_ZONE_MAP_CENTER;
-    const z = 12;
-    return waitForContainerSize(container, 6000)
-      .then(() => loadYmaps())
-      .then((ymaps) => {
-        if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
-        container.innerHTML = '';
-        ensureMapHostPixels(container);
-        const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
-          disableScrollZoom: false,
-          controls: ['zoomControl'],
-        });
-        removeSearchControl(map);
-        const relayout = () => invalidateSize();
-        scheduleMapInvalidate(relayout);
-        window.setTimeout(relayout, 200);
-        window.setTimeout(relayout, 800);
-        window.setTimeout(relayout, 2000);
-        container.classList.add('is-map-ready');
-        return {
-          engine: 'yandex',
-          map,
-          invalidateSize: relayout,
-          destroy() {
-            try {
-              detachMapChrome?.();
-            } catch (_) {
-              /**/
-            }
-            try {
-              map.destroy();
-            } catch (_) {
-              /**/
-            }
-            container.innerHTML = '';
-            container.classList.remove('is-map-ready');
-          },
-        };
-      })
-      .catch(() =>
-        getConfig().then((cfg) => renderMapPlaceholder(container, ymapsLoadFailMessage(cfg?.refererHint)))
-      );
   }
 
   /** Демо-карта на странице «Доставка». */
@@ -483,11 +399,29 @@
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
+        let blankHandled = false;
+        const failMsg = () => ymapsLoadFailMessage(cfg?.refererHint);
+        scheduleMapRenderCheck(container, invalidateSize, () => {
+          if (blankHandled) return;
+          blankHandled = true;
+          try {
+            detachMapChrome?.();
+          } catch (_) {
+            /**/
+          }
+          try {
+            map.destroy();
+          } catch (_) {
+            /**/
+          }
+          renderMapPlaceholder(container, failMsg());
+        });
         return {
           engine: 'yandex',
           map,
           invalidateSize,
           destroy() {
+            blankHandled = true;
             try {
               detachMapChrome?.();
             } catch (_) {
@@ -522,12 +456,10 @@
       .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
-        ensureMapHostPixels(container);
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
-        [300, 900, 1800].forEach((ms) => window.setTimeout(invalidateSize, ms));
         let placemark = null;
 
         function setMarker(lat, lon) {
@@ -774,74 +706,11 @@
       .catch(() => renderMapPlaceholder(container, ymapsLoadFailMessage()));
   }
 
-  const DELIVERY_ZONE_MAP_CENTER = [51.768, 55.102];
-  let deliveryZoneMapBootPromise = null;
-
-  function bootDeliveryZoneMap() {
-    const container = document.getElementById('deliveryZoneMap');
-    if (!(container instanceof HTMLElement)) return Promise.resolve(null);
-    const bootState = container.dataset.ekDeliveryMapBoot || '';
-    if (bootState === '1' || bootState === 'pending') {
-      return deliveryZoneMapBootPromise || Promise.resolve(null);
-    }
-    if (container.querySelector('[class*="ymaps"], .ek-map-unavailable')) {
-      container.dataset.ekDeliveryMapBoot = '1';
-      return Promise.resolve(null);
-    }
-
-    container.dataset.ekDeliveryMapBoot = 'pending';
-    deliveryZoneMapBootPromise = initDeliveryCoverageMap(container)
-      .then((ctl) => {
-        container.dataset.ekDeliveryMapBoot = '1';
-        if (ctl?.invalidateSize) {
-          const relayout = () => ctl.invalidateSize();
-          window.addEventListener('resize', relayout, { passive: true });
-          if (typeof IntersectionObserver === 'function') {
-            const obs = new IntersectionObserver(
-              (entries) => {
-                if (entries.some((entry) => entry.isIntersecting)) relayout();
-              },
-              { threshold: 0.08 }
-            );
-            obs.observe(container);
-          }
-        }
-        return ctl;
-      })
-      .catch(() => {
-        container.dataset.ekDeliveryMapBoot = '';
-        deliveryZoneMapBootPromise = null;
-        return null;
-      });
-    return deliveryZoneMapBootPromise;
-  }
-
-  function scheduleDeliveryZoneMapBoot() {
-    if (!document.getElementById('deliveryZoneMap')) return;
-    const run = () => {
-      void bootDeliveryZoneMap();
-    };
-    if (document.readyState === 'complete') {
-      run();
-      window.setTimeout(run, 500);
-    } else {
-      window.addEventListener(
-        'load',
-        () => {
-          run();
-          window.setTimeout(run, 500);
-        },
-        { once: true }
-      );
-    }
-  }
-
   window.EkvalineMaps = {
     prefetch,
     getConfig,
     loadYmaps,
     initStaticMap,
-    bootDeliveryZoneMap,
     attachInteractiveMap,
     createOrdersMapHost,
     async usesYandexTiles() {
@@ -853,7 +722,6 @@
   if (typeof document !== 'undefined') {
     const startMapsWarmup = () => {
       if (documentLikelyUsesMaps()) prefetch();
-      scheduleDeliveryZoneMapBoot();
     };
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startMapsWarmup, { once: true });
