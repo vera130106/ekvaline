@@ -319,30 +319,6 @@
     });
   }
 
-  function mapTilesLikelyRendered(container) {
-    if (!(container instanceof HTMLElement)) return false;
-    if (container.querySelector('[class*="-tiles-pane"] img, [class*="-ground-pane"] img, [class*="-ground-pane"] canvas')) {
-      return true;
-    }
-    const ground = container.querySelector('[class*="-ground-pane"]');
-    if (ground instanceof HTMLElement) {
-      const bg = window.getComputedStyle(ground).backgroundImage;
-      if (bg && bg !== 'none' && !/rgba\(0,\s*0,\s*0,\s*0\)/.test(bg)) return true;
-    }
-    return false;
-  }
-
-  /** Если тайлы не появились — чаще всего неверный HTTP Referer ключа на хосте. */
-  function scheduleMapRenderCheck(container, invalidateSize, onLikelyBlank) {
-    scheduleMapInvalidate(invalidateSize);
-    const check = () => {
-      scheduleMapInvalidate(invalidateSize);
-      if (!mapTilesLikelyRendered(container)) onLikelyBlank?.();
-    };
-    window.setTimeout(check, 5000);
-    window.setTimeout(check, 9000);
-  }
-
   function createYandexMap(container, centerLatLng, zoom, options) {
     const opts = options || {};
     if (container instanceof HTMLElement && !container.id) {
@@ -385,43 +361,28 @@
     return { map, invalidateSize, detachMapChrome: stopChromeObserver };
   }
 
-  /** Демо-карта на странице «Доставка». */
+  /** Карта на странице «Доставка» (initStaticMap больше нигде не вызывается). */
   function initStaticMap(container, centerLatLng, zoom) {
     if (!(container instanceof HTMLElement)) return Promise.resolve(null);
     const center = Array.isArray(centerLatLng) && centerLatLng.length === 2 ? centerLatLng : DEFAULT_CENTER;
     const z = Number.isFinite(Number(zoom)) ? Number(zoom) : 12;
-    return waitForContainerSize(container)
-      .then(() => Promise.all([loadYmaps(), getConfig()]))
-      .then(([ymaps, cfg]) => {
+    return waitForContainerSize(container, 6000)
+      .then(() => loadYmaps())
+      .then((ymaps) => {
         if (!ymaps) return renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG);
         container.innerHTML = '';
         const { map, invalidateSize, detachMapChrome } = createYandexMap(container, center, z, {
           disableScrollZoom: false,
         });
         scheduleMapInvalidate(invalidateSize);
-        let blankHandled = false;
-        const failMsg = () => ymapsLoadFailMessage(cfg?.refererHint);
-        scheduleMapRenderCheck(container, invalidateSize, () => {
-          if (blankHandled) return;
-          blankHandled = true;
-          try {
-            detachMapChrome?.();
-          } catch (_) {
-            /**/
-          }
-          try {
-            map.destroy();
-          } catch (_) {
-            /**/
-          }
-          renderMapPlaceholder(container, failMsg());
-        });
+        window.setTimeout(invalidateSize, 300);
+        window.setTimeout(invalidateSize, 900);
+        window.setTimeout(invalidateSize, 2000);
         return {
           engine: 'yandex',
           map,
           invalidateSize,
           destroy() {
-            blankHandled = true;
             try {
               detachMapChrome?.();
             } catch (_) {
@@ -436,9 +397,7 @@
           },
         };
       })
-      .catch(() =>
-        getConfig().then((cfg) => renderMapPlaceholder(container, ymapsLoadFailMessage(cfg?.refererHint)))
-      );
+      .catch(() => renderMapPlaceholder(container, MAP_UNAVAILABLE_MSG));
   }
 
   /**
